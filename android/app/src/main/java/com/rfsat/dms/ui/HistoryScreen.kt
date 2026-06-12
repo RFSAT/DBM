@@ -70,30 +70,51 @@ fun HistoryScreen(dao: EventDao, onBack: () -> Unit) {
         val shown = events.filter { filter == null || it.severity == filter }
         val grouped = shown.groupBy { dayFmt.format(Date(it.timestampMs)) }
 
+        // Table header
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp)) {
+            Text("Time", Modifier.weight(0.16f), fontSize = 11.sp,
+                color = com.rfsat.dms.ui.theme.EnactGreen)
+            Text("Issue", Modifier.weight(0.30f), fontSize = 11.sp,
+                color = com.rfsat.dms.ui.theme.EnactGreen)
+            Text("Detail", Modifier.weight(0.36f), fontSize = 11.sp,
+                color = com.rfsat.dms.ui.theme.EnactGreen)
+            Text("Sev", Modifier.weight(0.10f), fontSize = 11.sp,
+                color = com.rfsat.dms.ui.theme.EnactGreen)
+            Text("📷", Modifier.weight(0.08f), fontSize = 11.sp,
+                color = com.rfsat.dms.ui.theme.EnactGreen)
+        }
+        HorizontalDivider()
+
         LazyColumn(Modifier.fillMaxSize()) {
             grouped.forEach { (day, dayEvents) ->
                 item(key = "h-$day") {
-                    Text(day, fontSize = 14.sp, color = Color.Gray,
-                        modifier = Modifier.padding(top = 10.dp, bottom = 2.dp))
-                    HorizontalDivider()
+                    Text(day, fontSize = 12.sp, color = Color.Gray,
+                        modifier = Modifier.padding(top = 8.dp, bottom = 2.dp))
                 }
                 items(dayEvents, key = { it.id }) { e ->
                     Row(Modifier.fillMaxWidth()
-                        .clickable { selected = e }
-                        .padding(vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween) {
-                        Column {
-                            Text(e.type.replace('_', ' '),
-                                color = severityColor(e.severity), fontSize = 14.sp)
-                            Text(e.detail.ifEmpty { e.cameraRole },
-                                fontSize = 11.sp, color = Color.Gray)
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text(timeFmt.format(Date(e.timestampMs)), fontSize = 12.sp)
-                            Text(if (e.evidencePath != null) "📷 evidence" else "—",
-                                fontSize = 10.sp, color = Color.Gray)
-                        }
+                            .clickable { selected = e }
+                            .padding(vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text(timeFmt.format(Date(e.timestampMs)),
+                            Modifier.weight(0.16f), fontSize = 11.sp)
+                        Text(e.type.replace('_', ' ').lowercase()
+                                .replaceFirstChar { it.uppercase() },
+                            Modifier.weight(0.30f), fontSize = 11.sp,
+                            color = severityColor(e.severity),
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                        Text(e.detail, Modifier.weight(0.36f), fontSize = 11.sp,
+                            color = Color.Gray, maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                        Text(when (e.severity) {
+                            "CRITICAL" -> "C"; "WARNING" -> "W"; else -> "i" },
+                            Modifier.weight(0.10f), fontSize = 11.sp,
+                            color = severityColor(e.severity))
+                        Text(if (e.evidencePath != null) "✓" else "—",
+                            Modifier.weight(0.08f), fontSize = 11.sp, color = Color.Gray)
                     }
+                    HorizontalDivider(color = Color.Gray.copy(alpha = 0.15f))
                 }
             }
         }

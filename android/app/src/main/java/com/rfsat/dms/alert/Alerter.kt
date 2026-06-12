@@ -14,7 +14,7 @@ class Alerter(context: Context) {
     @Volatile var audioEnabled = true
     @Volatile var ttsEnabled = true
 
-    private val tone = ToneGenerator(AudioManager.STREAM_ALARM, 90)
+    private val tone = ToneGenerator(AudioManager.STREAM_ALARM, 45)
     private var ttsReady = false
     private val tts = TextToSpeech(context) { if (it == TextToSpeech.SUCCESS) ttsReady = true }
         .apply { language = Locale.UK }

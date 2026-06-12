@@ -11,28 +11,34 @@ enum class CameraRole(val rtspUrl: String, val statusUrl: String, val label: Str
     REAR  ("rtsp://192.168.50.12:8554/rear",   "http://192.168.50.12:8080/status", "Rear");
 }
 
-enum class RiskType(val description: String, val scorePenalty: Int) {
+enum class RiskType(
+    val description: String,
+    val scorePenalty: Int,
+    /** True when the detector behind this issue is active in the current
+     *  release; planned items (awaiting their models/hardware) are false. */
+    val implemented: Boolean = true,
+) {
     // Driver-state risks
     MICROSLEEP("Eyes closed — possible microsleep", 15),
     EYES_OFF_ROAD("Driver not looking ahead", 8),
     NO_MIRROR_CHECK("No mirror check for extended period", 3),
-    PHONE_USE("Mobile phone use detected", 12),
-    HANDS_OFF_WHEEL("Hands off steering wheel", 10),
-    NO_SEATBELT("Seatbelt not fastened", 10),
+    PHONE_USE("Mobile phone use detected", 12, implemented = false),
+    HANDS_OFF_WHEEL("Hands off steering wheel", 10, implemented = false),
+    NO_SEATBELT("Seatbelt not fastened", 10, implemented = false),
     // Road / collision risks
     FRONT_COLLISION_RISK("Fast-approaching object ahead", 10),
     UNSAFE_FOLLOWING_DISTANCE("Following closer than stopping distance", 10),
-    REAR_COLLISION_RISK("Fast-approaching vehicle behind / tailgating", 6),
+    REAR_COLLISION_RISK("Fast-approaching vehicle behind", 6, implemented = false),
     VULNERABLE_ROAD_USER("Pedestrian / cyclist / scooter in risk zone", 8),
     // Road-regulation compliance
     SPEEDING("Exceeding posted speed limit", 12),
     SOLID_LINE_CROSSING("Crossing a solid lane line", 10),
     DOUBLE_LINE_CROSSING("Crossing a double solid line", 15),
     HARD_SHOULDER_DRIVING("Driving on the hard shoulder", 12),
-    ILLEGAL_TURN("Possible illegal turn manoeuvre", 12),
+    ILLEGAL_TURN("Possible illegal turn manoeuvre", 12, implemented = false),
     LANE_DRIFT("Drifting out of lane without indicating", 5),
     // System
-    NODE_OFFLINE("Camera offline", 0),
+    NODE_OFFLINE("Camera offline", 0, implemented = false),
 }
 
 enum class Severity { INFO, WARNING, CRITICAL }

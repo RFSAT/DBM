@@ -49,6 +49,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -251,20 +252,30 @@ class MainActivity : ComponentActivity() {
         Box(modifier.clip(RoundedCornerShape(14.dp)).background(EnactSurface)) {
             AndroidView(
                 factory = {
-                    // The PreviewView outlives the Detector tab's composition.
-                    // Returning to the tab re-adds it; it must be detached from
-                    // the previous (disposed) parent first or the surface stays
-                    // blank/frozen.
                     (view.parent as? android.view.ViewGroup)?.removeView(view)
                     view
                 },
                 modifier = Modifier.fillMaxSize())
             Canvas(Modifier.fillMaxSize()) {
+                // PreviewView FILL_CENTER crops the 4:3 frame to the card —
+                // map normalized frame coords through the same scale+crop so
+                // overlays align with the visible video.
+                val frameAr = 4f / 3f
+                val viewAr = size.width / size.height
+                val sx: Float; val sy: Float; val ox: Float; val oy: Float
+                if (viewAr > frameAr) {      // card wider: frame cropped top/bottom
+                    sx = size.width; sy = size.width / frameAr
+                    ox = 0f; oy = (size.height - sy) / 2f
+                } else {                      // card taller: frame cropped left/right
+                    sy = size.height; sx = size.height * frameAr
+                    oy = 0f; ox = (size.width - sx) / 2f
+                }
+                fun mx(x: Float) = ox + x * sx
+                fun my(y: Float) = oy + y * sy
                 result.detections.forEach { d ->
                     drawRect(if (d.risky) Color(0xFFE57373) else EnactGreen,
-                        topLeft = Offset(d.left * size.width, d.top * size.height),
-                        size = Size((d.right - d.left) * size.width,
-                                    (d.bottom - d.top) * size.height),
+                        topLeft = Offset(mx(d.left), my(d.top)),
+                        size = Size(mx(d.right) - mx(d.left), my(d.bottom) - my(d.top)),
                         style = Stroke(3f))
                 }
                 result.laneLines.forEach { l ->
@@ -274,8 +285,8 @@ class MainActivity : ComponentActivity() {
                         LaneLine.Kind.DASHED -> EnactLime
                     }
                     drawLine(col,
-                        Offset(l.xBottom * size.width, size.height),
-                        Offset(l.xTop * size.width, size.height * 0.55f),
+                        Offset(mx(l.xBottom), my(1f)),
+                        Offset(mx(l.xTop), my(0.55f)),
                         strokeWidth = 4f)
                 }
             }
@@ -303,17 +314,20 @@ class MainActivity : ComponentActivity() {
                     fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
             LazyColumn {
                 items(events) { e ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                    val label = e.type.replace('_', ' ').lowercase()
+                        .replaceFirstChar { it.uppercase() }
+                    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp),
                         horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(e.type.replace('_', ' ') +
-                            if (e.detail.isNotEmpty()) " — ${e.detail}" else "",
+                        Text(label + if (e.detail.isNotEmpty()) ": ${e.detail}" else "",
                             color = when (e.severity) {
                                 "CRITICAL" -> Color(0xFFE57373)
                                 "WARNING" -> EnactWarning
                                 else -> EnactOnSurfaceDim
-                            }, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                            }, fontSize = 11.sp, maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f))
                         Text(fmt.format(Date(e.timestampMs)),
-                            color = EnactOnSurfaceDim, fontSize = 11.sp)
+                            color = EnactOnSurfaceDim, fontSize = 10.sp)
                     }
                 }
             }
@@ -332,6 +346,7 @@ class MainActivity : ComponentActivity() {
                     fontWeight = FontWeight.Bold)
                 Row {
                     TextButton(onClick = { text = DLog.tail() }) { Text("Refresh") }
+                    TextButton(onClick = { saveLog() }) { Text("Save") }
                     TextButton(onClick = { shareLog() }) { Text("Share") }
                 }
             }
@@ -342,6 +357,28 @@ class MainActivity : ComponentActivity() {
                     color = EnactOnSurface)
             }
         }
+    }
+
+    /** Save today's log into public Downloads (e.g. to attach when reporting
+     *  an issue or sharing with an AI assistant for debugging). */
+    private fun saveLog() {
+        runCatching {
+            val src = DLog.currentLogFile()
+            val name = "DBM-log-${java.text.SimpleDateFormat("yyyyMMdd_HHmmss",
+                Locale.US).format(Date())}.txt"
+            val values = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Downloads.DISPLAY_NAME, name)
+                put(android.provider.MediaStore.Downloads.MIME_TYPE, "text/plain")
+            }
+            val uri = contentResolver.insert(
+                android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)!!
+            contentResolver.openOutputStream(uri)!!.use { out ->
+                src.inputStream().use { it.copyTo(out) }
+            }
+            DLog.i(TAG, "log saved to Downloads/$name")
+            android.widget.Toast.makeText(this, "Saved to Downloads/$name",
+                android.widget.Toast.LENGTH_LONG).show()
+        }.onFailure { DLog.e(TAG, "log save failed", it) }
     }
 
     private fun shareLog() {
@@ -403,12 +440,12 @@ class MainActivity : ComponentActivity() {
             Text("Points deducted per occurrence (scaled by severity).",
                 color = EnactOnSurfaceDim, fontSize = 11.sp)
             Spacer(Modifier.height(6.dp))
-            RiskType.entries.filter { it != RiskType.NODE_OFFLINE }.forEach { rt ->
+            RiskType.entries.filter { it.implemented }.forEach { rt ->
                 WeightSlider(rt)
             }
             Spacer(Modifier.height(14.dp))
-            Text("Evidence retention: 30 days (records older than this are " +
-                "pruned automatically).", color = EnactOnSurfaceDim, fontSize = 12.sp)
+            Text("Data retention: 30 days (older data is automatically removed)",
+                color = EnactOnSurfaceDim, fontSize = 12.sp)
             Text("All data is processed and stored on this device only.",
                 color = EnactOnSurfaceDim, fontSize = 12.sp)
         }
@@ -479,20 +516,21 @@ class MainActivity : ComponentActivity() {
                 },
                 valueRange = 0f..25f, steps = 24)
         }
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(4.dp))
     }
 
     @Composable
     private fun SettingRow(label: String, value: Boolean, onChange: (Boolean) -> Unit) {
         Row(Modifier.fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp)).background(EnactSurface)
-                .padding(horizontal = 12.dp, vertical = 4.dp),
+                .padding(horizontal = 12.dp, vertical = 0.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically) {
-            Text(label, color = EnactOnSurface, fontSize = 14.sp)
-            Switch(checked = value, onCheckedChange = onChange)
+            Text(label, color = EnactOnSurface, fontSize = 13.sp)
+            Switch(checked = value, onCheckedChange = onChange,
+                modifier = Modifier.scale(0.8f))
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(4.dp))
     }
 
     // ---- About tab ----
@@ -510,14 +548,17 @@ class MainActivity : ComponentActivity() {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("Driver Behavior Monitor", fontSize = 26.sp,
                         fontWeight = FontWeight.Bold, color = EnactGreen)
-                    Text("by RFSAT Limited — www.rfsat.com", fontSize = 13.sp,
-                        color = EnactLime,
-                        modifier = Modifier.clickable {
-                            startActivity(Intent(Intent.ACTION_VIEW,
-                                android.net.Uri.parse("https://www.rfsat.com")))
-                        })
+                    Row {
+                        Text("by RFSAT Limited — ", fontSize = 13.sp,
+                            color = EnactOnSurface.copy(alpha = 0.7f))
+                        Text("www.rfsat.com", fontSize = 13.sp, color = EnactLime,
+                            modifier = Modifier.clickable {
+                                startActivity(Intent(Intent.ACTION_VIEW,
+                                    android.net.Uri.parse("https://www.rfsat.com")))
+                            })
+                    }
                     Spacer(Modifier.height(4.dp))
-                    Text("Version ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
+                    Text("Version ${BuildConfig.VERSION_NAME}",
                         fontSize = 12.sp, color = EnactLime.copy(alpha = 0.9f))
                 }
             }
@@ -527,7 +568,8 @@ class MainActivity : ComponentActivity() {
                 "road hazards and road-regulation compliance, maintains a " +
                 "timestamped evidential record with integrity hashes, and scores " +
                 "overall driver compliance.",
-                color = EnactOnSurfaceDim, fontSize = 13.sp)
+                color = EnactOnSurfaceDim, fontSize = 13.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Justify)
             Spacer(Modifier.height(12.dp))
             Column(Modifier.fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp)).background(EnactSurface)
@@ -536,7 +578,7 @@ class MainActivity : ComponentActivity() {
                     fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(6.dp))
                 RiskType.entries
-                    .filter { it != RiskType.NODE_OFFLINE }
+                    .filter { it.implemented }
                     .forEach { rt ->
                         Text("•  ${rt.description}",
                             color = EnactOnSurface, fontSize = 12.sp,
@@ -544,8 +586,12 @@ class MainActivity : ComponentActivity() {
                     }
             }
             Spacer(Modifier.height(12.dp))
-            Text("All processing and storage occur on this device; nothing is " +
-                "transmitted.", color = EnactOnSurfaceDim, fontSize = 13.sp)
+            Text("Data processing and storage occurs ONLY on this device, " +
+                "nothing is transmitted.", color = EnactOnSurfaceDim, fontSize = 13.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Justify)
+            Spacer(Modifier.height(8.dp))
+            Text("Copyright (c) RFSAT Limited, 2026",
+                color = EnactOnSurfaceDim, fontSize = 12.sp)
         }
     }
 

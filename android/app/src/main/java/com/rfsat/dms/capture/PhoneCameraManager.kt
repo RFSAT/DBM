@@ -92,17 +92,26 @@ class PhoneCameraManager(
         hookAttach(roadPreview, CameraRole.FRONT)
     }
 
+    private val rebindRunnable = Runnable { rebind() }
+
+    /** Full use-case rebind — same recovery path as app minimise/restore. */
+    fun rebind() {
+        val p = provider ?: return
+        DLog.i(TAG, "rebind requested (mode=$mode)")
+        runCatching {
+            if (mode == Mode.CONCURRENT) bindConcurrent(p) else muxBindCurrent(p)
+        }.onFailure { DLog.e(TAG, "rebind failed", it) }
+    }
+
     private fun hookAttach(view: PreviewView, role: CameraRole) {
         view.addOnAttachStateChangeListener(object :
                 android.view.View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(v: android.view.View) {
-                // Post so the layout pass completes before the provider is set.
-                v.post {
-                    previews[role]?.let {
-                        it.surfaceProvider = view.surfaceProvider
-                        DLog.i(TAG, "surface provider refreshed on attach: $role")
-                    }
-                }
+                // Re-attaching after a tab switch: a surface-provider refresh
+                // alone proved unreliable; do what minimise/restore does — a
+                // full (debounced) rebind of the use cases.
+                handler.removeCallbacks(rebindRunnable)
+                handler.postDelayed(rebindRunnable, 150)
             }
             override fun onViewDetachedFromWindow(v: android.view.View) = Unit
         })
@@ -173,7 +182,14 @@ class PhoneCameraManager(
                     val now = System.currentTimeMillis()
                     if (now - lastT >= minIntervalMs) {
                         lastT = now
-                        onFrame(role, img.toBitmap(), now)
+                        var bmp = img.toBitmap()
+                        val rot = img.imageInfo.rotationDegrees
+                        if (rot != 0) {
+                            val m = android.graphics.Matrix().apply { postRotate(rot.toFloat()) }
+                            val r = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
+                            bmp.recycle(); bmp = r
+                        }
+                        onFrame(role, bmp, now)
                     }
                     img.close()
                 }

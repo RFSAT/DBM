@@ -5,6 +5,29 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v8.0 — alignment, tables, log export and UI refinements (features + corrections -> major increment)
+- Previews restored deterministically on menu switching: re-attachment now
+  triggers a full debounced use-case rebind (the same recovery path that
+  minimise/restore exercised)
+- Lane/detection overlay geometry fixed twice over: analysis frames are now
+  rotated per sensor orientation before analysis (root cause of diagonal/
+  shifted lines), and overlays are mapped through the PreviewView
+  FILL_CENTER scale-and-crop so they align with the visible video
+- RiskType gains an "implemented" flag: About and the Settings weight list
+  now show only detections active in this release (phone use, hands-off-
+  wheel, seatbelt, rear collision and illegal turn marked as planned)
+- Default warning volume halved (tone generator 90 -> 45)
+- About: only the URL is clickable; description and bottom note fully
+  justified; bottom note reworded; copyright line added; build number
+  removed (major.minor shown)
+- Settings: option rows compacted to fit more lines; retention note reworded
+- Log tab: new Save action writes the log to public Downloads for sharing
+  (e.g. with an AI assistant when debugging)
+- History: violations presented as a table (Time | Issue | Detail | Severity
+  | Evidence), one violation per row, day-grouped, tappable for full detail
+- Detector messages: sentence case, single line each with ellipsis, so more
+  fit on screen
+
 ## v7.0 — following distance, score weights, overlay recording (new features -> major increment)
 - NEW unsafe-following-distance detection: monocular distance to the lead
   vehicle (bounding-box width model) compared against the stopping distance
