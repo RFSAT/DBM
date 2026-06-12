@@ -81,11 +81,21 @@ class PhoneCameraManager(
         onMode(mode)
     }
 
+    private val previews = mutableMapOf<CameraRole, Preview>()
+
+    /** Re-issue surface providers after the preview views were re-attached. */
+    fun refreshSurfaces() {
+        previews[CameraRole.DRIVER]?.surfaceProvider = interiorPreview.surfaceProvider
+        previews[CameraRole.FRONT]?.surfaceProvider = roadPreview.surfaceProvider
+        DLog.i(TAG, "surface providers refreshed")
+    }
+
     private fun singleConfig(
         selector: CameraSelector, view: PreviewView, role: CameraRole
     ): SingleCameraConfig {
         val preview = Preview.Builder().build().also {
             it.surfaceProvider = view.surfaceProvider
+            previews[role] = it
         }
         val group = UseCaseGroup.Builder()
             .addUseCase(preview)
@@ -118,7 +128,10 @@ class PhoneCameraManager(
                 Triple(CameraSelector.DEFAULT_FRONT_CAMERA, interiorPreview, CameraRole.DRIVER)
             else
                 Triple(CameraSelector.DEFAULT_BACK_CAMERA, roadPreview, CameraRole.FRONT)
-        val preview = Preview.Builder().build().also { it.surfaceProvider = view.surfaceProvider }
+        val preview = Preview.Builder().build().also {
+            it.surfaceProvider = view.surfaceProvider
+            previews[role] = it
+        }
         runCatching {
             p.bindToLifecycle(lifecycleOwner, selector, preview, analysisUseCase(role))
         }.onFailure { DLog.e(TAG, "mux bind failed for $role", it) }

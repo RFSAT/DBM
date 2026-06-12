@@ -5,6 +5,58 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v6.4 — portrait operation (correction -> minor increment)
+- Application now rotates freely (fullSensor): in portrait the two video
+  views are positioned one under the other with the detection messages at
+  the bottom; landscape keeps the side-by-side arrangement
+- Camera capture, analysis and the activity state survive rotation (the
+  service owns the pipeline; previews re-attach via the existing surface-
+  refresh mechanism)
+
+## v6.3 — About view additions (corrections -> minor increment)
+- "by RFSAT Limited" in the About header now links to https://www.rfsat.com
+- About view lists all detectable issues as a bullet list (generated from
+  the risk-type catalogue, so future detection types appear automatically)
+
+## v6.2 — About view text (correction -> minor increment)
+- Removed the versioning-policy note from the About view (policy remains
+  documented in CHANGELOG.md and build.gradle.kts)
+
+## v6.1 — duration display units (correction -> minor increment)
+- All displayed durations (detection messages, event details, history
+  records) are shown in seconds with one decimal place, so sub-second
+  values appear as fractions (e.g. "eyes closed 0.8 s") instead of
+  milliseconds
+
+## v6.0 — selective detection elements (new feature -> major increment)
+- New "Detection elements" section in Settings: individually switch on/off
+  road signs (speed limits), lane-marking overlay, single/double line-
+  crossing events, hard-shoulder detection, road objects (vehicles,
+  pedestrians, cyclists...), and driver-state monitoring
+- Switches are persisted, applied live to the running pipeline, and skip the
+  corresponding computation entirely when off (lower CPU and battery use)
+- Lane-crossing and hard-shoulder events are filterable independently of the
+  lane overlay, so markings can stay visible without raising events
+
+## v5.2 — preview recovery on tab switching (corrections -> minor increment)
+- Fixed camera previews freezing or going blank after switching menus: the
+  long-lived PreviewViews are now detached from their disposed parent before
+  Compose re-attaches them on return to the Detector tab, and CameraX
+  surface providers are re-issued when the tab becomes visible again (the
+  TextureView surface is destroyed on detach and must be re-provided)
+
+## v5.1 — UI corrections (corrections -> minor increment)
+- Camera previews now display reliably at start: PreviewView switched to
+  COMPATIBLE (TextureView) mode, and camera capture now starts only after
+  the privacy notice is accepted (binding previously occurred while the
+  preview surfaces were not yet attached, leaving SurfaceView previews blank;
+  this is also the correct privacy ordering)
+- Edge-to-edge insets handled: the UI is padded by the safe-drawing area so
+  system navigation buttons and the status-bar icons no longer overlap the
+  application (edge-to-edge is enforced by default when targeting SDK 35)
+- Screen is kept on while the application is active (FLAG_KEEP_SCREEN_ON)
+- Camera view row height increased by 10 %
+
 ## v5.0 — restructured UI in RFSAT/ENACT style (new feature -> major increment)
 - New navigation: scrollable tab menu at the top of the screen — Detector,
   History, Log, Settings, About

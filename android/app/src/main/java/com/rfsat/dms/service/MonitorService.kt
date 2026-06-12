@@ -11,6 +11,8 @@ import android.os.Build
 import android.os.IBinder
 import com.rfsat.dms.AnalysisResult
 import com.rfsat.dms.CameraRole
+import com.rfsat.dms.RiskType
+import com.rfsat.dms.RiskEventCandidate
 import com.rfsat.dms.alert.Alerter
 import com.rfsat.dms.data.EvidenceStore
 import com.rfsat.dms.detect.ComplianceScorer
@@ -62,6 +64,30 @@ class MonitorService : Service() {
 
     private var roadFrameCount = 0
 
+    /** Selective detection-element switches (persisted in "dbm" prefs). */
+    @Volatile var detectSigns = true; private set
+    @Volatile var detectLaneMarkings = true; private set
+    @Volatile var detectLaneCrossing = true; private set      // single/double line events
+    @Volatile var detectHardShoulder = true; private set
+    @Volatile var detectRoadObjects = true; private set
+    @Volatile var detectDriverState = true; private set
+
+    fun setElement(key: String, on: Boolean) {
+        getSharedPreferences("dbm", MODE_PRIVATE).edit().putBoolean(key, on).apply()
+        applyElement(key, on)
+        DLog.i(TAG, "detection element $key = $on")
+    }
+
+    private fun applyElement(key: String, on: Boolean) = when (key) {
+        "det_signs" -> detectSigns = on
+        "det_lanes" -> detectLaneMarkings = on
+        "det_lane_cross" -> detectLaneCrossing = on
+        "det_shoulder" -> detectHardShoulder = on
+        "det_objects" -> detectRoadObjects = on
+        "det_driver" -> detectDriverState = on
+        else -> Unit
+    }
+
     val results = mapOf(
         CameraRole.DRIVER to MutableStateFlow(AnalysisResult()),
         CameraRole.FRONT to MutableStateFlow(AnalysisResult()),
@@ -91,9 +117,12 @@ class MonitorService : Service() {
         signs = SignAnalyzer()
         evidence = EvidenceStore(this)
         alerter = Alerter(this)
-        getSharedPreferences("dbm", MODE_PRIVATE).let {
-            alerter.audioEnabled = it.getBoolean("alerts_audio", true)
-            alerter.ttsEnabled = it.getBoolean("alerts_tts", true)
+        getSharedPreferences("dbm", MODE_PRIVATE).let { p ->
+            alerter.audioEnabled = p.getBoolean("alerts_audio", true)
+            alerter.ttsEnabled = p.getBoolean("alerts_tts", true)
+            listOf("det_signs", "det_lanes", "det_lane_cross", "det_shoulder",
+                   "det_objects", "det_driver")
+                .forEach { applyElement(it, p.getBoolean(it, true)) }
         }
         speed = SpeedMonitor(this)
         DLog.i(TAG, "onCreate complete (driver=${driver != null}, road=${road != null})")
@@ -126,7 +155,9 @@ class MonitorService : Service() {
         scope.launch {
             val result = runCatching {
                 when (role) {
-                    CameraRole.DRIVER -> driver?.analyze(frame, tMs) ?: AnalysisResult()
+                    CameraRole.DRIVER ->
+                        if (detectDriverState) driver?.analyze(frame, tMs) ?: AnalysisResult()
+                        else AnalysisResult()
                     else -> roadPermit.withPermit { analyzeRoad(frame, tMs) }
                 }
             }.onFailure { DLog.e(TAG, "analysis failed for $role", it) }

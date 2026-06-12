@@ -14,6 +14,9 @@ import com.rfsat.dms.Severity
 import kotlin.math.abs
 import kotlin.math.hypot
 
+/** Format a millisecond duration for display: seconds with one decimal. */
+internal fun fmtSecs(ms: Long): String = "%.1f s".format(ms / 1000f)
+
 /**
  * Driver-facing camera analysis.
  *
@@ -84,9 +87,9 @@ class DriverAnalyzer(context: Context) {
             if (eyesClosedSinceMs == 0L) eyesClosedSinceMs = tMs
             val dur = tMs - eyesClosedSinceMs
             if (dur > EYES_CLOSED_CRITICAL_MS) events += RiskEventCandidate(
-                RiskType.MICROSLEEP, Severity.CRITICAL, 0.95f, "eyes closed ${dur} ms")
+                RiskType.MICROSLEEP, Severity.CRITICAL, 0.95f, "eyes closed ${fmtSecs(dur)}")
             else if (dur > EYES_CLOSED_WARN_MS) events += RiskEventCandidate(
-                RiskType.MICROSLEEP, Severity.WARNING, 0.8f, "eyes closed ${dur} ms")
+                RiskType.MICROSLEEP, Severity.WARNING, 0.8f, "eyes closed ${fmtSecs(dur)}")
         } else eyesClosedSinceMs = 0L
 
         // -- PERCLOS over 60 s --
@@ -112,7 +115,7 @@ class DriverAnalyzer(context: Context) {
         if (tMs - lastMirrorCheckMs > MIRROR_INTERVAL_MS) {
             events += RiskEventCandidate(
                 RiskType.NO_MIRROR_CHECK, Severity.INFO, 0.6f,
-                "no mirror glance for ${(tMs - lastMirrorCheckMs) / 1000} s")
+                "no mirror glance for ${fmtSecs(tMs - lastMirrorCheckMs)}")
             lastMirrorCheckMs = tMs // re-arm
         }
 

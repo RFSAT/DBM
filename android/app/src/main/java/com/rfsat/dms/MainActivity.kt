@@ -13,12 +13,14 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -96,6 +98,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private var permissionsOk = false
+    private var privacyAccepted = false
     private val permLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
             DLog.i(TAG, "permission results: " + res.entries.joinToString {
@@ -108,8 +111,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         DLog.i(TAG, "MainActivity onCreate")
-        interiorView = PreviewView(this)
-        roadView = PreviewView(this)
+        interiorView = PreviewView(this).apply {
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE }
+        roadView = PreviewView(this).apply {
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE }
+        // (3) keep the screen on while DBM is active
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         startForegroundService(Intent(this, MonitorService::class.java))
         bindService(Intent(this, MonitorService::class.java), conn, Context.BIND_AUTO_CREATE)
         val perms = mutableListOf(
@@ -123,9 +130,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun maybeStart() {
-        DLog.i(TAG, "maybeStart: service=${service != null} perms=$permissionsOk cams=${cameras != null}")
+        DLog.i(TAG, "maybeStart: service=${service != null} perms=$permissionsOk privacy=$privacyAccepted cams=${cameras != null}")
         val svc = service ?: return
-        if (!permissionsOk || cameras != null) return
+        if (!permissionsOk || !privacyAccepted || cameras != null) return
         svc.onPermissionsGranted()
         cameras = PhoneCameraManager(this, this, interiorView, roadView,
             onFrame = { role, bmp, t -> svc.submitFrame(role, bmp, t) },
@@ -139,11 +146,18 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun Root() {
-        var accepted by remember { mutableStateOf(false) }
-        if (!accepted) { PrivacyNotice { accepted = true }; return }
+        var accepted by remember { mutableStateOf(privacyAccepted) }
+        if (!accepted) {
+            PrivacyNotice {
+                accepted = true
+                privacyAccepted = true
+                maybeStart()
+            }
+            return
+        }
 
         var tab by remember { mutableIntStateOf(0) }
-        Column(Modifier.fillMaxSize().background(EnactDark)) {
+        Column(Modifier.fillMaxSize().background(EnactDark).safeDrawingPadding()) {
             ScrollableTabRow(
                 selectedTabIndex = tab,
                 containerColor = EnactDarkMid,
@@ -176,13 +190,27 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun DetectorScreen() {
+        androidx.compose.runtime.LaunchedEffect(Unit) { cameras?.refreshSurfaces() }
+        val portrait = androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
+                android.content.res.Configuration.ORIENTATION_PORTRAIT
         Column(Modifier.fillMaxSize().padding(8.dp)) {
             StatusStrip()
             Spacer(Modifier.height(6.dp))
-            Row(Modifier.fillMaxWidth().weight(1.1f),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                CameraCard(CameraRole.DRIVER, interiorView, Modifier.weight(1f))
-                CameraCard(CameraRole.FRONT, roadView, Modifier.weight(1f))
+            if (portrait) {
+                // Videos stacked one under the other; detections at the bottom.
+                Column(Modifier.fillMaxWidth().weight(2.42f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CameraCard(CameraRole.DRIVER, interiorView,
+                        Modifier.weight(1f).fillMaxWidth())
+                    CameraCard(CameraRole.FRONT, roadView,
+                        Modifier.weight(1f).fillMaxWidth())
+                }
+            } else {
+                Row(Modifier.fillMaxWidth().weight(1.21f),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CameraCard(CameraRole.DRIVER, interiorView, Modifier.weight(1f))
+                    CameraCard(CameraRole.FRONT, roadView, Modifier.weight(1f))
+                }
             }
             Spacer(Modifier.height(6.dp))
             DetectionPanel(Modifier.weight(1f))
@@ -221,7 +249,16 @@ class MainActivity : ComponentActivity() {
         val result by (service?.results?.get(role)
             ?: MutableStateFlow(AnalysisResult())).collectAsState()
         Box(modifier.clip(RoundedCornerShape(14.dp)).background(EnactSurface)) {
-            AndroidView(factory = { view }, modifier = Modifier.fillMaxSize())
+            AndroidView(
+                factory = {
+                    // The PreviewView outlives the Detector tab's composition.
+                    // Returning to the tab re-adds it; it must be detached from
+                    // the previous (disposed) parent first or the surface stays
+                    // blank/frozen.
+                    (view.parent as? android.view.ViewGroup)?.removeView(view)
+                    view
+                },
+                modifier = Modifier.fillMaxSize())
             Canvas(Modifier.fillMaxSize()) {
                 result.detections.forEach { d ->
                     drawRect(if (d.risky) Color(0xFFE57373) else EnactGreen,
@@ -339,10 +376,30 @@ class MainActivity : ComponentActivity() {
                 service?.setTtsAlerts(it)
             }
             Spacer(Modifier.height(14.dp))
+            Text("Detection elements", color = EnactGreen, fontSize = 15.sp,
+                fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
+            DetectionElementRow("Road signs (speed limits)", "det_signs")
+            DetectionElementRow("Lane markings (overlay)", "det_lanes")
+            DetectionElementRow("Single/double line-crossing events", "det_lane_cross")
+            DetectionElementRow("Hard-shoulder driving", "det_shoulder")
+            DetectionElementRow("Road objects (vehicles, pedestrians…)", "det_objects")
+            DetectionElementRow("Driver state (eyes, gaze, mirrors)", "det_driver")
+            Spacer(Modifier.height(14.dp))
             Text("Evidence retention: 30 days (records older than this are " +
                 "pruned automatically).", color = EnactOnSurfaceDim, fontSize = 12.sp)
             Text("All data is processed and stored on this device only.",
                 color = EnactOnSurfaceDim, fontSize = 12.sp)
+        }
+    }
+
+    @Composable
+    private fun DetectionElementRow(label: String, key: String) {
+        val prefs = remember { getSharedPreferences("dbm", MODE_PRIVATE) }
+        var on by remember { mutableStateOf(prefs.getBoolean(key, true)) }
+        SettingRow(label, on) {
+            on = it
+            service?.setElement(key, it) ?: prefs.edit().putBoolean(key, it).apply()
         }
     }
 
@@ -374,8 +431,12 @@ class MainActivity : ComponentActivity() {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("Driver Behavior Monitor", fontSize = 26.sp,
                         fontWeight = FontWeight.Bold, color = EnactGreen)
-                    Text("by RFSAT Limited", fontSize = 13.sp,
-                        color = EnactOnSurface.copy(alpha = 0.7f))
+                    Text("by RFSAT Limited — www.rfsat.com", fontSize = 13.sp,
+                        color = EnactLime,
+                        modifier = Modifier.clickable {
+                            startActivity(Intent(Intent.ACTION_VIEW,
+                                android.net.Uri.parse("https://www.rfsat.com")))
+                        })
                     Spacer(Modifier.height(4.dp))
                     Text("Version ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
                         fontSize = 12.sp, color = EnactLime.copy(alpha = 0.9f))
@@ -383,15 +444,29 @@ class MainActivity : ComponentActivity() {
             }
             Spacer(Modifier.height(16.dp))
             Text(
-                "DBM is a driver-awareness aid. It detects risky driver behaviour " +
-                "(microsleeps, distraction, phone use), road hazards (approaching " +
-                "vehicles, vulnerable road users) and road-regulation compliance " +
-                "(speed limits, lane markings), maintains a timestamped evidential " +
-                "record with integrity hashes, and scores overall driver compliance.\n\n" +
-                "All processing and storage occur on this device; nothing is " +
-                "transmitted.\n\n" +
-                "Versioning: major = new features, minor = corrections.",
+                "DBM is a driver-awareness aid. It detects risky driver behaviour, " +
+                "road hazards and road-regulation compliance, maintains a " +
+                "timestamped evidential record with integrity hashes, and scores " +
+                "overall driver compliance.",
                 color = EnactOnSurfaceDim, fontSize = 13.sp)
+            Spacer(Modifier.height(12.dp))
+            Column(Modifier.fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp)).background(EnactSurface)
+                    .padding(12.dp)) {
+                Text("Detected issues", color = EnactGreen, fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(6.dp))
+                RiskType.entries
+                    .filter { it != RiskType.NODE_OFFLINE }
+                    .forEach { rt ->
+                        Text("•  ${rt.description}",
+                            color = EnactOnSurface, fontSize = 12.sp,
+                            modifier = Modifier.padding(vertical = 1.dp))
+                    }
+            }
+            Spacer(Modifier.height(12.dp))
+            Text("All processing and storage occur on this device; nothing is " +
+                "transmitted.", color = EnactOnSurfaceDim, fontSize = 13.sp)
         }
     }
 
