@@ -359,24 +359,35 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Save today's log into public Downloads (e.g. to attach when reporting
-     *  an issue or sharing with an AI assistant for debugging). */
+    /** Save today's log for sharing (e.g. with an AI assistant when
+     *  debugging). API 29+: public Downloads via MediaStore. API 26–28
+     *  (where MediaStore.Downloads does not exist): the app's external
+     *  files directory, accessible over USB/file manager. */
     private fun saveLog() {
         runCatching {
             val src = DLog.currentLogFile()
             val name = "DBM-log-${java.text.SimpleDateFormat("yyyyMMdd_HHmmss",
                 Locale.US).format(Date())}.txt"
-            val values = android.content.ContentValues().apply {
-                put(android.provider.MediaStore.Downloads.DISPLAY_NAME, name)
-                put(android.provider.MediaStore.Downloads.MIME_TYPE, "text/plain")
+            val shownPath: String
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                val values = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.Downloads.DISPLAY_NAME, name)
+                    put(android.provider.MediaStore.Downloads.MIME_TYPE, "text/plain")
+                }
+                val uri = contentResolver.insert(
+                    android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)!!
+                contentResolver.openOutputStream(uri)!!.use { out ->
+                    src.inputStream().use { it.copyTo(out) }
+                }
+                shownPath = "Downloads/$name"
+            } else {
+                val dir = getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS)!!
+                val dst = java.io.File(dir, name)
+                src.copyTo(dst, overwrite = true)
+                shownPath = dst.absolutePath
             }
-            val uri = contentResolver.insert(
-                android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)!!
-            contentResolver.openOutputStream(uri)!!.use { out ->
-                src.inputStream().use { it.copyTo(out) }
-            }
-            DLog.i(TAG, "log saved to Downloads/$name")
-            android.widget.Toast.makeText(this, "Saved to Downloads/$name",
+            DLog.i(TAG, "log saved to $shownPath")
+            android.widget.Toast.makeText(this, "Saved to $shownPath",
                 android.widget.Toast.LENGTH_LONG).show()
         }.onFailure { DLog.e(TAG, "log save failed", it) }
     }

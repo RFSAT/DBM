@@ -5,6 +5,11 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v8.1 — log-save API compatibility (correction -> minor increment)
+- Fixed lint NewApi error: MediaStore.Downloads requires API 29; log saving
+  now branches — public Downloads via MediaStore on API 29+, and the app's
+  external files directory (USB/file-manager accessible) on API 26–28
+
 ## v8.0 — alignment, tables, log export and UI refinements (features + corrections -> major increment)
 - Previews restored deterministically on menu switching: re-attachment now
   triggers a full debounced use-case rebind (the same recovery path that
