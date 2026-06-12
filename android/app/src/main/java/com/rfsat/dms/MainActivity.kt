@@ -47,12 +47,15 @@ import com.rfsat.dms.capture.PhoneCameraManager
 import com.rfsat.dms.data.DmsDatabase
 import com.rfsat.dms.service.MonitorService
 import com.rfsat.dms.ui.HistoryScreen
+import com.rfsat.dms.util.DLog
 import kotlinx.coroutines.flow.MutableStateFlow
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
+
+    companion object { private const val TAG = "MainActivity" }
 
     private var service: MonitorService? = null
     private var cameras: PhoneCameraManager? = null
@@ -62,6 +65,7 @@ class MainActivity : ComponentActivity() {
 
     private val conn = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
+            DLog.i(TAG, "service connected")
             service = (binder as MonitorService.LocalBinder).service
             maybeStart()
         }
@@ -71,12 +75,16 @@ class MainActivity : ComponentActivity() {
     private var permissionsOk = false
     private val permLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
+            DLog.i(TAG, "permission results: " + res.entries.joinToString {
+                "${it.key.substringAfterLast('.')}=${it.value}" })
             permissionsOk = res[Manifest.permission.CAMERA] == true
             if (permissionsOk) maybeStart()
+            else DLog.w(TAG, "CAMERA permission denied — monitoring cannot start")
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        DLog.i(TAG, "MainActivity onCreate")
         interiorView = PreviewView(this)
         roadView = PreviewView(this)
         startForegroundService(Intent(this, MonitorService::class.java))
@@ -92,6 +100,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun maybeStart() {
+        DLog.i(TAG, "maybeStart: service=${service != null} perms=$permissionsOk cams=${cameras != null}")
         val svc = service ?: return
         if (!permissionsOk || cameras != null) return
         svc.onPermissionsGranted()
@@ -108,8 +117,10 @@ class MainActivity : ComponentActivity() {
         var accepted by remember { mutableStateOf(false) }
         var showAbout by remember { mutableStateOf(false) }
         var showHistory by remember { mutableStateOf(false) }
+        var showLogs by remember { mutableStateOf(false) }
         if (!accepted) { PrivacyNotice { accepted = true }; return }
         if (showAbout) { AboutDialog { showAbout = false } }
+        if (showLogs) { LogsDialog { showLogs = false } }
         if (showHistory) {
             HistoryScreen(dao = DmsDatabase.get(this).events(),
                 onBack = { showHistory = false })
@@ -118,7 +129,8 @@ class MainActivity : ComponentActivity() {
 
         Column(Modifier.fillMaxSize()) {
             ScoreHeader(onAbout = { showAbout = true },
-                        onHistory = { showHistory = true })
+                        onHistory = { showHistory = true },
+                        onLogs = { showLogs = true })
             Row(Modifier.fillMaxSize()) {
                 Column(Modifier.weight(2f), verticalArrangement = Arrangement.SpaceEvenly) {
                     StreamCard(CameraRole.DRIVER, interiorView, Modifier.weight(1f))
@@ -130,7 +142,7 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun ScoreHeader(onAbout: () -> Unit, onHistory: () -> Unit) {
+    private fun ScoreHeader(onAbout: () -> Unit, onHistory: () -> Unit, onLogs: () -> Unit) {
         val st by (service?.scorer?.state
             ?: MutableStateFlow(ComplianceState())).collectAsState()
         val mode by captureMode.collectAsState()
@@ -154,6 +166,7 @@ class MainActivity : ComponentActivity() {
             Text("cameras: $mode", fontSize = 12.sp, color = Color.Gray)
             Row {
                 TextButton(onClick = onHistory) { Text("History") }
+                TextButton(onClick = onLogs) { Text("Logs") }
                 TextButton(onClick = onAbout) { Text("About") }
             }
         }
@@ -224,6 +237,36 @@ class MainActivity : ComponentActivity() {
             },
             confirmButton = { TextButton(onClick = onClose) { Text("Close") } }
         )
+    }
+
+    @Composable
+    private fun LogsDialog(onClose: () -> Unit) {
+        val text = remember { DLog.tail() }
+        AlertDialog(
+            onDismissRequest = onClose,
+            title = { Text("Diagnostic log (today)") },
+            text = {
+                LazyColumn {
+                    item { Text(text, fontSize = 9.sp,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace) }
+                }
+            },
+            confirmButton = { TextButton(onClick = { shareLog(); onClose() }) { Text("Share") } },
+            dismissButton = { TextButton(onClick = onClose) { Text("Close") } }
+        )
+    }
+
+    private fun shareLog() {
+        runCatching {
+            val f = DLog.currentLogFile()
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                this, "$packageName.fileprovider", f)
+            startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }, "Share DBM log"))
+        }.onFailure { DLog.e(TAG, "log share failed", it) }
     }
 
     @Composable

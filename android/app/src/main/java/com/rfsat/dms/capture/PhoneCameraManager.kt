@@ -15,6 +15,7 @@ import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import com.rfsat.dms.CameraRole
+import com.rfsat.dms.util.DLog
 import java.util.concurrent.Executors
 
 /**
@@ -41,6 +42,8 @@ class PhoneCameraManager(
 ) {
     enum class Mode { CONCURRENT, MULTIPLEXED }
 
+    companion object { private const val TAG = "PhoneCameras" }
+
     private val analysisExecutor = Executors.newFixedThreadPool(2)
     private val handler = Handler(Looper.getMainLooper())
     private var provider: ProcessCameraProvider? = null
@@ -53,9 +56,14 @@ class PhoneCameraManager(
         future.addListener({
             provider = future.get()
             val p = provider!!
+            DLog.i(TAG, "camera provider ready; concurrent combos: " +
+                p.availableConcurrentCameraInfos.size)
             if (p.availableConcurrentCameraInfos.isNotEmpty()) {
                 runCatching { bindConcurrent(p) }
-                    .onFailure { bindMultiplexed(p) }
+                    .onFailure {
+                        DLog.w(TAG, "concurrent bind failed, falling back to multiplex", it)
+                        bindMultiplexed(p)
+                    }
             } else bindMultiplexed(p)
         }, ContextCompat.getMainExecutor(context))
     }
@@ -69,6 +77,7 @@ class PhoneCameraManager(
             roadPreview, CameraRole.FRONT)
         p.bindToLifecycle(listOf(interior, road))
         mode = Mode.CONCURRENT
+        DLog.i(TAG, "bound CONCURRENT front+back")
         onMode(mode)
     }
 
@@ -88,6 +97,7 @@ class PhoneCameraManager(
     // ---- fallback: alternate cameras ----
     private fun bindMultiplexed(p: ProcessCameraProvider) {
         mode = Mode.MULTIPLEXED
+        DLog.i(TAG, "bound MULTIPLEXED (alternating cameras)")
         onMode(mode)
         muxBindCurrent(p)
         handler.post(object : Runnable {
@@ -109,7 +119,9 @@ class PhoneCameraManager(
             else
                 Triple(CameraSelector.DEFAULT_BACK_CAMERA, roadPreview, CameraRole.FRONT)
         val preview = Preview.Builder().build().also { it.surfaceProvider = view.surfaceProvider }
-        p.bindToLifecycle(lifecycleOwner, selector, preview, analysisUseCase(role))
+        runCatching {
+            p.bindToLifecycle(lifecycleOwner, selector, preview, analysisUseCase(role))
+        }.onFailure { DLog.e(TAG, "mux bind failed for $role", it) }
     }
 
     private fun analysisUseCase(role: CameraRole): ImageAnalysis =

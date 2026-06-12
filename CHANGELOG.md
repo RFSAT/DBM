@@ -5,6 +5,24 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v4.0 — diagnostic logging facility (new feature -> major increment)
+- Persistent file logging (filesDir/logs/dbm-YYYYMMDD.log): timestamped
+  entries mirrored to logcat, daily rotation, 7-day retention
+- Uncaught-exception handler writes the full crash stack trace to the log
+  file before the process dies — installed in a new Application class so it
+  is active from the first moment of app start
+- Operational logging across the app: activity lifecycle, per-permission
+  grant results, service binding, foreground start, analyzer initialisation,
+  camera binding decisions (concurrent vs multiplexed) and bind failures,
+  per-frame analysis failures
+- Crash-proofing of the suspected startup failure: foreground notification
+  is now started BEFORE analyzer initialisation (5-second contract), and
+  DriverAnalyzer/RoadAnalyzer construction is guarded — a missing model
+  asset now logs an explicit error and degrades (lane/sign analysis and the
+  other camera continue) instead of crashing
+- New "Logs" button: in-app viewer of today's log with a Share action
+  (FileProvider) to export the file for support
+
 ## v3.6 — lint clean-up (corrections -> minor increment)
 - StreamPlayer: opted in to Media3's unstable RTSP API at class level
   (@OptIn(UnstableApi::class)) — fixes 6 UnsafeOptInUsageError findings

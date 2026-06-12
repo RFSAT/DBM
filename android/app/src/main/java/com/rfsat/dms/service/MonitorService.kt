@@ -21,6 +21,7 @@ import com.rfsat.dms.detect.SignAnalyzer
 import com.rfsat.dms.detect.VisualSpeedEstimator
 import com.rfsat.dms.SpeedSource
 import com.rfsat.dms.location.SpeedMonitor
+import com.rfsat.dms.util.DLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -41,11 +42,13 @@ import kotlinx.coroutines.sync.withPermit
  */
 class MonitorService : Service() {
 
+    companion object { private const val TAG = "MonitorService" }
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val roadPermit = Semaphore(1)
 
-    private lateinit var driver: DriverAnalyzer
-    private lateinit var road: RoadAnalyzer
+    private var driver: DriverAnalyzer? = null
+    private var road: RoadAnalyzer? = null
     private lateinit var lanes: LaneAnalyzer
     private lateinit var signs: SignAnalyzer
     private val visualSpeed = VisualSpeedEstimator()
@@ -71,14 +74,25 @@ class MonitorService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        driver = DriverAnalyzer(this)
-        road = RoadAnalyzer(this, CameraRole.FRONT)
+        DLog.i(TAG, "onCreate: starting foreground")
+        // Foreground FIRST: startForegroundService() requires startForeground()
+        // within 5 s; a slow/failed analyzer init must not break that contract.
+        startForegroundWithNotification()
+        DLog.i(TAG, "foreground started; initialising analyzers")
+        driver = runCatching { DriverAnalyzer(this) }
+            .onFailure { DLog.e(TAG, "DriverAnalyzer init FAILED (face_landmarker.task in assets?)", it) }
+            .onSuccess { DLog.i(TAG, "DriverAnalyzer ready") }
+            .getOrNull()
+        road = runCatching { RoadAnalyzer(this, CameraRole.FRONT) }
+            .onFailure { DLog.e(TAG, "RoadAnalyzer init FAILED (efficientdet_lite0.tflite in assets?)", it) }
+            .onSuccess { DLog.i(TAG, "RoadAnalyzer ready") }
+            .getOrNull()
         lanes = LaneAnalyzer()
         signs = SignAnalyzer()
         evidence = EvidenceStore(this)
         alerter = Alerter(this)
         speed = SpeedMonitor(this)
-        startForegroundWithNotification()
+        DLog.i(TAG, "onCreate complete (driver=${driver != null}, road=${road != null})")
 
         // 1 Hz speed-compliance loop: GPS preferred, visual estimate as fallback
         scope.launch {
@@ -103,10 +117,13 @@ class MonitorService : Service() {
 
     fun submitFrame(role: CameraRole, frame: Bitmap, tMs: Long) {
         scope.launch {
-            val result = when (role) {
-                CameraRole.DRIVER -> driver.analyze(frame, tMs)
-                else -> roadPermit.withPermit { analyzeRoad(frame, tMs) }
-            }
+            val result = runCatching {
+                when (role) {
+                    CameraRole.DRIVER -> driver?.analyze(frame, tMs) ?: AnalysisResult()
+                    else -> roadPermit.withPermit { analyzeRoad(frame, tMs) }
+                }
+            }.onFailure { DLog.e(TAG, "analysis failed for $role", it) }
+             .getOrDefault(AnalysisResult())
             results[role]!!.value = result
             result.speedLimitSeen?.let { scorer.onSpeedLimitSeen(it) }
             result.events.forEach { ev ->
@@ -122,6 +139,10 @@ class MonitorService : Service() {
         // Retain a copy of the newest road frame for speed-violation evidence.
         latestRoadFrame?.recycle()
         latestRoadFrame = frame.copy(Bitmap.Config.ARGB_8888, false)
+        val road = road ?: return run {
+            val (laneLines, laneEvents) = lanes.analyze(frame, tMs)
+            AnalysisResult(laneLines = laneLines, events = laneEvents)
+        }
         // Visual speed: estimates when GNSS is down, auto-calibrates when it is up.
         visualSpeedKmh = visualSpeed.onFrame(
             frame, tMs,
@@ -167,7 +188,8 @@ class MonitorService : Service() {
     override fun onDestroy() {
         scope.cancel()
         speed.stop()
-        driver.close(); road.close(); alerter.release()
+        driver?.close(); road?.close(); alerter.release()
+        DLog.i(TAG, "onDestroy")
         super.onDestroy()
     }
 }
