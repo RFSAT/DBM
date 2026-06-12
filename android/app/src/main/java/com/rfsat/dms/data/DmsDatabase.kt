@@ -40,7 +40,7 @@ interface EventDao {
     suspend fun prune(before: Long)
 }
 
-@Database(entities = [EventEntity::class], version = 1, exportSchema = true)
+@Database(entities = [EventEntity::class], version = 1, exportSchema = false)
 abstract class DmsDatabase : RoomDatabase() {
     abstract fun events(): EventDao
 

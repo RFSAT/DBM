@@ -123,7 +123,7 @@ class DriverAnalyzer(context: Context) {
             1f, xs.min(), ys.min(), xs.max(), ys.max(),
             risky = events.any { it.severity != Severity.INFO })
 
-        return AnalysisResult(listOf(det), events)
+        return AnalysisResult(detections = listOf(det), events = events)
     }
 
     private fun resetTransient() { eyesClosedSinceMs = 0L; yawOffSinceMs = 0L }

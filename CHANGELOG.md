@@ -5,6 +5,16 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v3.4 — build fixes (corrections -> minor increment)
+- Fixed compile errors: AnalysisResult constructed with positional arguments
+  placed risk events into the laneLines parameter in DriverAnalyzer and
+  RoadAnalyzer; now passed as named arguments
+- Added kotlinx-coroutines-play-services dependency required by
+  SignAnalyzer's Task.await() (root cause of the unresolved-reference
+  cascade in the CI log)
+- Migrated deprecated kotlinOptions to the kotlin compilerOptions DSL
+- Room: exportSchema = false to silence the schema-location warning
+
 ## v3.3 — Play Store package ID (correction -> minor increment)
 - applicationId set to "com.DBM" for Google Play registration (Kotlin
   namespace remains com.rfsat.dms; the two are independent in Gradle)

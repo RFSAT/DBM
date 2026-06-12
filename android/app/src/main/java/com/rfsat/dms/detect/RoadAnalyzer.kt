@@ -83,7 +83,7 @@ class RoadAnalyzer(context: Context, private val role: CameraRole) {
             }
             tr.last.copy(risky = risky)
         }
-        return AnalysisResult(out, events)
+        return AnalysisResult(detections = out, events = events)
     }
 
     fun close() = detector.close()

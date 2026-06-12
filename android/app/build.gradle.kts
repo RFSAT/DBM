@@ -1,4 +1,5 @@
 import com.android.build.api.variant.impl.VariantOutputImpl
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("com.android.application")
@@ -15,7 +16,7 @@ plugins {
 //   in-app About screen (via BuildConfig.VERSION_NAME).
 // ---------------------------------------------------------------------------
 val dmsVersionMajor = 3
-val dmsVersionMinor = 3
+val dmsVersionMinor = 4
 val dmsVersionName = "$dmsVersionMajor.$dmsVersionMinor"
 
 android {
@@ -36,7 +37,7 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -44,6 +45,10 @@ android {
         }
     }
     androidResources { noCompress += listOf("tflite", "task") }
+}
+
+kotlin {
+    compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
 }
 
 // Versioned package filenames: DMS-v1.0-debug.apk / DMS-v1.0-release.apk
@@ -86,6 +91,8 @@ dependencies {
 
     // Speed-limit sign reading — ML Kit on-device text recognition
     implementation("com.google.mlkit:text-recognition:16.0.1")
+    // Task.await() bridge used by SignAnalyzer
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
 
     // Vehicle speed via GNSS
     implementation("com.google.android.gms:play-services-location:21.3.0")
