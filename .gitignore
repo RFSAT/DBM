@@ -1,0 +1,8 @@
+*.iml
+.gradle/
+android/local.properties
+android/app/build/
+android/build/
+android/app/src/main/assets/*.task
+android/app/src/main/assets/*.tflite
+.DS_Store

@@ -1,0 +1,23 @@
+name: Android CI
+on:
+  push: { branches: [main] }
+  pull_request:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - name: Fetch model assets
+        run: |
+          cd android/app/src/main/assets
+          curl -fLO https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task
+          curl -fL -o efficientdet_lite0.tflite https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/latest/efficientdet_lite0.tflite
+      - name: Build
+        working-directory: android
+        run: |
+          gradle wrapper --gradle-version 8.10.2
+          ./gradlew lint assembleDebug
+      - uses: actions/upload-artifact@v4
+        with: { name: DMS-apk, path: android/app/build/outputs/apk/debug/*.apk }
