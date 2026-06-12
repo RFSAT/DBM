@@ -9,6 +9,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.rtsp.RtspMediaSource
 
 /**
@@ -20,6 +21,7 @@ import androidx.media3.exoplayer.rtsp.RtspMediaSource
  * Auto-reconnects with exponential backoff on any playback error (WiFi drops,
  * node reboots at ignition, etc.).
  */
+@androidx.annotation.OptIn(UnstableApi::class)
 class StreamPlayer(
     context: Context,
     private val rtspUrl: String,

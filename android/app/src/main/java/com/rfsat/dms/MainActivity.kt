@@ -81,11 +81,13 @@ class MainActivity : ComponentActivity() {
         roadView = PreviewView(this)
         startForegroundService(Intent(this, MonitorService::class.java))
         bindService(Intent(this, MonitorService::class.java), conn, Context.BIND_AUTO_CREATE)
-        permLauncher.launch(arrayOf(
+        val perms = mutableListOf(
             Manifest.permission.CAMERA,
             Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.POST_NOTIFICATIONS))
+            Manifest.permission.ACCESS_COARSE_LOCATION)
+        if (android.os.Build.VERSION.SDK_INT >= 33)
+            perms += Manifest.permission.POST_NOTIFICATIONS
+        permLauncher.launch(perms.toTypedArray())
         setContent { MaterialTheme { Surface(Modifier.fillMaxSize()) { Screen() } } }
     }
 

@@ -5,6 +5,20 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v3.6 — lint clean-up (corrections -> minor increment)
+- StreamPlayer: opted in to Media3's unstable RTSP API at class level
+  (@OptIn(UnstableApi::class)) — fixes 6 UnsafeOptInUsageError findings
+- Foreground service type reduced to camera|location; connectedDevice type
+  and permission removed (not used in Phase 1, and it demands device-class
+  permissions DBM does not request) — fixes ForegroundServicePermission
+- POST_NOTIFICATIONS requested only on API 33+; foreground-service type
+  mask now built per API level (camera type requires API 30)
+- mipmap-anydpi-v26 merged into mipmap-anydpi (minSdk is 26); removed unused
+  app_name_short string
+- Orientation lock annotated as intentional (in-car landscape use)
+- Lint re-enabled as a hard build gate (abortOnError = true); dependency-
+  version and targetSdk-36 advisories tracked as scheduled maintenance
+
 ## v3.5 — lint compliance (corrections -> minor increment)
 - Added ACCESS_COARSE_LOCATION alongside FINE in the manifest and the runtime
   permission request (Android 12+ requirement; app degrades gracefully if the

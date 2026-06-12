@@ -154,10 +154,14 @@ class MonitorService : Service() {
             .setSmallIcon(android.R.drawable.presence_video_online)
             .setOngoing(true)
             .build()
-        val type = ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
-        if (Build.VERSION.SDK_INT >= 29) startForeground(1, n, type)
-        else startForeground(1, n)
+        when {
+            Build.VERSION.SDK_INT >= 30 -> startForeground(1, n,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+            Build.VERSION.SDK_INT >= 29 -> startForeground(1, n,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+            else -> startForeground(1, n)
+        }
     }
 
     override fun onDestroy() {

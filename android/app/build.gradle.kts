@@ -16,7 +16,7 @@ plugins {
 //   in-app About screen (via BuildConfig.VERSION_NAME).
 // ---------------------------------------------------------------------------
 val dmsVersionMajor = 3
-val dmsVersionMinor = 5
+val dmsVersionMinor = 6
 val dmsVersionName = "$dmsVersionMajor.$dmsVersionMinor"
 
 android {
@@ -46,10 +46,11 @@ android {
     }
     androidResources { noCompress += listOf("tflite", "task") }
     lint {
-        // Report all findings (HTML uploaded by CI) without failing the
-        // build while pre-release; tighten before Play submission.
-        abortOnError = false
+        abortOnError = true
         checkReleaseBuilds = true
+        // Tracked as scheduled maintenance, not build-breakers:
+        // dependency bumps and the targetSdk 36 move (needs AGP/Gradle bump).
+        disable += listOf("GradleDependency", "OldTargetApi")
     }
 }
 
