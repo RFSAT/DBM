@@ -15,7 +15,7 @@ plugins {
 //   in-app About screen (via BuildConfig.VERSION_NAME).
 // ---------------------------------------------------------------------------
 val dmsVersionMajor = 3
-val dmsVersionMinor = 2
+val dmsVersionMinor = 3
 val dmsVersionName = "$dmsVersionMajor.$dmsVersionMinor"
 
 android {
@@ -23,7 +23,9 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.rfsat.dms"
+        // Play Store package ID (permanent once published). Kotlin namespace stays
+        // com.rfsat.dms so no source refactor is needed — the two are independent.
+        applicationId = "com.DBM"
         minSdk = 26
         targetSdk = 35
         versionCode = dmsVersionMajor * 1000 + dmsVersionMinor

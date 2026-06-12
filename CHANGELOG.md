@@ -5,6 +5,10 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v3.3 — Play Store package ID (correction -> minor increment)
+- applicationId set to "com.DBM" for Google Play registration (Kotlin
+  namespace remains com.rfsat.dms; the two are independent in Gradle)
+
 ## v3.2 — Play Store icon asset (correction -> minor increment)
 - Added store-assets/DBM-play-store-icon-512.png: 512 x 512 px 32-bit PNG
   app icon required by Google Play Console registration, rendered from the
