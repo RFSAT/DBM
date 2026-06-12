@@ -5,6 +5,18 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v6.6 — reliable preview restoration (correction -> minor increment)
+- Fixed videos frequently staying blank after switching menus: surface
+  providers are now re-issued from an OnAttachStateChangeListener at the
+  moment each PreviewView is re-attached to the window (posted after the
+  layout pass), instead of at tab composition time — the previous approach
+  raced the view attachment and only sometimes won
+- Manual refreshSurfaces() retained for explicit recovery paths
+
+## v6.5 — Settings scrolling (correction -> minor increment)
+- Settings view content is now vertically scrollable (the detection-element
+  switches made it taller than smaller/landscape screens)
+
 ## v6.4 — portrait operation (correction -> minor increment)
 - Application now rotates freely (fullSensor): in portrait the two video
   views are positioned one under the other with the detection messages at

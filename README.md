@@ -1,6 +1,6 @@
 # DBM — Driver Behavior Monitor
 
-**Current version: v6.4** (see CHANGELOG.md; major = new features, minor = corrections; version is embedded in package filenames and the in-app About screen).
+**Current version: v6.6** (see CHANGELOG.md; major = new features, minor = corrections; version is embedded in package filenames and the in-app About screen).
 
 **Phase 1 (current):** phone-only — front camera watches the driver, rear camera watches the road ahead, with road-sign/lane compliance and driver scoring.
 **Phase 2:** external Raspberry Pi Zero 2 W camera nodes over in-car WiFi (infrastructure already in `pi/`).

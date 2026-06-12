@@ -83,11 +83,36 @@ class PhoneCameraManager(
 
     private val previews = mutableMapOf<CameraRole, Preview>()
 
-    /** Re-issue surface providers after the preview views were re-attached. */
+    init {
+        // Refresh each preview's surface provider at the moment its view is
+        // re-attached to the window (returning to the Detector tab). Doing
+        // this on ATTACH — not on tab composition — guarantees the
+        // TextureView surface exists when the provider is issued.
+        hookAttach(interiorPreview, CameraRole.DRIVER)
+        hookAttach(roadPreview, CameraRole.FRONT)
+    }
+
+    private fun hookAttach(view: PreviewView, role: CameraRole) {
+        view.addOnAttachStateChangeListener(object :
+                android.view.View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: android.view.View) {
+                // Post so the layout pass completes before the provider is set.
+                v.post {
+                    previews[role]?.let {
+                        it.surfaceProvider = view.surfaceProvider
+                        DLog.i(TAG, "surface provider refreshed on attach: $role")
+                    }
+                }
+            }
+            override fun onViewDetachedFromWindow(v: android.view.View) = Unit
+        })
+    }
+
+    /** Manual refresh (kept for explicit recovery paths). */
     fun refreshSurfaces() {
         previews[CameraRole.DRIVER]?.surfaceProvider = interiorPreview.surfaceProvider
         previews[CameraRole.FRONT]?.surfaceProvider = roadPreview.surfaceProvider
-        DLog.i(TAG, "surface providers refreshed")
+        DLog.i(TAG, "surface providers refreshed (manual)")
     }
 
     private fun singleConfig(

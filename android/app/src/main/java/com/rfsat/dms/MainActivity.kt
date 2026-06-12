@@ -190,7 +190,6 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun DetectorScreen() {
-        androidx.compose.runtime.LaunchedEffect(Unit) { cameras?.refreshSurfaces() }
         val portrait = androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
                 android.content.res.Configuration.ORIENTATION_PORTRAIT
         Column(Modifier.fillMaxSize().padding(8.dp)) {
@@ -363,7 +362,8 @@ class MainActivity : ComponentActivity() {
         val prefs = remember { getSharedPreferences("dbm", MODE_PRIVATE) }
         var audio by remember { mutableStateOf(prefs.getBoolean("alerts_audio", true)) }
         var tts by remember { mutableStateOf(prefs.getBoolean("alerts_tts", true)) }
-        Column(Modifier.fillMaxSize().padding(14.dp)) {
+        Column(Modifier.fillMaxSize().padding(14.dp)
+                .verticalScroll(rememberScrollState())) {
             Text("Settings", color = EnactGreen, fontSize = 18.sp,
                 fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(10.dp))
