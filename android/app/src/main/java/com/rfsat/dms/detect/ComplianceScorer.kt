@@ -32,6 +32,11 @@ class ComplianceScorer {
     private var lastSpeedEventMs = 0L
     private val lastDeductMs = HashMap<RiskType, Long>()
 
+    /** User-adjusted penalty weights; defaults from RiskType.scorePenalty. */
+    private val weights = HashMap<RiskType, Int>()
+    fun setWeight(type: RiskType, w: Int) { weights[type] = w.coerceIn(0, 25) }
+    fun weightOf(type: RiskType): Int = weights[type] ?: type.scorePenalty
+
     fun onSpeedLimitSeen(limitKmh: Int) {
         _state.value = _state.value.copy(activeSpeedLimitKmh = limitKmh)
     }
@@ -72,7 +77,7 @@ class ComplianceScorer {
         val mult = when (ev.severity) {
             Severity.CRITICAL -> 1.0f; Severity.WARNING -> 0.6f; Severity.INFO -> 0.25f
         }
-        scoreF = (scoreF - ev.type.scorePenalty * mult).coerceAtLeast(0f)
+        scoreF = (scoreF - weightOf(ev.type) * mult).coerceAtLeast(0f)
         _state.value = _state.value.copy(tripEvents = _state.value.tripEvents + 1)
         publish()
     }

@@ -32,6 +32,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
@@ -384,7 +385,27 @@ class MainActivity : ComponentActivity() {
             DetectionElementRow("Single/double line-crossing events", "det_lane_cross")
             DetectionElementRow("Hard-shoulder driving", "det_shoulder")
             DetectionElementRow("Road objects (vehicles, pedestrians…)", "det_objects")
+            DetectionElementRow("Unsafe following distance", "det_distance")
             DetectionElementRow("Driver state (eyes, gaze, mirrors)", "det_driver")
+            Spacer(Modifier.height(14.dp))
+            Text("Following distance", color = EnactGreen, fontSize = 15.sp,
+                fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(6.dp))
+            StoppingDistanceSlider()
+            Spacer(Modifier.height(14.dp))
+            Text("Video recording", color = EnactGreen, fontSize = 15.sp,
+                fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(6.dp))
+            VideoRecordingRow()
+            Spacer(Modifier.height(14.dp))
+            Text("Compliance score weights", color = EnactGreen, fontSize = 15.sp,
+                fontWeight = FontWeight.Bold)
+            Text("Points deducted per occurrence (scaled by severity).",
+                color = EnactOnSurfaceDim, fontSize = 11.sp)
+            Spacer(Modifier.height(6.dp))
+            RiskType.entries.filter { it != RiskType.NODE_OFFLINE }.forEach { rt ->
+                WeightSlider(rt)
+            }
             Spacer(Modifier.height(14.dp))
             Text("Evidence retention: 30 days (records older than this are " +
                 "pruned automatically).", color = EnactOnSurfaceDim, fontSize = 12.sp)
@@ -401,6 +422,64 @@ class MainActivity : ComponentActivity() {
             on = it
             service?.setElement(key, it) ?: prefs.edit().putBoolean(key, it).apply()
         }
+    }
+
+    @Composable
+    private fun StoppingDistanceSlider() {
+        val prefs = remember { getSharedPreferences("dbm", MODE_PRIVATE) }
+        var pct by remember { mutableStateOf(prefs.getInt("stop_dist_pct", 100).toFloat()) }
+        Column(Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp)).background(EnactSurface)
+                .padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Text("Required gap: ${pct.toInt()} % of computed stopping distance",
+                color = EnactOnSurface, fontSize = 13.sp)
+            Text("100 % = dry-road stopping distance at current speed " +
+                "(1 s reaction + braking). Increase for wet roads or extra margin.",
+                color = EnactOnSurfaceDim, fontSize = 11.sp)
+            Slider(value = pct, onValueChange = { pct = it },
+                onValueChangeFinished = {
+                    val v = pct.toInt()
+                    prefs.edit().putInt("stop_dist_pct", v).apply()
+                    service?.setStoppingDistanceFactor(v)
+                },
+                valueRange = 50f..200f, steps = 14)
+        }
+        Spacer(Modifier.height(8.dp))
+    }
+
+    @Composable
+    private fun VideoRecordingRow() {
+        val prefs = remember { getSharedPreferences("dbm", MODE_PRIVATE) }
+        var on by remember { mutableStateOf(prefs.getBoolean("record_video", false)) }
+        SettingRow("Record both videos with overlays", on) {
+            on = it
+            service?.setVideoRecording(it)
+                ?: prefs.edit().putBoolean("record_video", it).apply()
+        }
+        Text("MP4 files with detections burnt in, stored on this device " +
+            "(7-day retention).", color = EnactOnSurfaceDim, fontSize = 11.sp)
+        Spacer(Modifier.height(8.dp))
+    }
+
+    @Composable
+    private fun WeightSlider(rt: RiskType) {
+        val prefs = remember { getSharedPreferences("dbm", MODE_PRIVATE) }
+        var w by remember {
+            mutableStateOf(prefs.getInt("weight_${rt.name}", rt.scorePenalty).toFloat()) }
+        Column(Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp)).background(EnactSurface)
+                .padding(horizontal = 12.dp, vertical = 4.dp)) {
+            Text("${rt.description}: ${w.toInt()} pts",
+                color = EnactOnSurface, fontSize = 12.sp)
+            Slider(value = w, onValueChange = { w = it },
+                onValueChangeFinished = {
+                    val v = w.toInt()
+                    prefs.edit().putInt("weight_${rt.name}", v).apply()
+                    service?.setWeight(rt, v)
+                },
+                valueRange = 0f..25f, steps = 24)
+        }
+        Spacer(Modifier.height(6.dp))
     }
 
     @Composable

@@ -5,6 +5,22 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v7.0 — following distance, score weights, overlay recording (new features -> major increment)
+- NEW unsafe-following-distance detection: monocular distance to the lead
+  vehicle (bounding-box width model) compared against the stopping distance
+  at current speed (1 s reaction + v²/2a braking); warning when closer,
+  critical below 60 % of the required gap; persistence and rate limiting to
+  suppress jitter
+- Required gap adjustable in Settings as 50–200 % of the computed stopping
+  distance (e.g. raise for wet roads); new detection-element toggle
+- NEW per-issue compliance-score weights: every detection type's point
+  deduction is adjustable (0–25) via sliders in Settings, persisted and
+  applied live
+- NEW overlay video recording: both camera streams can be recorded to MP4
+  with detections, lane lines, event banners and timestamps burnt in
+  (H.264/MediaCodec at analysis frame rate, wall-clock timing, 7-day
+  retention, on-device only); toggle in Settings
+
 ## v6.6 — reliable preview restoration (correction -> minor increment)
 - Fixed videos frequently staying blank after switching menus: surface
   providers are now re-issued from an OnAttachStateChangeListener at the

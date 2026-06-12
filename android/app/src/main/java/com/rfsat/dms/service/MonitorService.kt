@@ -15,7 +15,9 @@ import com.rfsat.dms.RiskType
 import com.rfsat.dms.RiskEventCandidate
 import com.rfsat.dms.alert.Alerter
 import com.rfsat.dms.data.EvidenceStore
+import com.rfsat.dms.data.OverlayVideoRecorder
 import com.rfsat.dms.detect.ComplianceScorer
+import com.rfsat.dms.detect.FollowingDistanceMonitor
 import com.rfsat.dms.detect.DriverAnalyzer
 import com.rfsat.dms.detect.LaneAnalyzer
 import com.rfsat.dms.detect.RoadAnalyzer
@@ -61,6 +63,10 @@ class MonitorService : Service() {
     private lateinit var alerter: Alerter
     lateinit var speed: SpeedMonitor; private set
     val scorer = ComplianceScorer()
+    val following = FollowingDistanceMonitor()
+    private var recDriver: OverlayVideoRecorder? = null
+    private var recRoad: OverlayVideoRecorder? = null
+    @Volatile private var recordVideo = false
 
     private var roadFrameCount = 0
 
@@ -70,6 +76,7 @@ class MonitorService : Service() {
     @Volatile var detectLaneCrossing = true; private set      // single/double line events
     @Volatile var detectHardShoulder = true; private set
     @Volatile var detectRoadObjects = true; private set
+    @Volatile var detectFollowingDistance = true; private set
     @Volatile var detectDriverState = true; private set
 
     fun setElement(key: String, on: Boolean) {
@@ -84,6 +91,7 @@ class MonitorService : Service() {
         "det_lane_cross" -> detectLaneCrossing = on
         "det_shoulder" -> detectHardShoulder = on
         "det_objects" -> detectRoadObjects = on
+        "det_distance" -> detectFollowingDistance = on
         "det_driver" -> detectDriverState = on
         else -> Unit
     }
@@ -120,8 +128,14 @@ class MonitorService : Service() {
         getSharedPreferences("dbm", MODE_PRIVATE).let { p ->
             alerter.audioEnabled = p.getBoolean("alerts_audio", true)
             alerter.ttsEnabled = p.getBoolean("alerts_tts", true)
+            following.factor = p.getInt("stop_dist_pct", 100) / 100f
+            com.rfsat.dms.RiskType.entries.forEach { rt ->
+                if (p.contains("weight_${rt.name}"))
+                    scorer.setWeight(rt, p.getInt("weight_${rt.name}", rt.scorePenalty))
+            }
+            setVideoRecording(p.getBoolean("record_video", false))
             listOf("det_signs", "det_lanes", "det_lane_cross", "det_shoulder",
-                   "det_objects", "det_driver")
+                   "det_objects", "det_driver", "det_distance")
                 .forEach { applyElement(it, p.getBoolean(it, true)) }
         }
         speed = SpeedMonitor(this)
@@ -150,6 +164,25 @@ class MonitorService : Service() {
 
     fun setAudioAlerts(on: Boolean) { alerter.audioEnabled = on }
     fun setTtsAlerts(on: Boolean) { alerter.ttsEnabled = on }
+    fun setStoppingDistanceFactor(pct: Int) {
+        getSharedPreferences("dbm", MODE_PRIVATE).edit().putInt("stop_dist_pct", pct).apply()
+        following.factor = pct / 100f
+    }
+    fun setWeight(type: com.rfsat.dms.RiskType, w: Int) {
+        getSharedPreferences("dbm", MODE_PRIVATE).edit().putInt("weight_${type.name}", w).apply()
+        scorer.setWeight(type, w)
+    }
+    fun setVideoRecording(on: Boolean) {
+        getSharedPreferences("dbm", MODE_PRIVATE).edit().putBoolean("record_video", on).apply()
+        recordVideo = on
+        val dir = java.io.File(filesDir, "recordings")
+        if (on) {
+            if (recDriver == null) recDriver = OverlayVideoRecorder(dir, "driver", 640, 480)
+            if (recRoad == null) recRoad = OverlayVideoRecorder(dir, "road", 640, 480)
+            recDriver?.start(); recRoad?.start()
+        } else { recDriver?.stop(); recRoad?.stop() }
+        DLog.i(TAG, "video recording = $on")
+    }
 
     fun submitFrame(role: CameraRole, frame: Bitmap, tMs: Long) {
         scope.launch {
@@ -163,6 +196,10 @@ class MonitorService : Service() {
             }.onFailure { DLog.e(TAG, "analysis failed for $role", it) }
              .getOrDefault(AnalysisResult())
             results[role]!!.value = result
+            if (recordVideo) {
+                (if (role == CameraRole.DRIVER) recDriver else recRoad)
+                    ?.encode(frame, result, tMs)
+            }
             result.speedLimitSeen?.let { scorer.onSpeedLimitSeen(it) }
             result.events.forEach { ev ->
                 alerter.alert(ev)
@@ -188,6 +225,13 @@ class MonitorService : Service() {
             gpsHealthy = speed.healthy)
         val obj = road.analyze(frame, tMs)
         val (laneLines, laneEvents) = lanes.analyze(frame, tMs)
+        var followEvents = emptyList<RiskEventCandidate>()
+        if (detectFollowingDistance && obj != null) {
+            val spd = if (speed.healthy) speed.speedKmh.value else (visualSpeedKmh ?: 0)
+            val (ev, _) = following.check(obj.detections, spd, tMs)
+            ev?.let { followEvents = listOf(it) }
+        }
+
         var limit: Int? = null
         var signDets = emptyList<com.rfsat.dms.Detection>()
         if (roadFrameCount++ % 3 == 0) {
@@ -226,6 +270,7 @@ class MonitorService : Service() {
     override fun onDestroy() {
         scope.cancel()
         speed.stop()
+        recDriver?.stop(); recRoad?.stop()
         driver?.close(); road?.close(); alerter.release()
         DLog.i(TAG, "onDestroy")
         super.onDestroy()

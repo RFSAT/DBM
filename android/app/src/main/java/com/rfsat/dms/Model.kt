@@ -21,6 +21,7 @@ enum class RiskType(val description: String, val scorePenalty: Int) {
     NO_SEATBELT("Seatbelt not fastened", 10),
     // Road / collision risks
     FRONT_COLLISION_RISK("Fast-approaching object ahead", 10),
+    UNSAFE_FOLLOWING_DISTANCE("Following closer than stopping distance", 10),
     REAR_COLLISION_RISK("Fast-approaching vehicle behind / tailgating", 6),
     VULNERABLE_ROAD_USER("Pedestrian / cyclist / scooter in risk zone", 8),
     // Road-regulation compliance
