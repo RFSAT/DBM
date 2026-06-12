@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches the RFSAT/ENACT dark style; Material3 theming is applied in
+         Compose via DbmTheme. -->
+    <style name="Theme.DBM" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#0C2E28</item>
+        <item name="android:navigationBarColor">#061E1A</item>
+        <item name="android:windowBackground">#061E1A</item>
+    </style>
+</resources>

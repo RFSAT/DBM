@@ -134,7 +134,7 @@ private fun DetailDialog(e: EventEntity, timeFmt: SimpleDateFormat, onClose: () 
 }
 
 private fun severityColor(s: String) = when (s) {
-    "CRITICAL" -> Color.Red
-    "WARNING" -> Color(0xFFFFA000)
-    else -> Color.Gray
+    "CRITICAL" -> com.rfsat.dms.ui.theme.EnactError
+    "WARNING" -> com.rfsat.dms.ui.theme.EnactWarning
+    else -> com.rfsat.dms.ui.theme.EnactOnSurfaceDim
 }

@@ -91,6 +91,10 @@ class MonitorService : Service() {
         signs = SignAnalyzer()
         evidence = EvidenceStore(this)
         alerter = Alerter(this)
+        getSharedPreferences("dbm", MODE_PRIVATE).let {
+            alerter.audioEnabled = it.getBoolean("alerts_audio", true)
+            alerter.ttsEnabled = it.getBoolean("alerts_tts", true)
+        }
         speed = SpeedMonitor(this)
         DLog.i(TAG, "onCreate complete (driver=${driver != null}, road=${road != null})")
 
@@ -114,6 +118,9 @@ class MonitorService : Service() {
 
     /** Call from the Activity once runtime permissions are granted. */
     fun onPermissionsGranted() = speed.start()
+
+    fun setAudioAlerts(on: Boolean) { alerter.audioEnabled = on }
+    fun setTtsAlerts(on: Boolean) { alerter.ttsEnabled = on }
 
     fun submitFrame(role: CameraRole, frame: Bitmap, tMs: Long) {
         scope.launch {

@@ -11,6 +11,9 @@ import java.util.Locale
 /** Audio alerts: short tone for WARNING, urgent tone + spoken message for CRITICAL. */
 class Alerter(context: Context) {
 
+    @Volatile var audioEnabled = true
+    @Volatile var ttsEnabled = true
+
     private val tone = ToneGenerator(AudioManager.STREAM_ALARM, 90)
     private var ttsReady = false
     private val tts = TextToSpeech(context) { if (it == TextToSpeech.SUCCESS) ttsReady = true }
@@ -21,13 +24,13 @@ class Alerter(context: Context) {
         val now = System.currentTimeMillis()
         when (ev.severity) {
             Severity.CRITICAL -> {
-                tone.startTone(ToneGenerator.TONE_CDMA_EMERGENCY_RINGBACK, 600)
-                if (ttsReady && now - lastSpokenMs > 4000) {
+                if (audioEnabled) tone.startTone(ToneGenerator.TONE_CDMA_EMERGENCY_RINGBACK, 600)
+                if (ttsEnabled && ttsReady && now - lastSpokenMs > 4000) {
                     lastSpokenMs = now
                     tts.speak(ev.type.description, TextToSpeech.QUEUE_FLUSH, null, ev.type.name)
                 }
             }
-            Severity.WARNING -> tone.startTone(ToneGenerator.TONE_PROP_BEEP2, 250)
+            Severity.WARNING -> { if (audioEnabled) tone.startTone(ToneGenerator.TONE_PROP_BEEP2, 250) }
             Severity.INFO -> Unit
         }
     }

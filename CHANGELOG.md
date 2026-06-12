@@ -5,6 +5,21 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v5.0 — restructured UI in RFSAT/ENACT style (new feature -> major increment)
+- New navigation: scrollable tab menu at the top of the screen — Detector,
+  History, Log, Settings, About
+- Detector view: front (driver) and rear (road) camera views side by side
+  under the menu, with the live detection messages panel underneath and a
+  compliance/speed status strip above
+- Graphical style matched to ShimmerENACT: RFSAT/ENACT dark-green palette
+  (EnactDark background, EnactGreen primary, lime accents), rounded gradient
+  cards, EnactDarkMid top bar, Material 3 dark colour scheme, matching
+  status/navigation bar colours
+- Log is now a full tab with Refresh and Share; About restyled with the
+  ShimmerENACT-style branded header card
+- New Settings tab: toggles for audio alert tones and spoken (TTS) warnings,
+  persisted and applied live to the monitoring service
+
 ## v4.0 — diagnostic logging facility (new feature -> major increment)
 - Persistent file logging (filesDir/logs/dbm-YYYYMMDD.log): timestamped
   entries mirrored to logcat, daily rotation, 7-day retention
