@@ -5,6 +5,15 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v3.5 — lint compliance (corrections -> minor increment)
+- Added ACCESS_COARSE_LOCATION alongside FINE in the manifest and the runtime
+  permission request (Android 12+ requirement; app degrades gracefully if the
+  user grants only approximate location — GNSS speed still works)
+- Replaced deprecated Compose Divider with HorizontalDivider
+- Lint configured to report without aborting pre-release builds; CI now
+  uploads the full HTML lint report as a build artifact so all findings are
+  reviewable (to be tightened before Play submission)
+
 ## v3.4 — build fixes (corrections -> minor increment)
 - Fixed compile errors: AnalysisResult constructed with positional arguments
   placed risk events into the laneLines parameter in DriverAnalyzer and

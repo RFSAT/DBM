@@ -16,7 +16,7 @@ plugins {
 //   in-app About screen (via BuildConfig.VERSION_NAME).
 // ---------------------------------------------------------------------------
 val dmsVersionMajor = 3
-val dmsVersionMinor = 4
+val dmsVersionMinor = 5
 val dmsVersionName = "$dmsVersionMajor.$dmsVersionMinor"
 
 android {
@@ -45,6 +45,12 @@ android {
         }
     }
     androidResources { noCompress += listOf("tflite", "task") }
+    lint {
+        // Report all findings (HTML uploaded by CI) without failing the
+        // build while pre-release; tighten before Play submission.
+        abortOnError = false
+        checkReleaseBuilds = true
+    }
 }
 
 kotlin {

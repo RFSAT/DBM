@@ -20,4 +20,7 @@ jobs:
           gradle wrapper --gradle-version 8.10.2
           ./gradlew lint assembleDebug
       - uses: actions/upload-artifact@v4
-        with: { name: DMS-apk, path: android/app/build/outputs/apk/debug/*.apk }
+        with: { name: DBM-apk, path: android/app/build/outputs/apk/debug/*.apk }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: lint-report, path: android/app/build/reports/lint-results-*.html }

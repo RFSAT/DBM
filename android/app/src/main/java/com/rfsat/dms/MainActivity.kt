@@ -84,6 +84,7 @@ class MainActivity : ComponentActivity() {
         permLauncher.launch(arrayOf(
             Manifest.permission.CAMERA,
             Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.POST_NOTIFICATIONS))
         setContent { MaterialTheme { Surface(Modifier.fillMaxSize()) { Screen() } } }
     }

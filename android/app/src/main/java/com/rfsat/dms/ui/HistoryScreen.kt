@@ -12,7 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -75,7 +75,7 @@ fun HistoryScreen(dao: EventDao, onBack: () -> Unit) {
                 item(key = "h-$day") {
                     Text(day, fontSize = 14.sp, color = Color.Gray,
                         modifier = Modifier.padding(top = 10.dp, bottom = 2.dp))
-                    Divider()
+                    HorizontalDivider()
                 }
                 items(dayEvents, key = { it.id }) { e ->
                     Row(Modifier.fillMaxWidth()
