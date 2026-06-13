@@ -284,10 +284,24 @@ class MainActivity : ComponentActivity() {
                         LaneLine.Kind.SOLID -> EnactWarning
                         LaneLine.Kind.DASHED -> EnactLime
                     }
-                    drawLine(col,
-                        Offset(mx(l.xBottom), my(1f)),
-                        Offset(mx(l.xTop), my(0.55f)),
-                        strokeWidth = 4f)
+                    val pB = Offset(mx(l.xBottom), my(1f))
+                    val pT = Offset(mx(l.xTop), my(0.55f))
+                    when (l.kind) {
+                        LaneLine.Kind.DASHED ->
+                            drawLine(col, pB, pT, strokeWidth = 7f,
+                                pathEffect = androidx.compose.ui.graphics.PathEffect
+                                    .dashPathEffect(floatArrayOf(22f, 18f), 0f))
+                        LaneLine.Kind.SOLID ->
+                            drawLine(col, pB, pT, strokeWidth = 9f)
+                        LaneLine.Kind.DOUBLE_SOLID -> {
+                            // two parallel thick lines
+                            val dx = 7f
+                            drawLine(col, Offset(pB.x - dx, pB.y), Offset(pT.x - dx, pT.y),
+                                strokeWidth = 7f)
+                            drawLine(col, Offset(pB.x + dx, pB.y), Offset(pT.x + dx, pT.y),
+                                strokeWidth = 7f)
+                        }
+                    }
                 }
             }
             Text(role.label, color = EnactOnSurface, fontSize = 11.sp,
@@ -435,6 +449,23 @@ class MainActivity : ComponentActivity() {
             DetectionElementRow("Road objects (vehicles, pedestrians…)", "det_objects")
             DetectionElementRow("Unsafe following distance", "det_distance")
             DetectionElementRow("Driver state (eyes, gaze, mirrors)", "det_driver")
+            Spacer(Modifier.height(14.dp))
+            Text("Self-calibration", color = EnactGreen, fontSize = 15.sp,
+                fontWeight = FontWeight.Bold)
+            Text("DBM adapts to the driver and mount during use: eye-closure " +
+                "baseline, straight-ahead head pose, the visual speed scale and " +
+                "the following-distance focal factor are learned automatically " +
+                "and bounded for safety. Independent detectors cross-check each " +
+                "other — two speed sources must agree before a speeding alert, a " +
+                "close gap must also be closing, and a line crossing must coincide " +
+                "with an actual heading change — reducing false positives.",
+                color = EnactOnSurfaceDim, fontSize = 11.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Justify)
+            Spacer(Modifier.height(6.dp))
+            androidx.compose.material3.OutlinedButton(
+                onClick = { service?.resetCalibration() }) {
+                Text("Reset calibration")
+            }
             Spacer(Modifier.height(14.dp))
             Text("Following distance", color = EnactGreen, fontSize = 15.sp,
                 fontWeight = FontWeight.Bold)

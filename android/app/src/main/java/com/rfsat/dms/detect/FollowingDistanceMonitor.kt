@@ -28,6 +28,31 @@ class FollowingDistanceMonitor {
     /** Stopping-distance scale factor from Settings (1.0 = textbook dry road). */
     @Volatile var factor = 1.0f
 
+    /** Focal factor f_px/frame-width; refined at runtime when a vehicle is
+     *  tracked over a known closing speed (own speed while the lead is roughly
+     *  stationary in-frame gives a distance-rate cross-check). Bounded so a
+     *  noisy estimate cannot wildly distort distances. */
+    @Volatile var focalFactor = FOCAL_FACTOR
+    private val focalSamples = ArrayDeque<Float>()
+
+    /** Feed when own speed is known and a single lead vehicle is tracked: the
+     *  change in estimated distance over dt should match own speed if the lead
+     *  is slow/stopped; the ratio refines the focal factor. */
+    fun calibrateFocal(prevWNorm: Float, curWNorm: Float, dtSec: Float, ownSpeedKmh: Int) {
+        if (dtSec < 0.2f || ownSpeedKmh < 25 || prevWNorm < 0.02f || curWNorm < 0.02f) return
+        val dPrev = focalFactor * VEHICLE_WIDTH_M / prevWNorm
+        val dCur = focalFactor * VEHICLE_WIDTH_M / curWNorm
+        val measuredClosing = (dPrev - dCur) / dtSec            // m/s
+        val expected = ownSpeedKmh / 3.6f
+        if (measuredClosing <= 0.5f) return
+        val k = focalFactor * (expected / measuredClosing)
+        if (k.isFinite() && k in 0.4f..1.6f) {
+            focalSamples.addLast(k)
+            if (focalSamples.size > 40) focalSamples.removeFirst()
+            if (focalSamples.size >= 12) focalFactor = focalSamples.sorted()[focalSamples.size / 2]
+        }
+    }
+
     private var tooCloseSinceMs = 0L
     private var lastEventMs = 0L
 
@@ -46,7 +71,7 @@ class FollowingDistanceMonitor {
 
         val wNorm = lead.right - lead.left
         if (wNorm < 0.02f) { tooCloseSinceMs = 0; return null to null }
-        val distM = FOCAL_FACTOR * VEHICLE_WIDTH_M / wNorm
+        val distM = focalFactor * VEHICLE_WIDTH_M / wNorm
 
         val v = speedKmh / 3.6f
         val stopM = (v * REACTION_S + v * v / (2f * DECEL_MS2)) * factor

@@ -48,6 +48,13 @@ class DriverAnalyzer(context: Context) {
             .build()
     )
 
+    // --- self-calibration (parameter-level adaptation against the driver) ---
+    private val earOpenSamples = ArrayDeque<Float>()
+    private var earClosedThresh = EAR_CLOSED
+    private val yawNeutralSamples = ArrayDeque<Float>()
+    private var yawNeutral = 0f
+    var calibrated = false; private set
+
     // --- temporal state ---
     private var eyesClosedSinceMs = 0L
     private var yawOffSinceMs = 0L
@@ -72,13 +79,32 @@ class DriverAnalyzer(context: Context) {
         }
         val earL = ear(159, 158, 145, 153, 33, 133)
         val earR = ear(386, 385, 374, 380, 362, 263)
-        val closed = (earL + earR) / 2f < EAR_CLOSED
+        val earAvg = (earL + earR) / 2f
+        if (earAvg > EAR_CLOSED) {
+            earOpenSamples.addLast(earAvg)
+            if (earOpenSamples.size > 300) earOpenSamples.removeFirst()
+            if (earOpenSamples.size >= 60) {
+                val sorted = earOpenSamples.sorted()
+                earClosedThresh = (sorted[sorted.size / 2] * 0.55f).coerceIn(0.12f, 0.22f)
+                calibrated = true
+            }
+        }
+        val closed = earAvg < earClosedThresh
 
         // Coarse head yaw proxy: nose tip (1) offset between cheek points (234, 454).
         val noseX = p(1).x()
         val faceL = p(234).x(); val faceR = p(454).x()
         val yawNorm = ((noseX - faceL) / (faceR - faceL) - 0.5f) * 2f  // -1..1
-        val yawDeg = yawNorm * 60f                                     // rough mapping
+        val yawRaw = yawNorm * 60f
+        if (!closed) {
+            yawNeutralSamples.addLast(yawRaw)
+            if (yawNeutralSamples.size > 300) yawNeutralSamples.removeFirst()
+            if (yawNeutralSamples.size >= 60) {
+                val sorted = yawNeutralSamples.sorted()
+                yawNeutral = sorted[sorted.size / 2]
+            }
+        }
+        val yawDeg = yawRaw - yawNeutral
 
         val events = mutableListOf<RiskEventCandidate>()
 
@@ -130,6 +156,11 @@ class DriverAnalyzer(context: Context) {
     }
 
     private fun resetTransient() { eyesClosedSinceMs = 0L; yawOffSinceMs = 0L }
+
+    fun resetCalibration() {
+        earOpenSamples.clear(); yawNeutralSamples.clear()
+        earClosedThresh = EAR_CLOSED; yawNeutral = 0f; calibrated = false
+    }
 
     fun close() = landmarker.close()
 

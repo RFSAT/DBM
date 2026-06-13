@@ -17,7 +17,9 @@ import com.rfsat.dms.alert.Alerter
 import com.rfsat.dms.data.EvidenceStore
 import com.rfsat.dms.data.OverlayVideoRecorder
 import com.rfsat.dms.detect.ComplianceScorer
+import com.rfsat.dms.detect.CrossChecker
 import com.rfsat.dms.detect.FollowingDistanceMonitor
+import com.rfsat.dms.location.YawRateMonitor
 import com.rfsat.dms.detect.DriverAnalyzer
 import com.rfsat.dms.detect.LaneAnalyzer
 import com.rfsat.dms.detect.RoadAnalyzer
@@ -64,6 +66,11 @@ class MonitorService : Service() {
     lateinit var speed: SpeedMonitor; private set
     val scorer = ComplianceScorer()
     val following = FollowingDistanceMonitor()
+    val crossChecker = CrossChecker()
+    private lateinit var yawRate: YawRateMonitor
+    private var prevLeadWNorm = 0f
+    private var prevLeadTms = 0L
+    @Volatile private var lastLeadGrowth = 0f
     private var recDriver: OverlayVideoRecorder? = null
     private var recRoad: OverlayVideoRecorder? = null
     @Volatile private var recordVideo = false
@@ -139,6 +146,7 @@ class MonitorService : Service() {
                 .forEach { applyElement(it, p.getBoolean(it, true)) }
         }
         speed = SpeedMonitor(this)
+        yawRate = YawRateMonitor(this)
         DLog.i(TAG, "onCreate complete (driver=${driver != null}, road=${road != null})")
 
         // 1 Hz speed-compliance loop: GPS preferred, visual estimate as fallback
@@ -151,16 +159,20 @@ class MonitorService : Service() {
                     visualSpeedKmh != null -> visualSpeedKmh!! to SpeedSource.VISUAL
                     else -> 0 to SpeedSource.NONE
                 }
-                scorer.onSpeed(v, src, t)?.let { ev ->
-                    alerter.alert(ev); scorer.onEvent(ev, t)
-                    evidence.record(CameraRole.FRONT, ev, latestRoadFrame, t)
+                scorer.onSpeed(v, src, t)?.let { raw ->
+                    crossChecker.gpsSpeed = if (speed.healthy) speed.speedKmh.value else null
+                    crossChecker.visualSpeed = visualSpeedKmh
+                    crossChecker.adjudicate(raw, CrossChecker.Ctx())?.let { ev ->
+                        alerter.alert(ev); scorer.onEvent(ev, t)
+                        evidence.record(CameraRole.FRONT, ev, latestRoadFrame, t)
+                    }
                 }
             }
         }
     }
 
     /** Call from the Activity once runtime permissions are granted. */
-    fun onPermissionsGranted() = speed.start()
+    fun onPermissionsGranted() { speed.start(); yawRate.start() }
 
     fun setAudioAlerts(on: Boolean) { alerter.audioEnabled = on }
     fun setTtsAlerts(on: Boolean) { alerter.ttsEnabled = on }
@@ -172,6 +184,12 @@ class MonitorService : Service() {
         getSharedPreferences("dbm", MODE_PRIVATE).edit().putInt("weight_${type.name}", w).apply()
         scorer.setWeight(type, w)
     }
+    fun resetCalibration() {
+        driver?.resetCalibration()
+        following.focalFactor = FollowingDistanceMonitor.FOCAL_FACTOR
+        DLog.i(TAG, "calibration reset")
+    }
+
     fun setVideoRecording(on: Boolean) {
         getSharedPreferences("dbm", MODE_PRIVATE).edit().putBoolean("record_video", on).apply()
         recordVideo = on
@@ -201,7 +219,16 @@ class MonitorService : Service() {
                     ?.encode(frame, result, tMs)
             }
             result.speedLimitSeen?.let { scorer.onSpeedLimitSeen(it) }
-            result.events.forEach { ev ->
+            // Cross-detector consensus: corroborate or suppress using
+            // independent signals before an event fires.
+            crossChecker.gpsSpeed = if (speed.healthy) speed.speedKmh.value else null
+            crossChecker.visualSpeed = visualSpeedKmh
+            crossChecker.yawRateDps = yawRate.yawRateDps
+            val ctx = CrossChecker.Ctx(
+                leadAreaGrowthPerSec = lastLeadGrowth,
+                trackAgeFrames = CrossChecker.MIN_TRACK_AGE) // road objects already tracked
+            result.events.forEach { raw ->
+                val ev = crossChecker.adjudicate(raw, ctx) ?: return@forEach
                 alerter.alert(ev)
                 scorer.onEvent(ev, tMs)
                 evidence.record(role, ev, frame, tMs)
@@ -228,6 +255,20 @@ class MonitorService : Service() {
         var followEvents = emptyList<RiskEventCandidate>()
         if (detectFollowingDistance && obj != null) {
             val spd = if (speed.healthy) speed.speedKmh.value else (visualSpeedKmh ?: 0)
+            // focal self-calibration from successive lead-vehicle widths
+            val lead = obj.detections
+                .filter { it.labelText in FollowingDistanceMonitor.VEHICLES &&
+                          (it.left + it.right) / 2f in 0.35f..0.65f }
+                .maxByOrNull { it.right - it.left }
+            val wNorm = lead?.let { it.right - it.left } ?: 0f
+            if (wNorm > 0.02f && prevLeadWNorm > 0.02f && prevLeadTms > 0) {
+                val dt = (tMs - prevLeadTms) / 1000f
+                following.calibrateFocal(prevLeadWNorm, wNorm, dt, spd)
+                if (dt > 0.05f && prevLeadWNorm > 0f)
+                    lastLeadGrowth = (wNorm * wNorm - prevLeadWNorm * prevLeadWNorm) /
+                        (prevLeadWNorm * prevLeadWNorm) / dt
+            }
+            prevLeadWNorm = wNorm; prevLeadTms = tMs
             val (ev, _) = following.check(obj.detections, spd, tMs)
             ev?.let { followEvents = listOf(it) }
         }
@@ -269,7 +310,7 @@ class MonitorService : Service() {
 
     override fun onDestroy() {
         scope.cancel()
-        speed.stop()
+        speed.stop(); yawRate.stop()
         recDriver?.stop(); recRoad?.stop()
         driver?.close(); road?.close(); alerter.release()
         DLog.i(TAG, "onDestroy")

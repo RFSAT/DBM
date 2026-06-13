@@ -5,6 +5,40 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v10.0 — cross-detector consensus / co-training (new feature -> major increment)
+- New CrossChecker fuses INDEPENDENT detector signals to corroborate or
+  suppress each event before it fires, cutting false positives:
+  * SPEEDING: GPS speed and visual-flow speed must agree for a full-confidence
+    alert; disagreement demotes it to a cautious warning
+  * UNSAFE_FOLLOWING_DISTANCE: a close gap is only corroborated when the lead
+    vehicle is also closing (box-area growth); a close but steady gap (matched
+    cruising speed) is demoted/dropped — removes the commonest false positive
+  * lane crossings: corroborated against gyroscope yaw-rate — a crossing with
+    no real heading change is treated as paint/shadow noise and dropped
+    (double-solid kept regardless, as the higher-severity case)
+  * collisions / vulnerable road users: gated by tracker persistence to reject
+    single-frame spurious detections
+- New YawRateMonitor: phone gyroscope with auto-detected yaw axis provides the
+  independent heading-change signal for lane corroboration
+- These independent pairings also lay the groundwork for consistency-based
+  labels (one confident detector teaching another) in a future release
+
+## v9.0 — in-practice self-calibration + typed lane overlay (new feature -> major increment)
+- Parameter-level self-learning (safe adaptation against trusted references,
+  no model retraining, all bounded and reversible):
+  * per-driver eye-closure threshold learned from the personal open-eye EAR
+    baseline (closure = 55 % of personal median, clamped 0.12–0.22)
+  * straight-ahead head-pose neutral learned per mount, so "not looking
+    ahead" is judged relative to the actual mounting angle
+  * following-distance focal factor refined at runtime from successive
+    lead-vehicle widths against own speed (bounded 0.4–1.6)
+  * (existing) visual speed scale auto-calibrated against GPS
+- Settings: new Self-calibration section explaining the adaptation, with a
+  "Reset calibration" button
+- Lane overlay now reflects the detected line TYPE and is drawn thicker:
+  dashed lines rendered dashed (lime), single solid as one thick line
+  (amber), double solid as two parallel thick lines (red)
+
 ## v8.1 — log-save API compatibility (correction -> minor increment)
 - Fixed lint NewApi error: MediaStore.Downloads requires API 29; log saving
   now branches — public Downloads via MediaStore on API 29+, and the app's
