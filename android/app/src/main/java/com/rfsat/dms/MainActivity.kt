@@ -61,7 +61,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.ui.graphics.drawscope.drawText
+import androidx.compose.ui.text.drawText
 import com.rfsat.dms.DetClass
 import com.rfsat.dms.capture.PhoneCameraManager
 import com.rfsat.dms.data.DmsDatabase

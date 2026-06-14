@@ -5,6 +5,13 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v14.2 — build fix (correction -> minor increment)
+- FIX compile error: drawText was imported from the wrong package
+  (androidx.compose.ui.graphics.drawscope) — the DrawScope.drawText extension
+  taking a TextLayoutResult lives in androidx.compose.ui.text. Corrected the
+  import; the detection-box label chips in the camera overlay now compile.
+  First green-after-red fix from the CI build log
+
 ## v14.1 — sign recognition made functional + CI hardening (correction -> minor increment)
 - FIX road-sign recognition coverage: the GTSRB classifier was only fed YOLO
   "stop sign" boxes, so most sign types (speed-limit, warning, prohibition)
