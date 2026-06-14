@@ -6,8 +6,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
         with: { distribution: temurin, java-version: '17' }
       - name: Fetch non-committed model assets
         run: |
@@ -23,8 +23,8 @@ jobs:
         run: |
           gradle wrapper --gradle-version 8.10.2
           ./gradlew lint assembleDebug
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with: { name: DBM-apk, path: android/app/build/outputs/apk/debug/*.apk }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: always()
         with: { name: lint-report, path: android/app/build/reports/lint-results-*.html }

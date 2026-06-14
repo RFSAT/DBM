@@ -5,6 +5,39 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v14.5 — diagnostic logging of unrecognised signs (correction -> minor increment)
+- The sign region proposer now records each candidate's dominant border colour
+  (red/blue/yellow). When a sign-shaped region cannot be confidently classified
+  by GTSRB, its colour and the best low-confidence guess are logged (rate-
+  limited) to the diagnostic log. This is to measure how often EU signs absent
+  from GTSRB — notably the no-turn prohibition signs (no left/right/U-turn) —
+  appear during real driving, to inform whether a Mapillary-trained model is
+  warranted. SignClassifier.inspect() returns the best class regardless of the
+  confidence threshold for this purpose
+- No behavioural change to recognition or events; logging only
+
+## v14.4 — illegal-turn detection (new feature -> would be major, grouped as minor with docs)
+- NEW ILLEGAL_TURN now active: TurnMonitor integrates gyroscope yaw-rate to
+  detect a completed turn (heading change > 55 deg) and raises a warning when
+  it occurs within 12 s of a sign that prohibits it — no-entry/no-vehicles
+  (any turn into the restricted way) or ahead-only (any turn). Model-free,
+  rate-limited, assistance-grade confidence; corroborated by the independent
+  yaw signal. RecognisedSign now carries the GTSRB class id to drive this
+- Documentation regenerated to reflect the full v14.x feature set
+
+## v14.3 — road-sign recognition finalized + CI actions updated (correction -> minor increment)
+- FIX sign category mapping: 15 of 43 GTSRB classes were mis-categorised
+  (priority/yield/stop and the mandatory blue signs and derestrictions all
+  defaulted to "Information"). Verified the full taxonomy and corrected to the
+  proper two-way split — 28 Regulatory, 15 Warning (GTSRB has no information
+  class). Colour-coding in the pictogram strip is now correct (e.g. Stop shows
+  as regulatory, not info)
+- Recognised signs are now logged (deduplicated) to the diagnostic log so they
+  are traceable; speed-limit signs continue to set the active limit
+- CI: bumped actions/checkout, setup-java and upload-artifact to v5 for
+  Node.js 24 compatibility (clears the runner deprecation warning); no app
+  code affected
+
 ## v14.2 — build fix (correction -> minor increment)
 - FIX compile error: drawText was imported from the wrong package
   (androidx.compose.ui.graphics.drawscope) — the DrawScope.drawText extension

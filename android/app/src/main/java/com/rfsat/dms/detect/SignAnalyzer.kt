@@ -38,6 +38,7 @@ class SignAnalyzer(context: android.content.Context? = null) {
         val detections: List<Detection>,
         val speedLimitSeen: Int?,
         val signs: List<com.rfsat.dms.RecognisedSign>,
+        val unrecognised: List<String> = emptyList(),
     )
 
     /**
@@ -52,6 +53,7 @@ class SignAnalyzer(context: android.content.Context? = null) {
     ): SignOutput {
         val dets = mutableListOf<Detection>()
         val signs = mutableListOf<com.rfsat.dms.RecognisedSign>()
+        val unrecognised = mutableListOf<String>()
         var adopted: Int? = null
 
         // Stage 1: propose sign regions. Use upstream candidates (e.g. YOLO
@@ -76,12 +78,25 @@ class SignAnalyzer(context: android.content.Context? = null) {
                     Bitmap.createBitmap(frame, l, t, r - l, b - t)
                 }.getOrNull() ?: continue
                 val res = clf.classify(crop)
-                crop.recycle()
                 if (res != null) {
+                    crop.recycle()
                     signs += com.rfsat.dms.RecognisedSign(
-                        res.name, SignClassifier.category(res.classId), res.score)
+                        res.name, SignClassifier.category(res.classId), res.score,
+                        res.classId)
                     dets += cand.copy(labelText = res.name, risky = false)
                     res.speedLimitKmh?.let { if (candidate == it) adopted = it else candidate = it }
+                } else {
+                    // Diagnostic: a sign-shaped region the model could not
+                    // confidently recognise. Log its border colour and the best
+                    // (low-confidence) guess so we can gauge how often EU signs
+                    // absent from GTSRB — e.g. no-turn prohibitions — appear.
+                    if (cand.labelText.startsWith("sign?:")) {
+                        val colour = cand.labelText.substringAfter(":")
+                        val guess = clf.inspect(crop)
+                        unrecognised += "$colour border, best guess '${guess.name}'" +
+                            " ${(guess.score * 100).toInt()}%"
+                    }
+                    crop.recycle()
                 }
             }
         }
@@ -107,7 +122,7 @@ class SignAnalyzer(context: android.content.Context? = null) {
             }
         }
         if (dets.isEmpty()) candidate = null
-        return SignOutput(dets, adopted, signs)
+        return SignOutput(dets, adopted, signs, unrecognised)
     }
 
     /**
@@ -127,6 +142,9 @@ class SignAnalyzer(context: android.content.Context? = null) {
         val px = IntArray(w * roiH)
         frame.getPixels(px, 0, w, 0, 0, w, roiH)
         val score = Array(gy) { IntArray(gx) }
+        val redC = Array(gy) { IntArray(gx) }
+        val blueC = Array(gy) { IntArray(gx) }
+        val yellowC = Array(gy) { IntArray(gx) }
         var i = 0
         while (i < px.size) {
             val c = px[i]
@@ -140,7 +158,12 @@ class SignAnalyzer(context: android.content.Context? = null) {
                 if (isRed || isBlue || isYellow) {
                     val x = (i % w); val y = (i / w)
                     val cx = x / cellW; val cy = y / cellH
-                    if (cx in 0 until gx && cy in 0 until gy) score[cy][cx]++
+                    if (cx in 0 until gx && cy in 0 until gy) {
+                        score[cy][cx]++
+                        if (isRed) redC[cy][cx]++
+                        else if (isBlue) blueC[cy][cx]++
+                        else yellowC[cy][cx]++
+                    }
                 }
             }
             i += 3                                    // subsample
@@ -160,7 +183,10 @@ class SignAnalyzer(context: android.content.Context? = null) {
             if (!used.add(key)) continue
             val pxc = (cx + 0.5f) * cellW; val pyc = (cy + 0.5f) * cellH
             val half = maxOf(cellW, cellH) * 1.6f
-            out += Detection("sign?", 0.5f,
+            val colour = when (maxOf(redC[cy][cx], blueC[cy][cx], yellowC[cy][cx])) {
+                redC[cy][cx] -> "red"; blueC[cy][cx] -> "blue"; else -> "yellow"
+            }
+            out += Detection("sign?:$colour", 0.5f,
                 ((pxc - half) / w).coerceIn(0f, 1f), ((pyc - half) / h).coerceIn(0f, 1f),
                 ((pxc + half) / w).coerceIn(0f, 1f), ((pyc + half) / h).coerceIn(0f, 1f))
         }

@@ -52,6 +52,29 @@ class SignClassifier(context: Context, assetName: String = "gtsrb_sign.tflite") 
         return SignResult(best, NAMES[best], bestS, SPEED_LIMITS[best])
     }
 
+    /**
+     * Diagnostic-only: classify a crop and return the best class and score
+     * regardless of the confidence threshold. Used to log sign-shaped regions
+     * the model could not confidently recognise (e.g. EU no-turn prohibitions
+     * absent from GTSRB), to gauge how often they appear in real driving.
+     */
+    fun inspect(crop: Bitmap): SignResult {
+        val scaled = Bitmap.createScaledBitmap(crop, size, size, true)
+        val px = IntArray(size * size)
+        scaled.getPixels(px, 0, size, 0, 0, size, size)
+        inBuf.rewind()
+        for (p in px) {
+            inBuf.putFloat((p shr 16 and 0xFF) / 255f)
+            inBuf.putFloat((p shr 8 and 0xFF) / 255f)
+            inBuf.putFloat((p and 0xFF) / 255f)
+        }
+        if (scaled != crop) scaled.recycle()
+        interpreter.run(inBuf, out)
+        var best = 0; var bestS = out[0][0]
+        for (i in 1 until numClasses) if (out[0][i] > bestS) { bestS = out[0][i]; best = i }
+        return SignResult(best, NAMES[best], bestS, SPEED_LIMITS[best])
+    }
+
     fun close() = interpreter.close()
 
     private fun loadAsset(context: Context, name: String): ByteBuffer {
@@ -86,10 +109,14 @@ class SignClassifier(context: Context, assetName: String = "gtsrb_sign.tflite") 
             null, null, null, null, null, null, null, null)
 
         // Categories for display grouping.
+        // Category per GTSRB class id, verified against the standard taxonomy.
+        // Regulatory (red/blue mandatory & prohibitory) vs Warning (triangular).
+        // Only class 11 (priority at next intersection) is a warning among the
+        // low ids; 12-17 and 32-42 are regulatory.
+        private val WARNING_IDS = (18..31).toSet() + 11
         fun category(id: Int): String = when (id) {
-            in 0..8, 9, 10, 15, 16, 17 -> "Regulatory"
-            in 18..31 -> "Warning"
-            else -> "Information"
+            in WARNING_IDS -> "Warning"
+            else -> "Regulatory"   // all remaining GTSRB classes are regulatory
         }
     }
 }

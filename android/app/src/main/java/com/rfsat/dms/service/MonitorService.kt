@@ -59,6 +59,7 @@ class MonitorService : Service() {
     private lateinit var lanes: LaneAnalyzer
     private lateinit var signs: SignAnalyzer
     private val lights = TrafficLightAnalyzer(this)
+    private val turns = TurnMonitor()
     private val visualSpeed = VisualSpeedEstimator()
     @Volatile private var visualSpeedKmh: Int? = null
     /** Copy of the most recent road frame, attached to speed violations. */
@@ -108,6 +109,8 @@ class MonitorService : Service() {
     }
 
     val recognisedSigns = MutableStateFlow<List<com.rfsat.dms.RecognisedSign>>(emptyList())
+    private var lastLoggedSign: String? = null
+    private var lastUnrecognisedLogMs = 0L
 
     val results = mapOf(
         CameraRole.DRIVER to MutableStateFlow(AnalysisResult()),
@@ -233,8 +236,19 @@ class MonitorService : Service() {
             }.onFailure { DLog.e(TAG, "analysis failed for $role", it) }
              .getOrDefault(AnalysisResult())
             results[role]!!.value = result
-            if (role != CameraRole.DRIVER && result.signs.isNotEmpty())
+            if (role != CameraRole.DRIVER && result.signs.isNotEmpty()) {
                 recognisedSigns.value = result.signs
+                // Log each newly-seen sign once (dedup within a short window) so
+                // recognised signs are traceable in the diagnostic log.
+                result.signs.forEach { sg ->
+                    turns.onSign(sg.classId, tMs)
+                    if (sg.name != lastLoggedSign) {
+                        lastLoggedSign = sg.name
+                        DLog.i(TAG, "sign recognised: ${sg.name} (${sg.category}, " +
+                            "${(sg.score * 100).toInt()}%)")
+                    }
+                }
+            }
             if (recordVideo) {
                 (if (role == CameraRole.DRIVER) recDriver else recRoad)
                     ?.encode(frame, result, tMs)
@@ -245,10 +259,17 @@ class MonitorService : Service() {
             crossChecker.gpsSpeed = if (speed.healthy) speed.speedKmh.value else null
             crossChecker.visualSpeed = visualSpeedKmh
             crossChecker.yawRateDps = yawRate.yawRateDps
+            // Illegal-turn detection: integrate yaw, fire if a prohibited turn
+            // completes shortly after a relevant sign. Road frames only (signs
+            // and the road context live there).
+            val turnEvent = if (role != CameraRole.DRIVER)
+                turns.update(yawRate.yawRateDps,
+                    if (speed.healthy) speed.speedKmh.value else (visualSpeedKmh ?: 0), tMs)
+            else null
             val ctx = CrossChecker.Ctx(
                 leadAreaGrowthPerSec = lastLeadGrowth,
                 trackAgeFrames = CrossChecker.MIN_TRACK_AGE) // road objects already tracked
-            result.events.forEach { raw ->
+            (result.events + listOfNotNull(turnEvent)).forEach { raw ->
                 if (raw.type == com.rfsat.dms.RiskType.YAWNING)
                     crossChecker.recentYawnMs = tMs
                 val ev = crossChecker.adjudicate(raw, ctx) ?: return@forEach
@@ -334,6 +355,15 @@ class MonitorService : Service() {
             val out = signs.analyze(frame, cand)
             signDets = out.detections; limit = out.speedLimitSeen
             recognisedSigns = out.signs
+            // Diagnostic logging of sign-shaped regions GTSRB could not
+            // recognise (e.g. EU no-turn signs), rate-limited.
+            if (out.unrecognised.isNotEmpty() &&
+                tMs - lastUnrecognisedLogMs > 4000) {
+                lastUnrecognisedLogMs = tMs
+                out.unrecognised.take(2).forEach {
+                    DLog.i(TAG, "unrecognised sign region: $it")
+                }
+            }
         }
 
         return AnalysisResult(

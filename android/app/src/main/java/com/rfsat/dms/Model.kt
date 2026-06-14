@@ -38,7 +38,7 @@ enum class RiskType(
     SOLID_LINE_CROSSING("Crossing a solid lane line", 10),
     DOUBLE_LINE_CROSSING("Crossing a double solid line", 15),
     HARD_SHOULDER_DRIVING("Driving on the hard shoulder", 12),
-    ILLEGAL_TURN("Possible illegal turn manoeuvre", 12, implemented = false),
+    ILLEGAL_TURN("Possible illegal turn manoeuvre", 12),
     LANE_DRIFT("Drifting out of lane without indicating", 5),
     // System
     NODE_OFFLINE("Camera offline", 0, implemented = false),
@@ -93,6 +93,7 @@ data class RecognisedSign(
     val name: String,
     val category: String,   // Regulatory / Warning / Information
     val score: Float,
+    val classId: Int = -1,
 )
 
 data class RiskEventCandidate(
