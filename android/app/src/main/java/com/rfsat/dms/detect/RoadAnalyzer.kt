@@ -28,27 +28,44 @@ import org.tensorflow.lite.task.vision.detector.ObjectDetector
  */
 class RoadAnalyzer(context: Context, private val role: CameraRole) {
 
-    private val detector: ObjectDetector = ObjectDetector.createFromFileAndOptions(
-        context, "efficientdet_lite0.tflite",
-        ObjectDetector.ObjectDetectorOptions.builder()
-            .setBaseOptions(BaseOptions.builder().setNumThreads(2).build())
-            .setScoreThreshold(0.45f)
-            .setMaxResults(8)
-            .build()
-    )
+    // Object detector — two supported paths:
+    //  * YOLO26-nano (yolo26n.tflite): raw [1,84,8400] output, decoded by
+    //    YoloDetector (the TFLite Task API cannot parse this format).
+    //  * EfficientDet-Lite0 (fallback): standard Task ObjectDetector.
+    // The YOLO path is used whenever the asset is present.
+    private val hasYolo =
+        runCatching { context.assets.open("yolo26n.tflite").close() }.isSuccess
+    private val yolo: YoloDetector? = if (hasYolo)
+        runCatching { YoloDetector(context) }.getOrNull() else null
+    private val detector: ObjectDetector? = if (yolo == null) {
+        fun build(useNnapi: Boolean) = ObjectDetector.createFromFileAndOptions(
+            context, "efficientdet_lite0.tflite",
+            ObjectDetector.ObjectDetectorOptions.builder()
+                .setBaseOptions(
+                    BaseOptions.builder().setNumThreads(2)
+                        .apply { if (useNnapi) useNnapi() }.build())
+                .setScoreThreshold(0.40f)
+                .setMaxResults(10)
+                .build())
+        runCatching { build(true) }.getOrElse { build(false) }
+    } else null
 
-    private val tracker = IouTracker()
+    private val tracker = ByteTrackTracker()
 
     fun analyze(frame: Bitmap, tMs: Long): AnalysisResult {
         val w = frame.width.toFloat(); val h = frame.height.toFloat()
-        val raw = detector.detect(TensorImage.fromBitmap(frame))
-            .mapNotNull { d ->
-                val c = d.categories.firstOrNull() ?: return@mapNotNull null
-                if (c.label !in RELEVANT) return@mapNotNull null
-                Detection(c.label, c.score,
-                    d.boundingBox.left / w, d.boundingBox.top / h,
-                    d.boundingBox.right / w, d.boundingBox.bottom / h)
-            }
+        val raw = if (yolo != null) {
+            yolo.detect(frame).filter { it.labelText in RELEVANT }
+        } else {
+            detector!!.detect(TensorImage.fromBitmap(frame))
+                .mapNotNull { d ->
+                    val c = d.categories.firstOrNull() ?: return@mapNotNull null
+                    if (c.label !in RELEVANT) return@mapNotNull null
+                    Detection(c.label, c.score,
+                        d.boundingBox.left / w, d.boundingBox.top / h,
+                        d.boundingBox.right / w, d.boundingBox.bottom / h)
+                }
+        }
 
         val tracks = tracker.update(raw, tMs)
         val events = mutableListOf<RiskEventCandidate>()
@@ -56,16 +73,17 @@ class RoadAnalyzer(context: Context, private val role: CameraRole) {
             val growth = tr.areaGrowthPerSec()
             val centred = (tr.last.left + tr.last.right) / 2f in 0.3f..0.7f
             val low = tr.last.bottom > 0.5f   // lower half = close
+            val confirmed = tr.ageFrames >= 3   // persistence: reject one-frame boxes
             var risky = false
 
-            if (growth > GROWTH_CRITICAL && centred && low) {
+            if (confirmed && growth > GROWTH_CRITICAL && centred && low) {
                 risky = true
                 events += RiskEventCandidate(
                     if (role == CameraRole.REAR) RiskType.REAR_COLLISION_RISK
                     else RiskType.FRONT_COLLISION_RISK,
                     Severity.CRITICAL, tr.last.score,
                     "${tr.last.labelText} approaching, growth %.1f/s".format(growth))
-            } else if (growth > GROWTH_WARN && centred) {
+            } else if (confirmed && growth > GROWTH_WARN && centred) {
                 risky = true
                 events += RiskEventCandidate(
                     if (role == CameraRole.REAR) RiskType.REAR_COLLISION_RISK
@@ -74,7 +92,7 @@ class RoadAnalyzer(context: Context, private val role: CameraRole) {
                     "${tr.last.labelText} closing, growth %.1f/s".format(growth))
             }
 
-            if (role == CameraRole.FRONT && tr.last.labelText in VULNERABLE &&
+            if (confirmed && role == CameraRole.FRONT && tr.last.labelText in VULNERABLE &&
                 centred && tr.last.bottom > 0.6f) {
                 risky = true
                 events += RiskEventCandidate(
@@ -86,7 +104,7 @@ class RoadAnalyzer(context: Context, private val role: CameraRole) {
         return AnalysisResult(detections = out, events = events)
     }
 
-    fun close() = detector.close()
+    fun close() { detector?.close(); yolo?.close() }
 
     companion object {
         val RELEVANT = setOf("car", "truck", "bus", "motorcycle", "bicycle", "person")

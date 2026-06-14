@@ -37,16 +37,22 @@ internal fun fmtSecs(ms: Long): String = "%.1f s".format(ms / 1000f)
  */
 class DriverAnalyzer(context: Context) {
 
-    private val landmarker: FaceLandmarker = FaceLandmarker.createFromOptions(
-        context,
-        FaceLandmarker.FaceLandmarkerOptions.builder()
-            .setBaseOptions(
-                BaseOptions.builder().setModelAssetPath("face_landmarker.task").build()
-            )
-            .setRunningMode(RunningMode.VIDEO)
-            .setNumFaces(1)
-            .build()
-    )
+    private val landmarker: FaceLandmarker = run {
+        fun build(gpu: Boolean) = FaceLandmarker.createFromOptions(
+            context,
+            FaceLandmarker.FaceLandmarkerOptions.builder()
+                .setBaseOptions(
+                    BaseOptions.builder()
+                        .setModelAssetPath("face_landmarker.task")
+                        .apply { if (gpu) setDelegate(
+                            com.google.mediapipe.tasks.core.Delegate.GPU) }
+                        .build())
+                .setRunningMode(RunningMode.VIDEO)
+                .setNumFaces(1)
+                .build())
+        // GPU delegate with automatic CPU fall-back (performance recommendation).
+        runCatching { build(true) }.getOrElse { build(false) }
+    }
 
     // --- self-calibration (parameter-level adaptation against the driver) ---
     private val earOpenSamples = ArrayDeque<Float>()
@@ -59,6 +65,8 @@ class DriverAnalyzer(context: Context) {
     private var eyesClosedSinceMs = 0L
     private var yawOffSinceMs = 0L
     private var lastMirrorCheckMs = System.currentTimeMillis()
+    private var yawnSinceMs = 0L
+    private var lastYawnEventMs = 0L
     private val perclosWindow = ArrayDeque<Pair<Long, Boolean>>() // (t, closed)
 
     fun analyze(frame: Bitmap, tMs: Long): AnalysisResult {
@@ -129,6 +137,20 @@ class DriverAnalyzer(context: Context) {
                 RiskType.MICROSLEEP, Severity.WARNING, perclos, "PERCLOS=%.2f".format(perclos))
         }
 
+        // -- yawning (mouth aspect ratio) as a corroborating drowsiness cue --
+        // MAR from inner-lip landmarks (13 upper, 14 lower) over mouth width (61-291).
+        val marV = hypot((p(13).x() - p(14).x()), (p(13).y() - p(14).y()))
+        val marH = hypot((p(61).x() - p(291).x()), (p(61).y() - p(291).y()))
+        val mar = if (marH > 0f) marV / marH else 0f
+        if (mar > MAR_YAWN) {
+            if (yawnSinceMs == 0L) yawnSinceMs = tMs
+            if (tMs - yawnSinceMs > YAWN_MIN_MS && tMs - lastYawnEventMs > 20_000) {
+                lastYawnEventMs = tMs
+                events += RiskEventCandidate(RiskType.YAWNING, Severity.WARNING, 0.7f,
+                    "sustained yawn")
+            }
+        } else yawnSinceMs = 0L
+
         // -- gaze off road --
         if (abs(yawDeg) > YAW_OFF_ROAD_DEG && !closed) {
             if (yawOffSinceMs == 0L) yawOffSinceMs = tMs
@@ -172,5 +194,7 @@ class DriverAnalyzer(context: Context) {
         const val YAW_MIRROR_MIN_DEG = 15f
         const val YAW_MIRROR_MAX_DEG = 45f
         const val MIRROR_INTERVAL_MS = 120_000L
+        const val MAR_YAWN = 0.6f
+        const val YAWN_MIN_MS = 1500L
     }
 }

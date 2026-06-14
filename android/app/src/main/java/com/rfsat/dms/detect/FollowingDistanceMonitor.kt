@@ -71,7 +71,14 @@ class FollowingDistanceMonitor {
 
         val wNorm = lead.right - lead.left
         if (wNorm < 0.02f) { tooCloseSinceMs = 0; return null to null }
-        val distM = focalFactor * VEHICLE_WIDTH_M / wNorm
+        // Class-specific physical width sharpens the monocular distance
+        // (algorithm-review recommendation) versus a single average width.
+        val widthM = when (lead.labelText.lowercase()) {
+            "truck", "bus" -> 2.5f
+            "motorcycle", "motorbike" -> 0.8f
+            else -> VEHICLE_WIDTH_M
+        }
+        val distM = focalFactor * widthM / wNorm
 
         val v = speedKmh / 3.6f
         val stopM = (v * REACTION_S + v * v / (2f * DECEL_MS2)) * factor

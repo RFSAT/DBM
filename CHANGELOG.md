@@ -5,6 +5,108 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v14.1 — sign recognition made functional + CI hardening (correction -> minor increment)
+- FIX road-sign recognition coverage: the GTSRB classifier was only fed YOLO
+  "stop sign" boxes, so most sign types (speed-limit, warning, prohibition)
+  were never classified. SignAnalyzer now includes a colour/shape region
+  proposer (red/blue/yellow sign borders in the upper frame) that supplies
+  candidates independent of YOLO, so all 43 GTSRB classes can be recognised;
+  classifier confidence rejects non-sign crops
+- CI: no longer overwrites the committed, validated yolo26n.tflite with the
+  int8 export (whose raw format the decoder cannot parse); only the
+  non-committed face_landmarker.task and EfficientDet fallback are fetched.
+  .gitignore de-duplicated and updated to keep the three committed detection
+  models in the repo
+
+## v14.0 — learned traffic-light detector (new feature -> major increment)
+- NEW TrafficLightDetector: bundled YOLOv8-nano model (traffic_light.tflite,
+  classes red/green/off/yellow, validated) detects AND colour-classifies
+  traffic signals, replacing the colour-blob heuristic when present
+- Brake-light rejection: red detections enclosed by a vehicle box and low in
+  the frame are discarded, so car tail-lights no longer trigger false red-light
+  events — the main weakness of the previous heuristic
+- TrafficLightAnalyzer uses the learned detector when the asset is present and
+  falls back to the colour heuristic otherwise; the red/amber crossing state
+  machine (serious/warning) is unchanged. Vehicle boxes from the object
+  detector are passed in for the brake-light check
+- nano model chosen over small (6 MB vs 22 MB float16) — both validated with
+  identical detections; nano is the right fit alongside YOLO26 + GTSRB
+
+## v13.0 — traffic-sign recognition + road pipeline reconciliation (new feature -> major increment)
+- NEW two-stage traffic-sign recognition: a bundled GTSRB 43-class classifier
+  (gtsrb_sign.tflite, MobileNet, validated) identifies regulatory, warning and
+  information signs from candidate regions; speed-limit classes set the active
+  limit, complementing the OCR path. Recognised signs shown as a colour-coded
+  pictogram strip above the cameras (red regulatory, amber warning, blue info)
+- IMPORTANT FIX: the road-analysis pipeline (analyzeRoad) was reconciled — the
+  per-element detection toggles (objects, lane markings, line-crossing,
+  hard-shoulder, following distance, signs) and the traffic-light detector
+  were declared but not actually applied in the analysis body due to earlier
+  patches that silently failed to match. analyzeRoad now correctly honours all
+  toggles and runs the traffic-light and two-stage sign stages
+
+## v12.2 — real YOLO26 decoder; model bundled (correction -> minor increment)
+- Inspected the supplied yolo26n_int8.tflite: float32 input [1,640,640,3],
+  single raw output [1,84,8400] (NMS-free), COCO labels. The TFLite Task API
+  cannot parse this, so v12.0/12.1's Task-based loading would not have worked
+- NEW YoloDetector: raw TFLite Interpreter with letterbox preprocessing,
+  YOLO box decode (normalized cx,cy,w,h), score thresholding, class selection
+  and Non-Maximum Suppression; NNAPI delegate with CPU fall-back
+- RoadAnalyzer uses YoloDetector when yolo26n.tflite is present, else the
+  EfficientDet-Lite0 Task detector; ByteTrack and all downstream logic
+  unchanged
+- The YOLO26-nano model is now bundled in assets; added the core
+  tensorflow-lite interpreter dependency
+
+## v12.1 — YOLO26 detector enabled via CI (correction -> minor increment)
+- CI now fetches the official Ultralytics YOLO26-nano int8 TFLite model
+  (yolo26n_int8.tflite -> yolo26n.tflite); RoadAnalyzer already prefers it
+  automatically, falling back to EfficientDet-Lite0 if the asset is absent
+- models/README documents the direct download URL and the export command
+
+## v12.0 — algorithm-review recommendations (new features + performance -> major increment)
+- Hardware-accelerated inference: object detector uses NNAPI and the face
+  landmarker uses the GPU delegate, each with automatic CPU fall-back — the
+  single largest performance gain, no accuracy change
+- ByteTrack-style tracker replaces the greedy IoU tracker: constant-velocity
+  prediction plus two-stage (high- then low-score) association for stable
+  identities, fewer identity switches and fewer one-frame spurious tracks;
+  collision and vulnerable-road-user events now require a confirmed track
+  (>= 3 frames) at the source
+- Yawning detection: mouth-aspect-ratio cue raises a fatigue warning and, via
+  the cross-checker, independently corroborates microsleep findings
+- Class-specific vehicle widths sharpen monocular following-distance (trucks/
+  buses 2.5 m, motorcycles 0.8 m, cars 1.8 m)
+- Adaptive analysis rate: road analysis drops to ~2 fps when the vehicle is
+  stationary and returns to ~6 fps when moving, reducing CPU and battery use
+- Activatable model upgrades: a fine-tuned YOLO26-nano object model is used
+  automatically when yolo26n.tflite is present; integration points and a
+  models/README document the eye-state CNN, two-stage sign recogniser,
+  learned traffic-light detector and row-anchor (UFLD) lane model, each
+  falling back to the existing method until its asset is supplied
+
+## v11.1 — labelled, colour-coded road-user marking (correction/enhancement -> minor increment)
+- The front (road) video now marks each detected road user with a distinct
+  colour and a text label: pedestrians (amber), cyclists/motorbikes (orange,
+  as vulnerable users), cars (blue), trucks/buses (purple), signs (cyan),
+  traffic signals (red); risky objects override to red. Labels are drawn as
+  chips above each box, in both the live overlay and the recorded video
+- Detection class grouping centralised in a DetClass type
+
+## v11.0 — traffic-light violations and violations summary (new features -> major increment)
+- NEW traffic-light crossing detection: passing under a RED signal while
+  moving is a serious (critical) violation; passing on AMBER is a warning.
+  Signal state from a saturated-colour blob detector in the upper road ROI;
+  a crossing requires the light to have been red/amber AND the vehicle still
+  moving as it passes beneath (a normal stop at red is not flagged). New
+  detection-element toggle; assistance-grade confidence, rate-limited
+- NEW Summary tab: violations over time with totals per category, overall
+  violation count, the period covered, and the live compliance score;
+  categories ordered by frequency and tagged Serious/Warning
+- NEW Reset all counters: clears all recorded violations and resets the
+  compliance score on demand (with confirmation); saved video recordings
+  are not affected
+
 ## v10.0 — cross-detector consensus / co-training (new feature -> major increment)
 - New CrossChecker fuses INDEPENDENT detector signals to corroborate or
   suppress each event before it fires, cutting false positives:

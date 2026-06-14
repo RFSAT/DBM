@@ -45,6 +45,9 @@ class PhoneCameraManager(
     companion object { private const val TAG = "PhoneCameras" }
 
     private val analysisExecutor = Executors.newFixedThreadPool(2)
+    /** When false (vehicle ~stationary), road analysis runs at a reduced rate
+     *  to save CPU/battery — a performance recommendation from the review. */
+    @Volatile var vehicleMoving = true
     private val handler = Handler(Looper.getMainLooper())
     private var provider: ProcessCameraProvider? = null
     private var mode = Mode.MULTIPLEXED
@@ -177,9 +180,15 @@ class PhoneCameraManager(
             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
             .build().also { ua ->
                 var lastT = 0L
-                val minIntervalMs = if (role == CameraRole.DRIVER) 100L else 160L // 10 / ~6 fps
                 ua.setAnalyzer(analysisExecutor) { img: ImageProxy ->
                     val now = System.currentTimeMillis()
+                    // Driver pipeline always full-rate; road pipeline drops to
+                    // ~2 fps when stationary, ~6 fps when moving.
+                    val minIntervalMs = when {
+                        role == CameraRole.DRIVER -> 100L
+                        vehicleMoving -> 160L
+                        else -> 500L
+                    }
                     if (now - lastT >= minIntervalMs) {
                         lastT = now
                         var bmp = img.toBitmap()

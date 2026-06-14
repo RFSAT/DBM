@@ -15,8 +15,8 @@ plugins {
 //   The version number appears in every produced package filename and in the
 //   in-app About screen (via BuildConfig.VERSION_NAME).
 // ---------------------------------------------------------------------------
-val dmsVersionMajor = 10
-val dmsVersionMinor = 0
+val dmsVersionMajor = 14
+val dmsVersionMinor = 1
 val dmsVersionName = "$dmsVersionMajor.$dmsVersionMinor"
 
 android {
@@ -94,6 +94,8 @@ dependencies {
 
     // Road object detection — TFLite
     implementation("org.tensorflow:tensorflow-lite-task-vision:0.4.4")
+    // Core interpreter + NNAPI delegate for the raw YOLO26 decode path
+    implementation("org.tensorflow:tensorflow-lite:2.16.1")
     implementation("org.tensorflow:tensorflow-lite-gpu:2.16.1")
 
     // Speed-limit sign reading — ML Kit on-device text recognition

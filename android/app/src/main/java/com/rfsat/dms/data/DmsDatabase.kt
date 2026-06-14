@@ -38,7 +38,21 @@ interface EventDao {
 
     @Query("DELETE FROM events WHERE timestampMs < :before")
     suspend fun prune(before: Long)
+
+    @Query("SELECT type, COUNT(*) AS n FROM events GROUP BY type ORDER BY n DESC")
+    fun countsByType(): kotlinx.coroutines.flow.Flow<List<TypeCount>>
+
+    @Query("SELECT COUNT(*) FROM events")
+    fun totalCount(): kotlinx.coroutines.flow.Flow<Int>
+
+    @Query("SELECT MIN(timestampMs) FROM events")
+    fun firstEventMs(): kotlinx.coroutines.flow.Flow<Long?>
+
+    @Query("DELETE FROM events")
+    suspend fun clearAll()
 }
+
+data class TypeCount(val type: String, val n: Int)
 
 @Database(entities = [EventEntity::class], version = 1, exportSchema = false)
 abstract class DmsDatabase : RoomDatabase() {

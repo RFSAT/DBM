@@ -22,6 +22,7 @@ enum class RiskType(
     MICROSLEEP("Eyes closed — possible microsleep", 15),
     EYES_OFF_ROAD("Driver not looking ahead", 8),
     NO_MIRROR_CHECK("No mirror check for extended period", 3),
+    YAWNING("Yawning — possible fatigue", 4),
     PHONE_USE("Mobile phone use detected", 12, implemented = false),
     HANDS_OFF_WHEEL("Hands off steering wheel", 10, implemented = false),
     NO_SEATBELT("Seatbelt not fastened", 10, implemented = false),
@@ -32,6 +33,8 @@ enum class RiskType(
     VULNERABLE_ROAD_USER("Pedestrian / cyclist / scooter in risk zone", 8),
     // Road-regulation compliance
     SPEEDING("Exceeding posted speed limit", 12),
+    RED_LIGHT_CROSSING("Crossing a red traffic light", 15),
+    AMBER_LIGHT_CROSSING("Crossing on amber traffic light", 6),
     SOLID_LINE_CROSSING("Crossing a solid lane line", 10),
     DOUBLE_LINE_CROSSING("Crossing a double solid line", 15),
     HARD_SHOULDER_DRIVING("Driving on the hard shoulder", 12),
@@ -43,13 +46,31 @@ enum class RiskType(
 
 enum class Severity { INFO, WARNING, CRITICAL }
 
+/** Road-user / object class groups for distinct overlay colouring + labels. */
+enum class DetClass(val display: String) {
+    CAR("Car"), TRUCK("Truck"), BUS("Bus"), MOTORCYCLE("Motorbike"),
+    BICYCLE("Cyclist"), PEDESTRIAN("Pedestrian"), SIGN("Sign"),
+    LIGHT("Signal"), OTHER("Object");
+    companion object {
+        fun of(label: String): DetClass = when (label.lowercase()) {
+            "car" -> CAR; "truck" -> TRUCK; "bus" -> BUS
+            "motorcycle", "motorbike" -> MOTORCYCLE
+            "bicycle" -> BICYCLE; "person", "pedestrian" -> PEDESTRIAN
+            "red", "amber", "green" -> LIGHT
+            else -> if (label.startsWith("limit")) SIGN else OTHER
+        }
+    }
+}
+
 /** Detection box in normalized [0,1] frame coords for overlay drawing. */
 data class Detection(
     val labelText: String,
     val score: Float,
     val left: Float, val top: Float, val right: Float, val bottom: Float,
     val risky: Boolean = false,
-)
+) {
+    val detClass: DetClass get() = DetClass.of(labelText)
+}
 
 /** A detected lane line for overlay: bottom/top x positions, normalized. */
 data class LaneLine(
@@ -63,6 +84,15 @@ data class AnalysisResult(
     val events: List<RiskEventCandidate> = emptyList(),
     /** Speed limit (km/h) read from a sign in this frame, if any. */
     val speedLimitSeen: Int? = null,
+    /** Recognised road signs in this frame (name + category) for display. */
+    val signs: List<RecognisedSign> = emptyList(),
+)
+
+/** A classified road sign for on-screen display. */
+data class RecognisedSign(
+    val name: String,
+    val category: String,   // Regulatory / Warning / Information
+    val score: Float,
 )
 
 data class RiskEventCandidate(

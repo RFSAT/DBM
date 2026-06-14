@@ -24,6 +24,7 @@ import com.rfsat.dms.detect.DriverAnalyzer
 import com.rfsat.dms.detect.LaneAnalyzer
 import com.rfsat.dms.detect.RoadAnalyzer
 import com.rfsat.dms.detect.SignAnalyzer
+import com.rfsat.dms.detect.TrafficLightAnalyzer
 import com.rfsat.dms.detect.VisualSpeedEstimator
 import com.rfsat.dms.SpeedSource
 import com.rfsat.dms.location.SpeedMonitor
@@ -57,6 +58,7 @@ class MonitorService : Service() {
     private var road: RoadAnalyzer? = null
     private lateinit var lanes: LaneAnalyzer
     private lateinit var signs: SignAnalyzer
+    private val lights = TrafficLightAnalyzer(this)
     private val visualSpeed = VisualSpeedEstimator()
     @Volatile private var visualSpeedKmh: Int? = null
     /** Copy of the most recent road frame, attached to speed violations. */
@@ -84,6 +86,7 @@ class MonitorService : Service() {
     @Volatile var detectHardShoulder = true; private set
     @Volatile var detectRoadObjects = true; private set
     @Volatile var detectFollowingDistance = true; private set
+    @Volatile var detectTrafficLights = true; private set
     @Volatile var detectDriverState = true; private set
 
     fun setElement(key: String, on: Boolean) {
@@ -99,9 +102,12 @@ class MonitorService : Service() {
         "det_shoulder" -> detectHardShoulder = on
         "det_objects" -> detectRoadObjects = on
         "det_distance" -> detectFollowingDistance = on
+        "det_lights" -> detectTrafficLights = on
         "det_driver" -> detectDriverState = on
         else -> Unit
     }
+
+    val recognisedSigns = MutableStateFlow<List<com.rfsat.dms.RecognisedSign>>(emptyList())
 
     val results = mapOf(
         CameraRole.DRIVER to MutableStateFlow(AnalysisResult()),
@@ -129,7 +135,7 @@ class MonitorService : Service() {
             .onSuccess { DLog.i(TAG, "RoadAnalyzer ready") }
             .getOrNull()
         lanes = LaneAnalyzer()
-        signs = SignAnalyzer()
+        signs = SignAnalyzer(this)
         evidence = EvidenceStore(this)
         alerter = Alerter(this)
         getSharedPreferences("dbm", MODE_PRIVATE).let { p ->
@@ -142,7 +148,7 @@ class MonitorService : Service() {
             }
             setVideoRecording(p.getBoolean("record_video", false))
             listOf("det_signs", "det_lanes", "det_lane_cross", "det_shoulder",
-                   "det_objects", "det_driver", "det_distance")
+                   "det_objects", "det_driver", "det_distance", "det_lights")
                 .forEach { applyElement(it, p.getBoolean(it, true)) }
         }
         speed = SpeedMonitor(this)
@@ -159,6 +165,7 @@ class MonitorService : Service() {
                     visualSpeedKmh != null -> visualSpeedKmh!! to SpeedSource.VISUAL
                     else -> 0 to SpeedSource.NONE
                 }
+                cameraManager?.vehicleMoving = v >= 5
                 scorer.onSpeed(v, src, t)?.let { raw ->
                     crossChecker.gpsSpeed = if (speed.healthy) speed.speedKmh.value else null
                     crossChecker.visualSpeed = visualSpeedKmh
@@ -174,6 +181,10 @@ class MonitorService : Service() {
     /** Call from the Activity once runtime permissions are granted. */
     fun onPermissionsGranted() { speed.start(); yawRate.start() }
 
+    /** Activity links its camera manager so the service can throttle road
+     *  analysis by motion. */
+    var cameraManager: com.rfsat.dms.capture.PhoneCameraManager? = null
+
     fun setAudioAlerts(on: Boolean) { alerter.audioEnabled = on }
     fun setTtsAlerts(on: Boolean) { alerter.ttsEnabled = on }
     fun setStoppingDistanceFactor(pct: Int) {
@@ -184,6 +195,14 @@ class MonitorService : Service() {
         getSharedPreferences("dbm", MODE_PRIVATE).edit().putInt("weight_${type.name}", w).apply()
         scorer.setWeight(type, w)
     }
+    fun resetCounters() {
+        scorer.resetTrip()
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            com.rfsat.dms.data.DmsDatabase.get(this@MonitorService).events().clearAll()
+        }
+        DLog.i(TAG, "all counters reset")
+    }
+
     fun resetCalibration() {
         driver?.resetCalibration()
         following.focalFactor = FollowingDistanceMonitor.FOCAL_FACTOR
@@ -214,6 +233,8 @@ class MonitorService : Service() {
             }.onFailure { DLog.e(TAG, "analysis failed for $role", it) }
              .getOrDefault(AnalysisResult())
             results[role]!!.value = result
+            if (role != CameraRole.DRIVER && result.signs.isNotEmpty())
+                recognisedSigns.value = result.signs
             if (recordVideo) {
                 (if (role == CameraRole.DRIVER) recDriver else recRoad)
                     ?.encode(frame, result, tMs)
@@ -228,6 +249,8 @@ class MonitorService : Service() {
                 leadAreaGrowthPerSec = lastLeadGrowth,
                 trackAgeFrames = CrossChecker.MIN_TRACK_AGE) // road objects already tracked
             result.events.forEach { raw ->
+                if (raw.type == com.rfsat.dms.RiskType.YAWNING)
+                    crossChecker.recentYawnMs = tMs
                 val ev = crossChecker.adjudicate(raw, ctx) ?: return@forEach
                 alerter.alert(ev)
                 scorer.onEvent(ev, tMs)
@@ -241,21 +264,36 @@ class MonitorService : Service() {
         // Retain a copy of the newest road frame for speed-violation evidence.
         latestRoadFrame?.recycle()
         latestRoadFrame = frame.copy(Bitmap.Config.ARGB_8888, false)
-        val road = road ?: return run {
-            val (laneLines, laneEvents) = lanes.analyze(frame, tMs)
-            AnalysisResult(laneLines = laneLines, events = laneEvents)
-        }
+
         // Visual speed: estimates when GNSS is down, auto-calibrates when it is up.
         visualSpeedKmh = visualSpeed.onFrame(
             frame, tMs,
             gpsSpeedKmh = if (speed.healthy) speed.speedKmh.value else null,
             gpsHealthy = speed.healthy)
-        val obj = road.analyze(frame, tMs)
-        val (laneLines, laneEvents) = lanes.analyze(frame, tMs)
+        val spd = if (speed.healthy) speed.speedKmh.value else (visualSpeedKmh ?: 0)
+
+        // Object detection (toggleable).
+        val obj = if (detectRoadObjects) road?.analyze(frame, tMs) else null
+
+        // Lane markings (toggleable), with crossing/shoulder sub-filters.
+        var laneLines = emptyList<com.rfsat.dms.LaneLine>()
+        var laneEvents = emptyList<RiskEventCandidate>()
+        if (detectLaneMarkings) {
+            val (ll, le) = lanes.analyze(frame, tMs)
+            laneLines = ll
+            laneEvents = le.filter { ev ->
+                when (ev.type) {
+                    RiskType.SOLID_LINE_CROSSING, RiskType.DOUBLE_LINE_CROSSING,
+                    RiskType.LANE_DRIFT -> detectLaneCrossing
+                    RiskType.HARD_SHOULDER_DRIVING -> detectHardShoulder
+                    else -> true
+                }
+            }
+        }
+
+        // Following distance (toggleable) + focal self-calibration.
         var followEvents = emptyList<RiskEventCandidate>()
         if (detectFollowingDistance && obj != null) {
-            val spd = if (speed.healthy) speed.speedKmh.value else (visualSpeedKmh ?: 0)
-            // focal self-calibration from successive lead-vehicle widths
             val lead = obj.detections
                 .filter { it.labelText in FollowingDistanceMonitor.VEHICLES &&
                           (it.left + it.right) / 2f in 0.35f..0.65f }
@@ -273,17 +311,38 @@ class MonitorService : Service() {
             ev?.let { followEvents = listOf(it) }
         }
 
+        // Traffic lights (toggleable).
+        var lightDet: com.rfsat.dms.Detection? = null
+        var lightEvents = emptyList<RiskEventCandidate>()
+        if (detectTrafficLights) {
+            val vboxes = (obj?.detections ?: emptyList())
+                .filter { it.labelText in setOf("car","truck","bus","motorcycle") }
+            val (d, ev) = lights.analyze(frame, spd, tMs, vboxes)
+            lightDet = d
+            ev?.let { lightEvents = listOf(it) }
+        }
+
+        // Signs (toggleable): two-stage classifier on candidate boxes + OCR.
         var limit: Int? = null
         var signDets = emptyList<com.rfsat.dms.Detection>()
-        if (roadFrameCount++ % 3 == 0) {
-            val (d, l) = signs.analyze(frame)
-            signDets = d; limit = l
+        var recognisedSigns = emptyList<com.rfsat.dms.RecognisedSign>()
+        if (detectSigns && roadFrameCount++ % 3 == 0) {
+            // Upstream sign hints (YOLO "stop sign"); SignAnalyzer adds its own
+            // colour/shape region proposals so all sign types are covered.
+            val cand = (obj?.detections ?: emptyList())
+                .filter { it.labelText == "stop sign" }
+            val out = signs.analyze(frame, cand)
+            signDets = out.detections; limit = out.speedLimitSeen
+            recognisedSigns = out.signs
         }
+
         return AnalysisResult(
-            detections = obj.detections + signDets,
+            detections = (obj?.detections ?: emptyList()) + signDets +
+                listOfNotNull(lightDet),
             laneLines = laneLines,
-            events = obj.events + laneEvents,
+            events = (obj?.events ?: emptyList()) + laneEvents + followEvents + lightEvents,
             speedLimitSeen = limit,
+            signs = recognisedSigns,
         )
     }
 
@@ -312,7 +371,7 @@ class MonitorService : Service() {
         scope.cancel()
         speed.stop(); yawRate.stop()
         recDriver?.stop(); recRoad?.stop()
-        driver?.close(); road?.close(); alerter.release()
+        driver?.close(); road?.close(); signs.close(); lights.close(); alerter.release()
         DLog.i(TAG, "onDestroy")
         super.onDestroy()
     }

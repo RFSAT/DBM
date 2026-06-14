@@ -33,6 +33,7 @@ import com.rfsat.dms.Severity
 class CrossChecker {
 
     @Volatile var yawRateDps = 0f          // fed from IMU (deg/s), 0 if absent
+    @Volatile var recentYawnMs = 0L        // last yawn timestamp, for drowsiness corroboration
     @Volatile var gpsSpeed: Int? = null
     @Volatile var visualSpeed: Int? = null
 
@@ -43,6 +44,7 @@ class CrossChecker {
         RiskType.SOLID_LINE_CROSSING,
         RiskType.DOUBLE_LINE_CROSSING,
         RiskType.LANE_DRIFT -> laneConsensus(ev)
+        RiskType.MICROSLEEP -> drowsinessConsensus(ev)
         RiskType.VULNERABLE_ROAD_USER,
         RiskType.FRONT_COLLISION_RISK,
         RiskType.REAR_COLLISION_RISK -> persistenceGate(ev, ctx)
@@ -54,6 +56,15 @@ class CrossChecker {
         val leadAreaGrowthPerSec: Float = 0f,
         val trackAgeFrames: Int = 0,
     )
+
+    private fun drowsinessConsensus(ev: RiskEventCandidate): RiskEventCandidate {
+        // A recent yawn independently supports a drowsiness finding -> promote.
+        val corroborated = System.currentTimeMillis() - recentYawnMs < 60_000
+        return if (corroborated)
+            ev.copy(confidence = (ev.confidence + 0.05f).coerceAtMost(0.99f),
+                    detail = ev.detail + " (yawning corroborated)")
+        else ev
+    }
 
     private fun speedConsensus(ev: RiskEventCandidate): RiskEventCandidate {
         val g = gpsSpeed; val v = visualSpeed

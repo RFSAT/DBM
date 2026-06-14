@@ -9,6 +9,7 @@ import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import com.rfsat.dms.AnalysisResult
+import com.rfsat.dms.DetClass
 import com.rfsat.dms.LaneLine
 import com.rfsat.dms.util.DLog
 import java.io.File
@@ -43,6 +44,16 @@ class OverlayVideoRecorder(
         color = Color.WHITE; textSize = 16f; setShadowLayer(2f, 1f, 1f, Color.BLACK)
     }
     private val tsFmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.UK)
+
+    private fun classColor(c: DetClass): Int = when (c) {
+        DetClass.PEDESTRIAN -> Color.rgb(255, 179, 0)
+        DetClass.BICYCLE, DetClass.MOTORCYCLE -> Color.rgb(255, 112, 67)
+        DetClass.CAR -> Color.rgb(66, 165, 245)
+        DetClass.TRUCK, DetClass.BUS -> Color.rgb(126, 87, 194)
+        DetClass.SIGN -> Color.rgb(38, 198, 218)
+        DetClass.LIGHT -> Color.rgb(239, 83, 80)
+        DetClass.OTHER -> Color.GREEN
+    }
     private var yuv: ByteArray? = null
     var active = false; private set
 
@@ -121,10 +132,11 @@ class OverlayVideoRecorder(
             .copy(Bitmap.Config.ARGB_8888, true)
         val cv = Canvas(b)
         r.detections.forEach { d ->
-            paintBox.color = if (d.risky) Color.RED else Color.GREEN
+            paintBox.color = if (d.risky) Color.RED else classColor(d.detClass)
             cv.drawRect(d.left * width, d.top * height,
                 d.right * width, d.bottom * height, paintBox)
-            cv.drawText(d.labelText, d.left * width, d.top * height - 4f, paintText)
+            cv.drawText(d.detClass.display, d.left * width,
+                (d.top * height - 4f).coerceAtLeast(12f), paintText)
         }
         r.laneLines.forEach { l ->
             paintLine.color = when (l.kind) {

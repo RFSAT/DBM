@@ -4,5 +4,11 @@ android/local.properties
 android/app/build/
 android/build/
 android/app/src/main/assets/*.task
-android/app/src/main/assets/*.tflite
+# yolo26n.tflite is committed; other downloaded tflite models are ignored
+android/app/src/main/assets/efficientdet_lite0.tflite
 .DS_Store
+# committed, validated detection models (keep in repo)
+!android/app/src/main/assets/yolo26n.tflite
+!android/app/src/main/assets/gtsrb_sign.tflite
+!android/app/src/main/assets/traffic_light.tflite
+

@@ -61,10 +61,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.graphics.drawscope.drawText
+import com.rfsat.dms.DetClass
 import com.rfsat.dms.capture.PhoneCameraManager
 import com.rfsat.dms.data.DmsDatabase
 import com.rfsat.dms.service.MonitorService
 import com.rfsat.dms.ui.HistoryScreen
+import com.rfsat.dms.ui.SummaryScreen
 import com.rfsat.dms.ui.theme.DbmTheme
 import com.rfsat.dms.ui.theme.EnactDark
 import com.rfsat.dms.ui.theme.EnactDarkMid
@@ -139,12 +142,12 @@ class MainActivity : ComponentActivity() {
         cameras = PhoneCameraManager(this, this, interiorView, roadView,
             onFrame = { role, bmp, t -> svc.submitFrame(role, bmp, t) },
             onMode = { captureMode.value = it.name.lowercase() }
-        ).also { it.start() }
+        ).also { it.start(); svc.cameraManager = it }
     }
 
     // ------------------------------------------------------------------ UI
 
-    private val tabs = listOf("Detector", "History", "Log", "Settings", "About")
+    private val tabs = listOf("Detector", "Summary", "History", "Log", "Settings", "About")
 
     @Composable
     private fun Root() {
@@ -179,11 +182,16 @@ class MainActivity : ComponentActivity() {
             }
             when (tab) {
                 0 -> DetectorScreen()
-                1 -> HistoryScreen(dao = DmsDatabase.get(this@MainActivity).events(),
+                1 -> SummaryScreen(
+                        dao = DmsDatabase.get(this@MainActivity).events(),
+                        complianceState = (service?.scorer?.state
+                            ?: MutableStateFlow(ComplianceState())).collectAsState().value,
+                        onResetCounters = { service?.resetCounters() })
+                2 -> HistoryScreen(dao = DmsDatabase.get(this@MainActivity).events(),
                         onBack = { tab = 0 })
-                2 -> LogScreen()
-                3 -> SettingsScreen()
-                4 -> AboutScreen()
+                3 -> LogScreen()
+                4 -> SettingsScreen()
+                5 -> AboutScreen()
             }
         }
     }
@@ -196,6 +204,7 @@ class MainActivity : ComponentActivity() {
                 android.content.res.Configuration.ORIENTATION_PORTRAIT
         Column(Modifier.fillMaxSize().padding(8.dp)) {
             StatusStrip()
+            SignStrip()
             Spacer(Modifier.height(6.dp))
             if (portrait) {
                 // Videos stacked one under the other; detections at the bottom.
@@ -215,6 +224,33 @@ class MainActivity : ComponentActivity() {
             }
             Spacer(Modifier.height(6.dp))
             DetectionPanel(Modifier.weight(1f))
+        }
+    }
+
+    @Composable
+    private fun SignStrip() {
+        val sgns by (service?.recognisedSigns
+            ?: MutableStateFlow(emptyList<com.rfsat.dms.RecognisedSign>()))
+            .collectAsState()
+        if (sgns.isEmpty()) return
+        Row(Modifier.fillMaxWidth().padding(top = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            sgns.take(4).forEach { sg ->
+                val col = when (sg.category) {
+                    "Regulatory" -> Color(0xFFE57373)
+                    "Warning" -> EnactWarning
+                    else -> Color(0xFF42A5F5)
+                }
+                Row(Modifier.clip(RoundedCornerShape(8.dp))
+                        .background(EnactSurface)
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.padding(end = 5.dp)
+                        .clip(RoundedCornerShape(3.dp)).background(col)
+                        .padding(3.dp)) {}
+                    Text(sg.name, color = EnactOnSurface, fontSize = 11.sp, maxLines = 1)
+                }
+            }
         }
     }
 
@@ -247,6 +283,7 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun CameraCard(role: CameraRole, view: PreviewView, modifier: Modifier) {
+        val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
         val result by (service?.results?.get(role)
             ?: MutableStateFlow(AnalysisResult())).collectAsState()
         Box(modifier.clip(RoundedCornerShape(14.dp)).background(EnactSurface)) {
@@ -273,10 +310,33 @@ class MainActivity : ComponentActivity() {
                 fun mx(x: Float) = ox + x * sx
                 fun my(y: Float) = oy + y * sy
                 result.detections.forEach { d ->
-                    drawRect(if (d.risky) Color(0xFFE57373) else EnactGreen,
-                        topLeft = Offset(mx(d.left), my(d.top)),
-                        size = Size(mx(d.right) - mx(d.left), my(d.bottom) - my(d.top)),
-                        style = Stroke(3f))
+                    val classCol = when (d.detClass) {
+                        DetClass.PEDESTRIAN -> Color(0xFFFFB300)   // amber
+                        DetClass.BICYCLE,
+                        DetClass.MOTORCYCLE -> Color(0xFFFF7043)   // orange — vulnerable
+                        DetClass.CAR -> Color(0xFF42A5F5)          // blue
+                        DetClass.TRUCK, DetClass.BUS -> Color(0xFF7E57C2) // purple — large
+                        DetClass.SIGN -> Color(0xFF26C6DA)         // cyan
+                        DetClass.LIGHT -> Color(0xFFEF5350)        // red
+                        DetClass.OTHER -> EnactGreen
+                    }
+                    val col = if (d.risky) Color(0xFFE57373) else classCol
+                    val l = mx(d.left); val tp = my(d.top)
+                    val r = mx(d.right); val bt = my(d.bottom)
+                    drawRect(col, topLeft = Offset(l, tp),
+                        size = Size(r - l, bt - tp), style = Stroke(3f))
+                    // label chip above the box
+                    val lbl = d.detClass.display
+                    val tl = textMeasurer.measure(
+                        androidx.compose.ui.text.AnnotatedString(lbl),
+                        style = androidx.compose.ui.text.TextStyle(
+                            fontSize = 9.sp, color = Color.White))
+                    val chipH = tl.size.height + 4f
+                    val chipW = tl.size.width + 8f
+                    val chipY = (tp - chipH).coerceAtLeast(0f)
+                    drawRect(col, topLeft = Offset(l, chipY),
+                        size = Size(chipW, chipH))
+                    drawText(tl, topLeft = Offset(l + 4f, chipY + 2f))
                 }
                 result.laneLines.forEach { l ->
                     val col = when (l.kind) {
@@ -448,6 +508,7 @@ class MainActivity : ComponentActivity() {
             DetectionElementRow("Hard-shoulder driving", "det_shoulder")
             DetectionElementRow("Road objects (vehicles, pedestrians…)", "det_objects")
             DetectionElementRow("Unsafe following distance", "det_distance")
+            DetectionElementRow("Traffic lights (red / amber crossing)", "det_lights")
             DetectionElementRow("Driver state (eyes, gaze, mirrors)", "det_driver")
             Spacer(Modifier.height(14.dp))
             Text("Self-calibration", color = EnactGreen, fontSize = 15.sp,
