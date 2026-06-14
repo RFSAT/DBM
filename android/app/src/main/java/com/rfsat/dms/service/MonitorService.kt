@@ -25,6 +25,7 @@ import com.rfsat.dms.detect.LaneAnalyzer
 import com.rfsat.dms.detect.RoadAnalyzer
 import com.rfsat.dms.detect.SignAnalyzer
 import com.rfsat.dms.detect.TrafficLightAnalyzer
+import com.rfsat.dms.detect.TurnMonitor
 import com.rfsat.dms.detect.VisualSpeedEstimator
 import com.rfsat.dms.SpeedSource
 import com.rfsat.dms.location.SpeedMonitor

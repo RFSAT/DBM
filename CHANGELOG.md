@@ -5,6 +5,13 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v14.6 — build fix (correction -> minor increment)
+- FIX compile error: MonitorService referenced TurnMonitor without importing it
+  (every other detect-package class used by the service is imported explicitly).
+  Added the missing import. Audited all newly-added detector classes for the
+  same issue — none others affected (the rest are referenced only within the
+  detect package and need no import)
+
 ## v14.5 — diagnostic logging of unrecognised signs (correction -> minor increment)
 - The sign region proposer now records each candidate's dominant border colour
   (red/blue/yellow). When a sign-shaped region cannot be confidently classified
