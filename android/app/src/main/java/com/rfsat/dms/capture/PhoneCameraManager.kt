@@ -188,8 +188,8 @@ class PhoneCameraManager(
                     .setResolutionStrategy(
                         androidx.camera.core.resolutionselector.ResolutionStrategy(
                             android.util.Size(
-                                if (role == CameraRole.ROAD) 1280 else 960,
-                                if (role == CameraRole.ROAD) 720 else 540),
+                                if (role == CameraRole.FRONT) 1280 else 960,
+                                if (role == CameraRole.FRONT) 720 else 540),
                             androidx.camera.core.resolutionselector.ResolutionStrategy
                                 .FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
                     .build())

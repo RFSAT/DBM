@@ -5,6 +5,12 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v15.1 — build fix (correction)
+- FIX compile error: the resolution code used CameraRole.ROAD, but the road
+  camera's enum value is FRONT (DRIVER/FRONT/REAR). Corrected both references.
+  Audited all CameraRole, SignDetector constant and theme-colour references
+  added in v15.0 — no others affected
+
 ## v15.0 — drive-test fixes, EU sign detector, UI controls (major)
 DETECTION (from road-test feedback):
 - Analysis resolution raised from the ~640x480 default to 1280x720 (road) /
