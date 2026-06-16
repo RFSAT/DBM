@@ -311,6 +311,14 @@ class MainActivity : ComponentActivity() {
                 }
                 fun mx(x: Float) = ox + x * sx
                 fun my(y: Float) = oy + y * sy
+                // The front (driver) camera preview is mirrored in COMPATIBLE
+                // mode, but landmark coordinates are not. Whether the box must be
+                // mirrored to match depends on the device, so it is a user
+                // setting (default on for the driver camera) that can be flipped
+                // once if the box tracks the wrong way.
+                val mirror = role == CameraRole.DRIVER &&
+                    getSharedPreferences("dbm", MODE_PRIVATE)
+                        .getBoolean("mirror_driver_overlay", true)
                 result.detections.forEach { d ->
                     val classCol = when (d.detClass) {
                         DetClass.PEDESTRIAN -> Color(0xFFFFB300)   // amber
@@ -323,12 +331,17 @@ class MainActivity : ComponentActivity() {
                         DetClass.OTHER -> EnactGreen
                     }
                     val col = if (d.risky) Color(0xFFE57373) else classCol
-                    val l = mx(d.left); val tp = my(d.top)
-                    val r = mx(d.right); val bt = my(d.bottom)
+                    // Mirror x for the driver card so the face box tracks the face.
+                    val dl = if (mirror) 1f - d.right else d.left
+                    val dr = if (mirror) 1f - d.left else d.right
+                    val l = mx(dl); val tp = my(d.top)
+                    val r = mx(dr); val bt = my(d.bottom)
                     drawRect(col, topLeft = Offset(l, tp),
                         size = Size(r - l, bt - tp), style = Stroke(3f))
-                    // label chip above the box
-                    val lbl = d.detClass.display
+                    // Label: driver-state boxes carry a descriptive label
+                    // (e.g. "EYES CLOSED", "yaw 12"); road detections use the
+                    // class name.
+                    val lbl = if (d.detClass == DetClass.OTHER) d.labelText else d.detClass.display
                     val tl = textMeasurer.measure(
                         androidx.compose.ui.text.AnnotatedString(lbl),
                         style = androidx.compose.ui.text.TextStyle(
@@ -519,6 +532,8 @@ class MainActivity : ComponentActivity() {
         val prefs = remember { getSharedPreferences("dbm", MODE_PRIVATE) }
         var audio by remember { mutableStateOf(prefs.getBoolean("alerts_audio", true)) }
         var tts by remember { mutableStateOf(prefs.getBoolean("alerts_tts", true)) }
+        var mirrorDriver by remember {
+            mutableStateOf(prefs.getBoolean("mirror_driver_overlay", true)) }
         Column(Modifier.fillMaxSize().padding(14.dp)
                 .verticalScroll(rememberScrollState())) {
             Text("Settings", color = EnactGreen, fontSize = 18.sp,
@@ -531,6 +546,10 @@ class MainActivity : ComponentActivity() {
             SettingRow("Spoken warnings (TTS)", tts) {
                 tts = it; prefs.edit().putBoolean("alerts_tts", it).apply()
                 service?.setTtsAlerts(it)
+            }
+            SettingRow("Mirror driver face box", mirrorDriver) {
+                mirrorDriver = it
+                prefs.edit().putBoolean("mirror_driver_overlay", it).apply()
             }
             Spacer(Modifier.height(14.dp))
             Text("Detection elements", color = EnactGreen, fontSize = 15.sp,

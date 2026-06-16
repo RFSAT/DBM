@@ -5,6 +5,23 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v15.3 — driver overlay mirror made user-correctable (correction)
+- The driver face-box mirroring (added in v15.2, correct for the mirrored
+  front-camera preview) is now a Settings toggle "Mirror driver face box",
+  default ON. This keeps the box aligned on the standard mirrored preview and
+  lets it be flipped once on any device that behaves differently, without a
+  code change. Read fresh each frame so the toggle takes effect on return to
+  the Detector tab
+
+## v15.2 — driver face overlay fix (correction)
+- FIX driver face box labelled "Object": the overlay always used the generic
+  detection-class group name. Driver-state boxes carry a descriptive label
+  ("EYES CLOSED", "yaw N") which is now shown instead
+- FIX driver face box not tracking the face: the front (selfie) camera preview
+  is mirrored by the system but the landmark coordinates were not, so the box
+  moved opposite to the face. The driver card now mirrors the box x-coordinates
+  to match the preview. Road overlays unchanged
+
 ## v15.1 — build fix (correction)
 - FIX compile error: the resolution code used CameraRole.ROAD, but the road
   camera's enum value is FRONT (DRIVER/FRONT/REAR). Corrected both references.
