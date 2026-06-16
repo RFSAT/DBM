@@ -5,6 +5,15 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v15.7 — lint fix for thermal API level (correction)
+- FIX lint error: PowerManager.addThermalStatusListener and the
+  OnThermalStatusChangedListener type require API 29, but minSdk is 26. Both
+  call sites are now guarded by Build.VERSION.SDK_INT >= Q and the listener is
+  lazily created so its API-29 references never resolve on Android 8/9. On
+  those older devices thermal throttling is simply inactive (analysis runs
+  full-rate); on Android 10+ it works as intended. The APK compiled fine in
+  v15.6 — this was the lint quality gate catching a real older-device crash
+
 ## v15.6 — drive-log crash fixes + thermal throttling (corrections)
 From a ~7-hour real drive log (Galaxy S24, Android 16):
 - FIX launch crash (SecurityException): a camera-typed foreground service may

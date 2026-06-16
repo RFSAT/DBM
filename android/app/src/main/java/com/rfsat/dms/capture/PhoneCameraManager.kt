@@ -2,6 +2,7 @@ package com.rfsat.dms.capture
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import androidx.camera.core.CameraSelector
@@ -54,7 +55,8 @@ class PhoneCameraManager(
     @Volatile private var thermalFactor = 1.0
     private val powerManager =
         context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
-    private val thermalListener =
+    @get:androidx.annotation.RequiresApi(Build.VERSION_CODES.Q)
+    private val thermalListener by lazy {
         android.os.PowerManager.OnThermalStatusChangedListener { status ->
             thermalFactor = when (status) {
                 android.os.PowerManager.THERMAL_STATUS_NONE,
@@ -65,6 +67,7 @@ class PhoneCameraManager(
             }
             DLog.i(TAG, "thermal status $status -> factor $thermalFactor")
         }
+    }
     private val handler = Handler(Looper.getMainLooper())
     private var provider: ProcessCameraProvider? = null
     private var mode = Mode.MULTIPLEXED
@@ -72,8 +75,12 @@ class PhoneCameraManager(
     private var released = false
 
     fun start() {
-        runCatching {
-            powerManager.addThermalStatusListener(analysisExecutor, thermalListener)
+        // Thermal monitoring is API 29+ (Android 10). On older devices it is
+        // simply skipped — thermalFactor stays 1.0 and analysis runs full-rate.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            runCatching {
+                powerManager.addThermalStatusListener(analysisExecutor, thermalListener)
+            }
         }
         val future = ProcessCameraProvider.getInstance(context)
         future.addListener({
@@ -263,7 +270,8 @@ class PhoneCameraManager(
 
     fun release() {
         released = true
-        runCatching { powerManager.removeThermalStatusListener(thermalListener) }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+            runCatching { powerManager.removeThermalStatusListener(thermalListener) }
         handler.removeCallbacksAndMessages(null)
         provider?.unbindAll()
         analysisExecutor.shutdown()
