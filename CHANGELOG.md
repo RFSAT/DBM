@@ -5,6 +5,34 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v15.0 — drive-test fixes, EU sign detector, UI controls (major)
+DETECTION (from road-test feedback):
+- Analysis resolution raised from the ~640x480 default to 1280x720 (road) /
+  960x540 (driver). Distant and oncoming vehicles, motorbikes and pedestrians
+  were too small to detect at the old resolution; this roughly doubles their
+  pixel size. Addresses missed oncoming cars, intermittent pedestrians and
+  missed motorbikes
+- Lane fit now rejects physically-impossible "diverging" fits (lines that open
+  outward with distance instead of converging to a vanishing point) and
+  enforces a minimum coverage and correct side, fixing the lane overlay that
+  did not follow the road
+- (Bounding boxes that were too small were a symptom of the low resolution;
+  the YOLO decode itself was verified correct against the reference image)
+
+EU SIGN DETECTOR:
+- NEW SignDetector: the Mapillary-trained one-stage detector (sign_eu.tflite,
+  27 classes including no-left-turn, no-right-turn, no-U-turn) both localises
+  and classifies signs, and is now the preferred sign path; the GTSRB
+  classifier remains as a fallback. TurnMonitor now does DIRECTIONAL illegal-
+  turn detection: a left turn under a no-left-turn sign fires, a right turn
+  under it does not; no-U-turn fires on a near-reversal
+
+UI (from feedback):
+- Detection message list shortened (fewer lines) and camera areas enlarged
+  vertically to use the freed space
+- NEW control bar: Start/Pause toggle, Stop, and Exit buttons. Pause halts
+  analysis (frames dropped) and resumes on demand; Exit closes the app
+
 ## v14.6 — build fix (correction -> minor increment)
 - FIX compile error: MonitorService referenced TurnMonitor without importing it
   (every other detect-package class used by the service is imported explicitly).

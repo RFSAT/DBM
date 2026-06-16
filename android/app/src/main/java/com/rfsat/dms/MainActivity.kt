@@ -208,7 +208,7 @@ class MainActivity : ComponentActivity() {
             Spacer(Modifier.height(6.dp))
             if (portrait) {
                 // Videos stacked one under the other; detections at the bottom.
-                Column(Modifier.fillMaxWidth().weight(2.42f),
+                Column(Modifier.fillMaxWidth().weight(3.0f),
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     CameraCard(CameraRole.DRIVER, interiorView,
                         Modifier.weight(1f).fillMaxWidth())
@@ -216,14 +216,16 @@ class MainActivity : ComponentActivity() {
                         Modifier.weight(1f).fillMaxWidth())
                 }
             } else {
-                Row(Modifier.fillMaxWidth().weight(1.21f),
+                Row(Modifier.fillMaxWidth().weight(1.6f),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     CameraCard(CameraRole.DRIVER, interiorView, Modifier.weight(1f))
                     CameraCard(CameraRole.FRONT, roadView, Modifier.weight(1f))
                 }
             }
             Spacer(Modifier.height(6.dp))
-            DetectionPanel(Modifier.weight(1f))
+            ControlBar()
+            Spacer(Modifier.height(6.dp))
+            DetectionPanel(Modifier.weight(0.7f))
         }
     }
 
@@ -373,9 +375,41 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
+    private fun ControlBar() {
+        val analysing by (service?.analysing
+            ?: MutableStateFlow(true)).collectAsState()
+        Row(Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            // Start / Pause toggle.
+            androidx.compose.material3.Button(
+                onClick = {
+                    if (analysing) service?.pauseAnalysis() else service?.resumeAnalysis()
+                },
+                modifier = Modifier.weight(1f),
+                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                    containerColor = if (analysing) EnactWarning else EnactGreen)) {
+                Text(if (analysing) "Pause" else "Start", fontSize = 13.sp)
+            }
+            // Stop: pause analysis and reset the live score view.
+            androidx.compose.material3.OutlinedButton(
+                onClick = { service?.pauseAnalysis() },
+                modifier = Modifier.weight(1f)) {
+                Text("Stop", fontSize = 13.sp, color = EnactOnSurface)
+            }
+            // Exit the application.
+            androidx.compose.material3.OutlinedButton(
+                onClick = { finishAndRemoveTask() },
+                modifier = Modifier.weight(1f)) {
+                Text("Exit", fontSize = 13.sp, color = Color(0xFFE57373))
+            }
+        }
+    }
+
+    @Composable
     private fun DetectionPanel(modifier: Modifier) {
         val dao = remember { DmsDatabase.get(this).events() }
-        val events by dao.latest(30).collectAsStateWithLifecycle(initialValue = emptyList())
+        // Show a shorter list so the cameras get more vertical space.
+        val events by dao.latest(8).collectAsStateWithLifecycle(initialValue = emptyList())
         val fmt = remember { SimpleDateFormat("HH:mm:ss", Locale.UK) }
         Column(modifier.fillMaxWidth()
                 .clip(RoundedCornerShape(14.dp))

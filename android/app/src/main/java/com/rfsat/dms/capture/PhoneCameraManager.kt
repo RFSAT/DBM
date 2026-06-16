@@ -178,6 +178,21 @@ class PhoneCameraManager(
         ImageAnalysis.Builder()
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+            // Request a higher analysis resolution. The default is ~640x480,
+            // which leaves distant/oncoming vehicles and motorbikes too small
+            // for the detector once letterboxed to 640. 1280x720 roughly doubles
+            // the linear resolution of small objects. The road camera benefits
+            // most; the driver camera can stay lower to save CPU.
+            .setResolutionSelector(
+                androidx.camera.core.resolutionselector.ResolutionSelector.Builder()
+                    .setResolutionStrategy(
+                        androidx.camera.core.resolutionselector.ResolutionStrategy(
+                            android.util.Size(
+                                if (role == CameraRole.ROAD) 1280 else 960,
+                                if (role == CameraRole.ROAD) 720 else 540),
+                            androidx.camera.core.resolutionselector.ResolutionStrategy
+                                .FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
+                    .build())
             .build().also { ua ->
                 var lastT = 0L
                 ua.setAnalyzer(analysisExecutor) { img: ImageProxy ->

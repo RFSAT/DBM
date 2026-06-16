@@ -225,7 +225,14 @@ class MonitorService : Service() {
         DLog.i(TAG, "video recording = $on")
     }
 
+    /** Detector run state, observed by the UI controls. */
+    val analysing = MutableStateFlow(true)
+
+    fun pauseAnalysis() { analysing.value = false; DLog.i(TAG, "analysis paused") }
+    fun resumeAnalysis() { analysing.value = true; DLog.i(TAG, "analysis resumed") }
+
     fun submitFrame(role: CameraRole, frame: Bitmap, tMs: Long) {
+        if (!analysing.value) { frame.recycle(); return }   // paused: drop frames
         scope.launch {
             val result = runCatching {
                 when (role) {

@@ -11,7 +11,8 @@ be adopted by dropping in a trained/converted model, with no code change.
 | `yolo26n.tflite` | Object detector (preferred) | **available — CI-fetched** | Official: github.com/ultralytics/yolo-flutter-app/releases/download/v0.3.5/yolo26n_int8.tflite (rename to yolo26n.tflite). Or fine-tune YOLO26-nano and export TFLite |
 | `face_landmarker.task` | Face landmarks (driver state) | bundled / CI-fetched | MediaPipe model zoo |
 | `eye_state.tflite` | CNN eye-state corroboration | integration point | Train on MRL Eye / NTHU-DDD |
-| `gtsrb_sign.tflite` | Sign classifier (43-class GTSRB) | **bundled** | frogermcs/GTSRB-TensorFlow-Lite (gtsrb_model.lite); MobileNet, 224x224 in, [1,43] out |
+| `sign_eu.tflite` | EU sign DETECTOR (27-class, Mapillary) | **bundled, preferred** | Trained on MTSD via prepare_mapillary.py; YOLO [1,31,8400]; includes no-turn signs |
+| `gtsrb_sign.tflite` | Sign classifier (43-class GTSRB) | fallback | frogermcs/GTSRB-TensorFlow-Lite; used only if sign_eu.tflite absent |
 | `traffic_light.tflite` | Learned traffic-light detector + colour | **bundled** | Syazvinski YOLOv8-nano (red/green/off/yellow), exported to float16 TFLite |
 | `ufld_lane.tflite` | Row-anchor lane model | integration point | Convert Ultra-Fast-Lane-Detection (TuSimple/CULane) |
 

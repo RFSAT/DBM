@@ -93,16 +93,29 @@ class LaneAnalyzer {
                    else LaneLine.Kind.SOLID
         }
 
-        fun emit(pts: List<Pt>): LaneLine? {
+        fun emit(pts: List<Pt>, isLeft: Boolean): LaneLine? {
             val fit = fitSide(pts) ?: return null
-            val (a, b, _) = fit
-            val xb = (a * rows + b) / w          // bottom intercept, normalized
-            val xt = b / w                        // top of ROI intercept
+            val (a, b, cov) = fit
+            if (cov < MIN_COVERAGE) return null   // too few rows -> unreliable fit
+            val xb = (a * rows + b) / w           // bottom intercept, normalized
+            val xt = b / w                         // top of ROI intercept
+            // Perspective sanity: real lane lines converge toward a vanishing
+            // point, so the TOP of a line sits closer to the frame centre than
+            // its BOTTOM. A fit where the top is further from centre than the
+            // bottom (lines "opening outward" with distance) is physically wrong
+            // and is rejected rather than drawn.
+            val centre = 0.5f
+            val bottomDist = abs(xb - centre)
+            val topDist = abs(xt - centre)
+            if (topDist > bottomDist + 0.04f) return null      // diverging -> reject
+            // The bottom of the line should also be on the expected side.
+            if (isLeft && xb > 0.62f) return null
+            if (!isLeft && xb < 0.38f) return null
             return LaneLine(xb.coerceIn(0f, 1f), xt.coerceIn(0f, 1f), classify(pts, fit))
         }
 
-        val left = emit(leftPts);  left?.let { lanes += it }
-        val right = emit(rightPts); right?.let { lanes += it }
+        val left = emit(leftPts, true);  left?.let { lanes += it }
+        val right = emit(rightPts, false); right?.let { lanes += it }
 
         // --- crossing logic: a line's bottom intercept inside vehicle corridor ---
         fun crossing(line: LaneLine?, sinceSet: (Long) -> Unit, since: Long): Boolean {
@@ -145,7 +158,8 @@ class LaneAnalyzer {
     companion object {
         const val GRAD_THRESH = 38
         const val BRIGHT_MIN = 120
-        const val MIN_PTS = 40
+        const val MIN_PTS = 60
+        const val MIN_COVERAGE = 0.35f
         const val SOLID_COVERAGE = 0.7f
         const val CORRIDOR = 0.12f          // half-width of own-vehicle corridor
         const val CROSS_PERSIST_MS = 700L

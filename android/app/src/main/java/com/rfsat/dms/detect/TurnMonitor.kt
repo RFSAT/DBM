@@ -29,7 +29,7 @@ import kotlin.math.abs
  */
 class TurnMonitor {
 
-    private enum class Restriction { NONE, NO_ENTRY, AHEAD_ONLY }
+    private enum class Restriction { NONE, NO_ENTRY, AHEAD_ONLY, NO_LEFT, NO_RIGHT, NO_U }
 
     private var restriction = Restriction.NONE
     private var restrictionMs = 0L
@@ -40,14 +40,20 @@ class TurnMonitor {
     private var turnStartMs = 0L
     private var lastEventMs = 0L
 
-    /** Record a recognised sign that may make a subsequent turn illegal. */
+    /** Record a recognised sign that may make a subsequent turn illegal.
+     *  Accepts GTSRB ids (legacy) and the EU SignDetector ids. */
     fun onSign(classId: Int, tMs: Long) {
+        // EU SignDetector class ids (Mapillary model).
         val r = when (classId) {
-            17, 15 -> Restriction.NO_ENTRY      // no entry / no vehicles
-            35 -> Restriction.AHEAD_ONLY        // ahead only
+            SignDetector.NO_LEFT_TURN -> Restriction.NO_LEFT
+            SignDetector.NO_RIGHT_TURN -> Restriction.NO_RIGHT
+            SignDetector.NO_U_TURN -> Restriction.NO_U
+            SignDetector.NO_STRAIGHT -> Restriction.NONE   // straight handled elsewhere
+            SignDetector.AHEAD_ONLY -> Restriction.AHEAD_ONLY
+            5 -> Restriction.NO_ENTRY          // EU "no entry" id 5
             else -> return
         }
-        restriction = r; restrictionMs = tMs
+        if (r != Restriction.NONE) { restriction = r; restrictionMs = tMs }
     }
 
     /**
@@ -79,17 +85,30 @@ class TurnMonitor {
         if (tMs - lastEventMs < EVENT_INTERVAL_MS) return null
 
         val dir = if (headingDeg > 0) "right" else "left"
+        val turnedLeft = headingDeg < 0
+        val turnedRight = headingDeg > 0
         val illegal = when (restriction) {
             Restriction.NO_ENTRY -> true                 // any turn into a restricted way
             Restriction.AHEAD_ONLY -> true               // straight-only: any turn breaches
+            Restriction.NO_LEFT -> turnedLeft            // directional: only the banned way
+            Restriction.NO_RIGHT -> turnedRight
+            Restriction.NO_U -> abs(headingDeg) > 140f    // U-turn = near-reversal
             Restriction.NONE -> false
         }
-        if (!illegal) return null
+        if (!illegal) {
+            // Wrong-direction turn under a directional ban is legal -> clear it.
+            if (restriction == Restriction.NO_LEFT || restriction == Restriction.NO_RIGHT)
+                restriction = Restriction.NONE
+            return null
+        }
 
         lastEventMs = tMs
         val reason = when (restriction) {
-            Restriction.NO_ENTRY -> "turn into a no-entry/no-vehicles way"
+            Restriction.NO_ENTRY -> "turn into a no-entry way"
             Restriction.AHEAD_ONLY -> "$dir turn where ahead-only applies"
+            Restriction.NO_LEFT -> "left turn where no-left-turn applies"
+            Restriction.NO_RIGHT -> "right turn where no-right-turn applies"
+            Restriction.NO_U -> "U-turn where no-U-turn applies"
             else -> "prohibited turn"
         }
         // Consume the restriction so it doesn't fire twice.

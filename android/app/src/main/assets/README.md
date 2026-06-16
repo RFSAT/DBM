@@ -13,3 +13,5 @@ yolo26n.tflite (bundled): Ultralytics YOLO26-nano, COCO, float input 640x640, ra
 gtsrb_sign.tflite (bundled): GTSRB 43-class traffic-sign classifier (MobileNet, input 224x224 float, output [1,43]). Recognition stage of the two-stage sign pipeline.
 
 traffic_light.tflite (bundled): YOLOv8-nano traffic-light detector + colour classifier (Syazvinski), float16, input 640x640, output [1,8,8400], classes red/green/off/yellow. Decoded by TrafficLightDetector with vehicle brake-light rejection.
+
+sign_eu.tflite (bundled): Mapillary-trained EU sign DETECTOR, 27 classes incl. no-left/right/U-turn. YOLO format [1,31,8400], input 640. Decoded by SignDetector; preferred over gtsrb_sign.tflite.

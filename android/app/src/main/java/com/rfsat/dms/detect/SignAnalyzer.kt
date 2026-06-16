@@ -27,12 +27,17 @@ class SignAnalyzer(context: android.content.Context? = null) {
     private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     private var candidate: Int? = null
 
-    // Two-stage sign recognition: GTSRB classifier used when its asset exists.
-    private val classifier: SignClassifier? = context?.let { ctx ->
+    // Preferred: one-stage EU sign DETECTOR (Mapillary-trained, 27 classes).
+    private val detector: SignDetector? = context?.let { ctx ->
+        if (runCatching { ctx.assets.open("sign_eu.tflite").close() }.isSuccess)
+            runCatching { SignDetector(ctx) }.getOrNull() else null
+    }
+    // Fallback: two-stage GTSRB classifier + region proposer.
+    private val classifier: SignClassifier? = if (detector != null) null else context?.let { ctx ->
         if (runCatching { ctx.assets.open("gtsrb_sign.tflite").close() }.isSuccess)
             runCatching { SignClassifier(ctx) }.getOrNull() else null
     }
-    val hasClassifier get() = classifier != null
+    val hasClassifier get() = classifier != null || detector != null
 
     data class SignOutput(
         val detections: List<Detection>,
@@ -56,10 +61,21 @@ class SignAnalyzer(context: android.content.Context? = null) {
         val unrecognised = mutableListOf<String>()
         var adopted: Int? = null
 
-        // Stage 1: propose sign regions. Use upstream candidates (e.g. YOLO
-        // "stop sign") plus a colour/shape region proposer, since YOLO's COCO
-        // classes do not localise most sign types. This is what lets the GTSRB
-        // classifier recognise speed-limit, warning and prohibition signs.
+        // Preferred path: one-stage EU sign detector.
+        val det = detector
+        if (det != null) {
+            for (hit in det.detect(frame)) {
+                signs += com.rfsat.dms.RecognisedSign(
+                    hit.name, SignDetector.category(hit.classId), hit.score, hit.classId)
+                dets += Detection(hit.name, hit.score,
+                    hit.left, hit.top, hit.right, hit.bottom, risky = false)
+                hit.speedLimitKmh?.let { if (candidate == it) adopted = it else candidate = it }
+            }
+            if (dets.isEmpty()) candidate = null
+            return SignOutput(dets, adopted, signs, unrecognised)
+        }
+
+        // Fallback path: propose sign regions for the GTSRB classifier.
         val clf = classifier
         val candidates = if (clf != null)
             (signCandidates + proposeSignRegions(frame))
