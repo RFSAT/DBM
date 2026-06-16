@@ -26,6 +26,7 @@ class SignAnalyzer(context: android.content.Context? = null) {
 
     private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     private var candidate: Int? = null
+    private val speedVotes = ArrayDeque<Int>()
 
     // Preferred: one-stage EU sign DETECTOR (Mapillary-trained, 27 classes).
     private val detector: SignDetector? = context?.let { ctx ->
@@ -69,7 +70,21 @@ class SignAnalyzer(context: android.content.Context? = null) {
                     hit.name, SignDetector.category(hit.classId), hit.score, hit.classId)
                 dets += Detection(hit.name, hit.score,
                     hit.left, hit.top, hit.right, hit.bottom, risky = false)
-                hit.speedLimitKmh?.let { if (candidate == it) adopted = it else candidate = it }
+                // Speed-limit adoption is error-prone (the model can confuse
+                // similar digits), so require a higher confidence AND a majority
+                // vote over the last few high-confidence readings before
+                // adopting, rather than just two consecutive frames. This cuts
+                // wrong numbers at the cost of a small, bounded delay.
+                hit.speedLimitKmh?.let { v ->
+                    if (hit.score >= SPEED_MIN_CONF) {
+                        speedVotes.addLast(v)
+                        while (speedVotes.size > SPEED_VOTE_WINDOW) speedVotes.removeFirst()
+                        val winner = speedVotes.groupingBy { it }.eachCount()
+                            .maxByOrNull { it.value }
+                        if (winner != null && winner.value >= SPEED_VOTE_MIN)
+                            adopted = winner.key
+                    }
+                }
             }
             if (dets.isEmpty()) candidate = null
             return SignOutput(dets, adopted, signs, unrecognised)
@@ -210,4 +225,10 @@ class SignAnalyzer(context: android.content.Context? = null) {
     }
 
     fun close() = classifier?.close()
+
+    companion object {
+        const val SPEED_MIN_CONF = 0.55f
+        const val SPEED_VOTE_WINDOW = 5
+        const val SPEED_VOTE_MIN = 3
+    }
 }

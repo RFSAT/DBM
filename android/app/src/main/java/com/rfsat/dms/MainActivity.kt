@@ -11,6 +11,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -275,10 +276,29 @@ class MainActivity : ComponentActivity() {
             Text("${st.currentSpeedKmh} km/h" +
                 when (st.speedSource) {
                     SpeedSource.GPS -> " GPS"; SpeedSource.VISUAL -> " est."; else -> " --"
-                } + (st.activeSpeedLimitKmh?.let { "  · limit $it" } ?: ""),
+                },
                 fontSize = 14.sp,
                 color = if (st.speedSource == SpeedSource.VISUAL) EnactWarning
                         else EnactOnSurface)
+            // Speed limit shown as a small sign roundel (red ring + number),
+            // which doubles as the icon next to the "Speed limit" label.
+            st.activeSpeedLimitKmh?.let { lim ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(28.dp).padding(end = 4.dp),
+                        contentAlignment = Alignment.Center) {
+                        androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+                            val r = size.minDimension / 2f
+                            drawCircle(Color.White, r, center)
+                            drawCircle(Color(0xFFD32F2F), r, center,
+                                style = Stroke(width = r * 0.34f))
+                        }
+                        Text("$lim", fontSize = 9.sp, fontWeight = FontWeight.Bold,
+                            color = Color.Black)
+                    }
+                    Text("Speed limit", fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold, color = EnactOnSurface)
+                }
+            }
             Text(mode, fontSize = 11.sp, color = EnactOnSurfaceDim)
         }
     }
@@ -411,7 +431,16 @@ class MainActivity : ComponentActivity() {
             }
             // Exit the application.
             androidx.compose.material3.OutlinedButton(
-                onClick = { finishAndRemoveTask() },
+                onClick = {
+                    // Fully exit: stop analysis, unbind and stop the foreground
+                    // service (otherwise it keeps the app alive), then remove the
+                    // task. Without stopping the service, Exit only closes the UI.
+                    service?.pauseAnalysis()
+                    cameras?.release()
+                    runCatching { unbindService(conn) }
+                    stopService(Intent(this@MainActivity, MonitorService::class.java))
+                    finishAndRemoveTask()
+                },
                 modifier = Modifier.weight(1f)) {
                 Text("Exit", fontSize = 13.sp, color = Color(0xFFE57373))
             }

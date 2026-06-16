@@ -410,6 +410,9 @@ class MonitorService : Service() {
         speed.stop(); yawRate.stop()
         recDriver?.stop(); recRoad?.stop()
         driver?.close(); road?.close(); signs.close(); lights.close(); alerter.release()
+        runCatching {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        }
         DLog.i(TAG, "onDestroy")
         super.onDestroy()
     }

@@ -5,6 +5,19 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v15.4 — speed-limit robustness, header icon, Exit fix (corrections)
+- Speed-limit adoption hardened: requires higher detector confidence AND a
+  majority vote over the last few readings before adopting, instead of two
+  consecutive frames. Reduces wrong numbers; small bounded delay. (Note:
+  mis-read digits ultimately reflect sign-model accuracy — see notes)
+- Header: speed limit shown as a small red-ring sign roundel with the value
+  inside, next to a shortened "Speed limit" label
+- Exit button now fully closes the app: stops analysis, releases cameras,
+  unbinds and stops the foreground service (which was keeping the app alive),
+  and clears the foreground notification. Previously Exit closed only the UI
+- (Sign bounding boxes not fully enclosing the sign reflect the trained
+  model's box tightness, not a decode error)
+
 ## v15.3 — driver overlay mirror made user-correctable (correction)
 - The driver face-box mirroring (added in v15.2, correct for the mirrored
   front-camera preview) is now a Settings toggle "Mirror driver face box",
