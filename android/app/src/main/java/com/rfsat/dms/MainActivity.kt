@@ -110,7 +110,7 @@ class MainActivity : ComponentActivity() {
             DLog.i(TAG, "permission results: " + res.entries.joinToString {
                 "${it.key.substringAfterLast('.')}=${it.value}" })
             permissionsOk = res[Manifest.permission.CAMERA] == true
-            if (permissionsOk) maybeStart()
+            if (permissionsOk) { startMonitorService(); maybeStart() }
             else DLog.w(TAG, "CAMERA permission denied — monitoring cannot start")
         }
 
@@ -123,8 +123,10 @@ class MainActivity : ComponentActivity() {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE }
         // (3) keep the screen on while DBM is active
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        startForegroundService(Intent(this, MonitorService::class.java))
-        bindService(Intent(this, MonitorService::class.java), conn, Context.BIND_AUTO_CREATE)
+        // NOTE: a camera-typed foreground service may only be started once the
+        // CAMERA runtime permission is granted (Android 14+ enforces this and
+        // throws otherwise). So we request permissions first and start/bind the
+        // service from the permission result, not here.
         val perms = mutableListOf(
             Manifest.permission.CAMERA,
             Manifest.permission.ACCESS_FINE_LOCATION,
@@ -133,6 +135,14 @@ class MainActivity : ComponentActivity() {
             perms += Manifest.permission.POST_NOTIFICATIONS
         permLauncher.launch(perms.toTypedArray())
         setContent { DbmTheme { Surface(Modifier.fillMaxSize()) { Root() } } }
+    }
+
+    /** Start and bind the monitoring service. Called only after the CAMERA
+     *  permission is granted, so the camera-typed FGS start is legal. */
+    private fun startMonitorService() {
+        if (service != null) return
+        startForegroundService(Intent(this, MonitorService::class.java))
+        bindService(Intent(this, MonitorService::class.java), conn, Context.BIND_AUTO_CREATE)
     }
 
     private fun maybeStart() {
@@ -268,20 +278,17 @@ class MainActivity : ComponentActivity() {
                 .padding(horizontal = 14.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically) {
-            Text("Compliance ${st.score}/100",
+            Text("${st.score}%",
                 fontWeight = FontWeight.Bold, fontSize = 18.sp,
                 color = when { st.score >= 80 -> EnactGreen
                                st.score >= 50 -> EnactWarning
                                else -> Color(0xFFE57373) })
-            Text("${st.currentSpeedKmh} km/h" +
-                when (st.speedSource) {
-                    SpeedSource.GPS -> " GPS"; SpeedSource.VISUAL -> " est."; else -> " --"
-                },
+            Text("${st.currentSpeedKmh} km/h",
                 fontSize = 14.sp,
                 color = if (st.speedSource == SpeedSource.VISUAL) EnactWarning
                         else EnactOnSurface)
-            // Speed limit shown as a small sign roundel (red ring + number),
-            // which doubles as the icon next to the "Speed limit" label.
+            // Speed limit shown as a small sign roundel (red ring + value) with
+            // a very short "Limit" label.
             st.activeSpeedLimitKmh?.let { lim ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(28.dp).padding(end = 4.dp),
@@ -295,19 +302,28 @@ class MainActivity : ComponentActivity() {
                         Text("$lim", fontSize = 9.sp, fontWeight = FontWeight.Bold,
                             color = Color.Black)
                     }
-                    Text("Speed limit", fontSize = 13.sp,
+                    Text("Limit", fontSize = 13.sp,
                         fontWeight = FontWeight.Bold, color = EnactOnSurface)
                 }
             }
-            Text(mode, fontSize = 11.sp, color = EnactOnSurfaceDim)
+            // Show a brief camera-mode hint, without internal jargon. The
+            // normal (both-cameras) mode shows nothing; only the fallback is
+            // flagged.
+            val modeLabel = if (mode.contains("multiplex")) "single-cam" else ""
+            if (modeLabel.isNotEmpty())
+                Text(modeLabel, fontSize = 11.sp, color = EnactOnSurfaceDim)
         }
     }
 
     @Composable
     private fun CameraCard(role: CameraRole, view: PreviewView, modifier: Modifier) {
         val textMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
-        val result by (service?.results?.get(role)
+        val analysing by (service?.analysing
+            ?: MutableStateFlow(true)).collectAsState()
+        val liveResult by (service?.results?.get(role)
             ?: MutableStateFlow(AnalysisResult())).collectAsState()
+        // When analysis is stopped/paused, show no overlays at all.
+        val result = if (analysing) liveResult else AnalysisResult()
         Box(modifier.clip(RoundedCornerShape(14.dp)).background(EnactSurface)) {
             AndroidView(
                 factory = {
@@ -319,7 +335,7 @@ class MainActivity : ComponentActivity() {
                 // PreviewView FILL_CENTER crops the 4:3 frame to the card —
                 // map normalized frame coords through the same scale+crop so
                 // overlays align with the visible video.
-                val frameAr = 4f / 3f
+                val frameAr = result.frameAspect
                 val viewAr = size.width / size.height
                 val sx: Float; val sy: Float; val ox: Float; val oy: Float
                 if (viewAr > frameAr) {      // card wider: frame cropped top/bottom
@@ -411,6 +427,9 @@ class MainActivity : ComponentActivity() {
     private fun ControlBar() {
         val analysing by (service?.analysing
             ?: MutableStateFlow(true)).collectAsState()
+        val btnHeight = 34.dp
+        val tightPad = androidx.compose.foundation.layout.PaddingValues(
+            horizontal = 8.dp, vertical = 0.dp)
         Row(Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             // Start / Pause toggle.
@@ -418,7 +437,8 @@ class MainActivity : ComponentActivity() {
                 onClick = {
                     if (analysing) service?.pauseAnalysis() else service?.resumeAnalysis()
                 },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).height(btnHeight),
+                contentPadding = tightPad,
                 colors = androidx.compose.material3.ButtonDefaults.buttonColors(
                     containerColor = if (analysing) EnactWarning else EnactGreen)) {
                 Text(if (analysing) "Pause" else "Start", fontSize = 13.sp)
@@ -426,7 +446,8 @@ class MainActivity : ComponentActivity() {
             // Stop: pause analysis and reset the live score view.
             androidx.compose.material3.OutlinedButton(
                 onClick = { service?.pauseAnalysis() },
-                modifier = Modifier.weight(1f)) {
+                modifier = Modifier.weight(1f).height(btnHeight),
+                contentPadding = tightPad) {
                 Text("Stop", fontSize = 13.sp, color = EnactOnSurface)
             }
             // Exit the application.
@@ -441,7 +462,8 @@ class MainActivity : ComponentActivity() {
                     stopService(Intent(this@MainActivity, MonitorService::class.java))
                     finishAndRemoveTask()
                 },
-                modifier = Modifier.weight(1f)) {
+                modifier = Modifier.weight(1f).height(btnHeight),
+                contentPadding = tightPad) {
                 Text("Exit", fontSize = 13.sp, color = Color(0xFFE57373))
             }
         }
@@ -450,8 +472,12 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun DetectionPanel(modifier: Modifier) {
         val dao = remember { DmsDatabase.get(this).events() }
+        val analysing by (service?.analysing
+            ?: MutableStateFlow(true)).collectAsState()
         // Show a shorter list so the cameras get more vertical space.
-        val events by dao.latest(8).collectAsStateWithLifecycle(initialValue = emptyList())
+        val dbEvents by dao.latest(8).collectAsStateWithLifecycle(initialValue = emptyList())
+        // When stopped, clear past detections from the Detector screen.
+        val events = if (analysing) dbEvents else emptyList()
         val fmt = remember { SimpleDateFormat("HH:mm:ss", Locale.UK) }
         Column(modifier.fillMaxWidth()
                 .clip(RoundedCornerShape(14.dp))
@@ -771,9 +797,10 @@ class MainActivity : ComponentActivity() {
                     }
             }
             Spacer(Modifier.height(12.dp))
-            Text("Data processing and storage occurs ONLY on this device, " +
-                "nothing is transmitted.", color = EnactOnSurfaceDim, fontSize = 13.sp,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Justify)
+            Text("Data processing and storage occurs ONLY on this device.",
+                color = EnactOnSurfaceDim, fontSize = 13.sp)
+            Text("NO data or information is transmitted to 3rd parties.",
+                color = EnactOnSurfaceDim, fontSize = 13.sp)
             Spacer(Modifier.height(8.dp))
             Text("Copyright (c) RFSAT Limited, 2026",
                 color = EnactOnSurfaceDim, fontSize = 12.sp)
@@ -802,7 +829,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         cameras?.release()
-        unbindService(conn)
+        runCatching { unbindService(conn) }   // may already be unbound (Exit)
         super.onDestroy()
     }
 }

@@ -48,6 +48,23 @@ class PhoneCameraManager(
     /** When false (vehicle ~stationary), road analysis runs at a reduced rate
      *  to save CPU/battery — a performance recommendation from the review. */
     @Volatile var vehicleMoving = true
+    /** Frame-interval multiplier driven by device thermal state. 1.0 = normal;
+     *  higher = slower analysis to shed heat. Prevents the prolonged-use
+     *  overheating seen on long drives. */
+    @Volatile private var thermalFactor = 1.0
+    private val powerManager =
+        context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+    private val thermalListener =
+        android.os.PowerManager.OnThermalStatusChangedListener { status ->
+            thermalFactor = when (status) {
+                android.os.PowerManager.THERMAL_STATUS_NONE,
+                android.os.PowerManager.THERMAL_STATUS_LIGHT -> 1.0
+                android.os.PowerManager.THERMAL_STATUS_MODERATE -> 1.6
+                android.os.PowerManager.THERMAL_STATUS_SEVERE -> 2.5
+                else -> 4.0   // CRITICAL/EMERGENCY/SHUTDOWN: heavily throttle
+            }
+            DLog.i(TAG, "thermal status $status -> factor $thermalFactor")
+        }
     private val handler = Handler(Looper.getMainLooper())
     private var provider: ProcessCameraProvider? = null
     private var mode = Mode.MULTIPLEXED
@@ -55,6 +72,9 @@ class PhoneCameraManager(
     private var released = false
 
     fun start() {
+        runCatching {
+            powerManager.addThermalStatusListener(analysisExecutor, thermalListener)
+        }
         val future = ProcessCameraProvider.getInstance(context)
         future.addListener({
             provider = future.get()
@@ -130,7 +150,17 @@ class PhoneCameraManager(
     private fun singleConfig(
         selector: CameraSelector, view: PreviewView, role: CameraRole
     ): SingleCameraConfig {
-        val preview = Preview.Builder().build().also {
+        val preview = Preview.Builder()
+            // Match the analysis 16:9 aspect so overlay boxes align with video.
+            .setResolutionSelector(
+                androidx.camera.core.resolutionselector.ResolutionSelector.Builder()
+                    .setAspectRatioStrategy(
+                        androidx.camera.core.resolutionselector.AspectRatioStrategy(
+                            androidx.camera.core.AspectRatio.RATIO_16_9,
+                            androidx.camera.core.resolutionselector.AspectRatioStrategy
+                                .FALLBACK_RULE_AUTO))
+                    .build())
+            .build().also {
             it.surfaceProvider = view.surfaceProvider
             previews[role] = it
         }
@@ -165,7 +195,17 @@ class PhoneCameraManager(
                 Triple(CameraSelector.DEFAULT_FRONT_CAMERA, interiorPreview, CameraRole.DRIVER)
             else
                 Triple(CameraSelector.DEFAULT_BACK_CAMERA, roadPreview, CameraRole.FRONT)
-        val preview = Preview.Builder().build().also {
+        val preview = Preview.Builder()
+            // Match the analysis 16:9 aspect so overlay boxes align with video.
+            .setResolutionSelector(
+                androidx.camera.core.resolutionselector.ResolutionSelector.Builder()
+                    .setAspectRatioStrategy(
+                        androidx.camera.core.resolutionselector.AspectRatioStrategy(
+                            androidx.camera.core.AspectRatio.RATIO_16_9,
+                            androidx.camera.core.resolutionselector.AspectRatioStrategy
+                                .FALLBACK_RULE_AUTO))
+                    .build())
+            .build().also {
             it.surfaceProvider = view.surfaceProvider
             previews[role] = it
         }
@@ -198,12 +238,14 @@ class PhoneCameraManager(
                 ua.setAnalyzer(analysisExecutor) { img: ImageProxy ->
                     val now = System.currentTimeMillis()
                     // Driver pipeline always full-rate; road pipeline drops to
-                    // ~2 fps when stationary, ~6 fps when moving.
-                    val minIntervalMs = when {
+                    // ~2 fps when stationary, ~6 fps when moving. Under thermal
+                    // stress all intervals are stretched to shed heat.
+                    val baseInterval = when {
                         role == CameraRole.DRIVER -> 100L
                         vehicleMoving -> 160L
                         else -> 500L
                     }
+                    val minIntervalMs = (baseInterval * thermalFactor).toLong()
                     if (now - lastT >= minIntervalMs) {
                         lastT = now
                         var bmp = img.toBitmap()
@@ -221,6 +263,7 @@ class PhoneCameraManager(
 
     fun release() {
         released = true
+        runCatching { powerManager.removeThermalStatusListener(thermalListener) }
         handler.removeCallbacksAndMessages(null)
         provider?.unbindAll()
         analysisExecutor.shutdown()

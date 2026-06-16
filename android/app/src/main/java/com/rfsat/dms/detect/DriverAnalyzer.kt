@@ -69,7 +69,14 @@ class DriverAnalyzer(context: Context) {
     private var lastYawnEventMs = 0L
     private val perclosWindow = ArrayDeque<Pair<Long, Boolean>>() // (t, closed)
 
+    private var lastMpTs = -1L
+
     fun analyze(frame: Bitmap, tMs: Long): AnalysisResult {
+        // MediaPipe's video API requires strictly increasing timestamps. Under
+        // thermal load frames can arrive late/out of order; feeding a stale
+        // timestamp throws. Skip any frame not newer than the last processed.
+        if (tMs <= lastMpTs) return AnalysisResult()
+        lastMpTs = tMs
         val res = landmarker.detectForVideo(BitmapImageBuilder(frame).build(), tMs)
         if (res.faceLandmarks().isEmpty()) {
             resetTransient()

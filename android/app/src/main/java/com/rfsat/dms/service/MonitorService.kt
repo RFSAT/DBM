@@ -233,6 +233,8 @@ class MonitorService : Service() {
 
     fun submitFrame(role: CameraRole, frame: Bitmap, tMs: Long) {
         if (!analysing.value) { frame.recycle(); return }   // paused: drop frames
+        val frameAspect = if (frame.height > 0)
+            frame.width.toFloat() / frame.height else 16f / 9f
         scope.launch {
             val result = runCatching {
                 when (role) {
@@ -243,7 +245,10 @@ class MonitorService : Service() {
                 }
             }.onFailure { DLog.e(TAG, "analysis failed for $role", it) }
              .getOrDefault(AnalysisResult())
-            results[role]!!.value = result
+            // Tag the result with the real frame aspect ratio so the overlay
+            // aligns boxes correctly regardless of the delivered resolution.
+            val aspected = result.copy(frameAspect = frameAspect)
+            results[role]!!.value = aspected
             if (role != CameraRole.DRIVER && result.signs.isNotEmpty()) {
                 recognisedSigns.value = result.signs
                 // Log each newly-seen sign once (dedup within a short window) so

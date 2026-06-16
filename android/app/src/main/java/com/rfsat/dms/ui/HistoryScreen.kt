@@ -56,12 +56,18 @@ fun HistoryScreen(dao: EventDao, onBack: () -> Unit) {
         Row(Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically) {
-            Text("Violation history (${events.size})", fontSize = 20.sp)
+            Text("Violations (${events.size})", fontSize = 20.sp)
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf(null, "CRITICAL", "WARNING", "INFO").forEach { f ->
                     FilterChip(selected = filter == f,
                         onClick = { filter = f },
-                        label = { Text(f ?: "All", fontSize = 12.sp) })
+                        label = {
+                            // Display first-capital labels; the filter value
+                            // itself stays uppercase to match stored severity.
+                            val lbl = f?.lowercase()
+                                ?.replaceFirstChar { it.uppercase() } ?: "All"
+                            Text(lbl, fontSize = 12.sp)
+                        })
                 }
                 TextButton(onClick = onBack) { Text("Back") }
             }

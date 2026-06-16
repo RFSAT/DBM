@@ -86,6 +86,9 @@ data class AnalysisResult(
     val speedLimitSeen: Int? = null,
     /** Recognised road signs in this frame (name + category) for display. */
     val signs: List<RecognisedSign> = emptyList(),
+    /** Aspect ratio (width/height) of the analysed frame, for correct overlay
+     *  alignment. Defaults to 16:9, the requested analysis resolution. */
+    val frameAspect: Float = 16f / 9f,
 )
 
 /** A classified road sign for on-screen display. */

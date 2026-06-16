@@ -5,6 +5,45 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v15.6 — drive-log crash fixes + thermal throttling (corrections)
+From a ~7-hour real drive log (Galaxy S24, Android 16):
+- FIX launch crash (SecurityException): a camera-typed foreground service may
+  only be started AFTER the CAMERA runtime permission is granted on Android 14+.
+  The service is now started from the permission result, not eagerly in
+  onCreate. (App previously crashed once on first launch, then recovered.)
+- FIX Exit crash (IllegalArgumentException "Service not registered"): the
+  activity onDestroy unbound the service a second time after Exit had already
+  unbound it. Guarded both unbind paths.
+- FIX 197 MediaPipe "smaller timestamp" errors: under thermal load frames
+  arrived out of order; the face landmarker now skips any frame whose timestamp
+  is not strictly newer than the last processed (MediaPipe video API requires
+  increasing timestamps).
+- NEW thermal throttling: analysis frame intervals stretch as the device heats
+  (moderate x1.6, severe x2.5, critical x4), shedding load to mitigate the
+  overheating seen on long drives instead of letting the phone cook.
+
+## v15.5 — UI simplification + overlay-alignment fix (corrections)
+- Header: score shown as percentage (e.g. "94%") instead of "Compliance N/100";
+  current speed shown plainly in km/h without the "GPS" suffix; speed limit
+  shown as the sign roundel with a very short "Limit" label; the internal
+  "concurrent"/"multiplexed" camera-mode word removed (only a "single-cam"
+  hint shows in the fallback case)
+- FIX sign/road bounding boxes "floating" around their target: the overlay
+  mapped coordinates assuming a 4:3 frame, but v15.0 raised the analysis
+  resolution to 16:9. The overlay now uses the real frame aspect ratio
+  (carried on AnalysisResult), and the camera previews are pinned to 16:9 to
+  match — boxes now align with the video
+- When detection is stopped/paused: no overlays are drawn and the Detector
+  screen's detection list is cleared
+- Control buttons (Pause/Stop/Exit) made shorter (reduced height, tight padding)
+- History: "Violation history" -> "Violations"; severity filter chips show
+  first-capital labels ("Critical", "Warning", "Info")
+- About: data statement split into two lines — "Data processing and storage
+  occurs ONLY on this device." and "NO data or information is transmitted to
+  3rd parties."
+- Speed-limit fault count moved conceptually to History (the live header no
+  longer shows the raw compliance fraction)
+
 ## v15.4 — speed-limit robustness, header icon, Exit fix (corrections)
 - Speed-limit adoption hardened: requires higher detector confidence AND a
   majority vote over the last few readings before adopting, instead of two
