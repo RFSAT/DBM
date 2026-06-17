@@ -5,6 +5,7 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.rfsat.dms.Detection
+import com.rfsat.dms.util.DLog
 import kotlinx.coroutines.tasks.await
 
 /**
@@ -85,14 +86,21 @@ class SignAnalyzer(context: android.content.Context? = null) {
                     val boxH = hit.bottom - hit.top
                     if (boxH >= SPEED_OCR_MIN_BOX) {
                         val v = ocrSpeedLimit(frame, hit)
+                        DLog.i(TAG, "speed-limit OCR: box=%.3f read=%s".format(boxH,
+                            v?.toString() ?: "none"))
                         if (v != null) {
                             speedVotes.addLast(v)
                             while (speedVotes.size > SPEED_VOTE_WINDOW) speedVotes.removeFirst()
                             val winner = speedVotes.groupingBy { it }.eachCount()
                                 .maxByOrNull { it.value }
-                            if (winner != null && winner.value >= SPEED_VOTE_MIN)
+                            if (winner != null && winner.value >= SPEED_VOTE_MIN) {
                                 adopted = winner.key
+                                DLog.i(TAG, "speed limit adopted: ${winner.key} km/h")
+                            }
                         }
+                    } else {
+                        DLog.i(TAG, "speed-limit sign seen but too small for OCR " +
+                            "(box=%.3f < %.3f)".format(boxH, SPEED_OCR_MIN_BOX))
                     }
                 }
             }
@@ -167,23 +175,37 @@ class SignAnalyzer(context: android.content.Context? = null) {
     }
 
     /** OCR the number on a detected speed-limit sign box. Returns a plausible
-     *  limit (multiple of 5, 5..130) or null. The crop is the detected box,
-     *  which by the time this runs is close/large enough to be legible. */
+     *  limit (multiple of 5, 5..130) or null. The crop is padded slightly and
+     *  upscaled if small, because ML Kit struggles with tiny text. */
     private suspend fun ocrSpeedLimit(frame: Bitmap, hit: SignDetector.SignHit): Int? {
         val w = frame.width; val h = frame.height
-        val l = (hit.left * w).toInt().coerceIn(0, w - 1)
-        val t = (hit.top * h).toInt().coerceIn(0, h - 1)
-        val r = (hit.right * w).toInt().coerceIn(l + 1, w)
-        val b = (hit.bottom * h).toInt().coerceIn(t + 1, h)
-        val crop = runCatching { Bitmap.createBitmap(frame, l, t, r - l, b - t) }
+        // Pad the box ~12% each side: the digits sit inside the sign border and
+        // a tight crop can clip them.
+        val pad = 0.12f
+        val bw = (hit.right - hit.left); val bh = (hit.bottom - hit.top)
+        val l = ((hit.left - bw * pad) * w).toInt().coerceIn(0, w - 1)
+        val t = ((hit.top - bh * pad) * h).toInt().coerceIn(0, h - 1)
+        val r = ((hit.right + bw * pad) * w).toInt().coerceIn(l + 1, w)
+        val b = ((hit.bottom + bh * pad) * h).toInt().coerceIn(t + 1, h)
+        var crop = runCatching { Bitmap.createBitmap(frame, l, t, r - l, b - t) }
             .getOrNull() ?: return null
+        // Upscale so the shorter side is at least ~96px — ML Kit reads digits
+        // far better when they are not tiny.
+        val minSide = minOf(crop.width, crop.height)
+        if (minSide < 96) {
+            val s = 96f / minSide
+            crop = runCatching {
+                Bitmap.createScaledBitmap(crop, (crop.width * s).toInt(),
+                    (crop.height * s).toInt(), true)
+            }.getOrNull() ?: crop
+        }
         val ocr = runCatching {
             recognizer.process(InputImage.fromBitmap(crop, 0)).await()
         }.getOrNull()
         crop.recycle()
         if (ocr == null) return null
         for (block in ocr.textBlocks) for (line in block.lines) {
-            val txt = line.text.trim().replace("O", "0").replace(" ", "")
+            val txt = line.text.trim().replace("O", "0").replace("o", "0").replace(" ", "")
             val v = txt.toIntOrNull() ?: continue
             if (v in 5..130 && v % 5 == 0) return v
         }
@@ -261,11 +283,13 @@ class SignAnalyzer(context: android.content.Context? = null) {
     fun close() = classifier?.close()
 
     companion object {
+        private const val TAG = "SignAnalyzer"
         const val SPEED_MIN_CONF = 0.55f
-        const val SPEED_VOTE_WINDOW = 5
-        const val SPEED_VOTE_MIN = 3
-        // Minimum sign-box height (fraction of frame) before OCR is attempted —
-        // defers reading until the sign is close enough to be legible.
-        const val SPEED_OCR_MIN_BOX = 0.06f
+        const val SPEED_VOTE_WINDOW = 4
+        const val SPEED_VOTE_MIN = 2
+        // Minimum sign-box height (fraction of frame) before OCR is attempted.
+        // Lowered from 0.06: real speed signs often pass before reaching 6% of
+        // frame height, so OCR was never triggered on the road.
+        const val SPEED_OCR_MIN_BOX = 0.04f
     }
 }

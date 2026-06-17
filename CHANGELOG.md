@@ -5,6 +5,25 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v16.2 — drive-log fixes: speed OCR, road-box mirroring, thermal balance
+From the 2026-06-17 drive (signs detected well, but numbers never read, plate
+box mirrored, signs sparse later in drive):
+- Speed-limit OCR: added full diagnostic logging (box size, read value, adopt);
+  lowered SPEED_OCR_MIN_BOX 0.06->0.04 (signs were passing before reaching the
+  old gate, so OCR never fired); relaxed vote 3-of-5 -> 2-of-4; OCR crop now
+  padded ~12% and upscaled to >=96px shorter side (ML Kit reads small digits
+  poorly). Should now actually read and commit numbers — and if not, the log
+  will say whether OCR fired and what it read.
+- Road/plate overlay mirroring: the rear preview is mirrored on some devices,
+  flipping road/plate boxes left-right (same class of bug as the driver face
+  box). Added a "Mirror road/plate boxes" Settings toggle (default off); flip
+  it once if boxes track the wrong way. (The OCR/evidence crop already used true
+  frame coordinates, so only the on-screen overlay was affected.)
+- Thermal balance: road pipeline now fully suspended only at CRITICAL (was
+  SEVERE). At SEVERE it keeps running rate-limited, so sign/hazard detection is
+  preserved. The previous setting silently killed road detection for long
+  stretches of a hot drive (53 signs in first 8 min vs 42 in next 2.5 hrs).
+
 ## v16.1 — build fix (correction)
 - FIX SignAnalyzer compile errors: the new ocrSpeedLimit function had been
   inserted INSIDE analyze() (making it a local function — hence "private not

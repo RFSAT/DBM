@@ -71,8 +71,12 @@ class PhoneCameraManager(
                 android.os.PowerManager.THERMAL_STATUS_SEVERE -> 3.0
                 else -> 5.0
             }
-            // Suspend the heavy road pipeline at SEVERE+ to actually cool down.
-            thermalSuspendRoad = status >= android.os.PowerManager.THERMAL_STATUS_SEVERE
+            // Fully suspend the heavy road pipeline only at CRITICAL+ (was
+            // SEVERE). At SEVERE the road pipeline keeps running but heavily
+            // rate-limited (factor 3.0) — this preserves sign/hazard detection,
+            // which full suspension was silently killing for long stretches of a
+            // hot drive, while still shedding most of the load.
+            thermalSuspendRoad = status >= android.os.PowerManager.THERMAL_STATUS_CRITICAL
             DLog.i(TAG, "thermal status $status -> factor $thermalFactor" +
                 if (thermalSuspendRoad) " (road analysis suspended)" else "")
         }

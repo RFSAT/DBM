@@ -351,10 +351,14 @@ class MainActivity : ComponentActivity() {
                 // mode, but landmark coordinates are not. Whether the box must be
                 // mirrored to match depends on the device, so it is a user
                 // setting (default on for the driver camera) that can be flipped
-                // once if the box tracks the wrong way.
-                val mirror = role == CameraRole.DRIVER &&
-                    getSharedPreferences("dbm", MODE_PRIVATE)
-                        .getBoolean("mirror_driver_overlay", true)
+                // once if the box tracks the wrong way. Some devices also mirror
+                // the REAR preview, flipping road/plate boxes left-right — so the
+                // road overlay has its own toggle (default off).
+                val prefs0 = getSharedPreferences("dbm", MODE_PRIVATE)
+                val mirror = if (role == CameraRole.DRIVER)
+                    prefs0.getBoolean("mirror_driver_overlay", true)
+                else
+                    prefs0.getBoolean("mirror_road_overlay", false)
                 result.detections.forEach { d ->
                     val classCol = when (d.detClass) {
                         DetClass.PEDESTRIAN -> Color(0xFFFFB300)   // amber
@@ -589,6 +593,8 @@ class MainActivity : ComponentActivity() {
         var tts by remember { mutableStateOf(prefs.getBoolean("alerts_tts", true)) }
         var mirrorDriver by remember {
             mutableStateOf(prefs.getBoolean("mirror_driver_overlay", true)) }
+        var mirrorRoad by remember {
+            mutableStateOf(prefs.getBoolean("mirror_road_overlay", false)) }
         Column(Modifier.fillMaxSize().padding(14.dp)
                 .verticalScroll(rememberScrollState())) {
             Text("Settings", color = EnactGreen, fontSize = 18.sp,
@@ -605,6 +611,10 @@ class MainActivity : ComponentActivity() {
             SettingRow("Mirror driver face box", mirrorDriver) {
                 mirrorDriver = it
                 prefs.edit().putBoolean("mirror_driver_overlay", it).apply()
+            }
+            SettingRow("Mirror road/plate boxes", mirrorRoad) {
+                mirrorRoad = it
+                prefs.edit().putBoolean("mirror_road_overlay", it).apply()
             }
             Spacer(Modifier.height(14.dp))
             Text("Detection elements", color = EnactGreen, fontSize = 15.sp,
