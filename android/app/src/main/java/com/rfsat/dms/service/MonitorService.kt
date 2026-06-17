@@ -119,6 +119,7 @@ class MonitorService : Service() {
         "det_objects" -> detectRoadObjects = on
         "det_distance" -> detectFollowingDistance = on
         "capture_plate" -> capturePlate = on
+        "log_gps" -> speed.logTrace = on
         "det_lights" -> detectTrafficLights = on
         "det_driver" -> detectDriverState = on
         else -> Unit
@@ -172,6 +173,8 @@ class MonitorService : Service() {
                 .forEach { applyElement(it, p.getBoolean(it, true)) }
         }
         speed = SpeedMonitor(this)
+        speed.logTrace = getSharedPreferences("dbm", MODE_PRIVATE)
+            .getBoolean("log_gps", false)
         yawRate = YawRateMonitor(this)
         DLog.i(TAG, "onCreate complete (driver=${driver != null}, road=${road != null})")
 

@@ -595,6 +595,8 @@ class MainActivity : ComponentActivity() {
             mutableStateOf(prefs.getBoolean("mirror_driver_overlay", true)) }
         var mirrorRoad by remember {
             mutableStateOf(prefs.getBoolean("mirror_road_overlay", false)) }
+        var logGps by remember {
+            mutableStateOf(prefs.getBoolean("log_gps", false)) }
         Column(Modifier.fillMaxSize().padding(14.dp)
                 .verticalScroll(rememberScrollState())) {
             Text("Settings", color = EnactGreen, fontSize = 18.sp,
@@ -615,6 +617,11 @@ class MainActivity : ComponentActivity() {
             SettingRow("Mirror road/plate boxes", mirrorRoad) {
                 mirrorRoad = it
                 prefs.edit().putBoolean("mirror_road_overlay", it).apply()
+            }
+            SettingRow("Log GPS trace (for map cross-check dev)", logGps) {
+                logGps = it
+                service?.setElement("log_gps", it)
+                    ?: prefs.edit().putBoolean("log_gps", it).apply()
             }
             Spacer(Modifier.height(14.dp))
             Text("Detection elements", color = EnactGreen, fontSize = 15.sp,

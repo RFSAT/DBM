@@ -5,6 +5,17 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v16.3 — GPS trace logging for map-based speed-limit cross-check (feature)
+- SpeedMonitor now exposes the latest GNSS position (lat, lon) as a flow, for
+  the planned map-based speed-limit cross-check, and can log each fix as a
+  machine-parseable line: "GPS lat=.. lon=.. spd=.. acc=..".
+- New Settings toggle "Log GPS trace (for map cross-check dev)", DEFAULT OFF.
+  It records a precise location trace (personal data), so it is opt-in for
+  development use; the trace stays in the local on-device log and is never
+  transmitted. Enable it for one drive to capture a trace for the offline
+  map-fusion development, then disable.
+- No behavioural change when the toggle is off.
+
 ## v16.2 — drive-log fixes: speed OCR, road-box mirroring, thermal balance
 From the 2026-06-17 drive (signs detected well, but numbers never read, plate
 box mirrored, signs sparse later in drive):
