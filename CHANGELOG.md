@@ -5,6 +5,18 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v15.10 — smarter plate reading (refinement)
+- Plate reading is now decoupled from hazard events and runs whenever a lead
+  vehicle is closer than the safe distance, with a read-once-per-vehicle policy:
+  * reads only while the lead is closer than safe distance (closest/clearest);
+  * does NOT re-read the same lead vehicle once read with good confidence;
+  * re-reads if the prior read was low-confidence, or when a DIFFERENT vehicle
+    becomes the lead (detected via box position/size discontinuity, since track
+    IDs are not propagated into Detection).
+- Hazard evidence images now annotate with the plate already read for that lead
+  (no fresh OCR triggered at event time). Plate reading remains OFF by default,
+  local-only, never transmitted.
+
 ## v15.9 — mirror-aware gaze + lead-vehicle hazards + evidence capture (new features)
 - Feature 1: mirror glances no longer flagged as eyes-off-road. Head PITCH is
   now estimated alongside yaw, and a glance is recognised as a mirror check

@@ -37,6 +37,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -51,7 +52,13 @@ import kotlinx.coroutines.sync.withPermit
  */
 class MonitorService : Service() {
 
-    companion object { private const val TAG = "MonitorService" }
+    companion object {
+        private const val TAG = "MonitorService"
+        // Plate-read lead-identity thresholds (box continuity) and confidence.
+        private const val PLATE_SAME_CX = 0.15f   // lead centre within this = same
+        private const val PLATE_SAME_W = 0.35f    // lead width within 35% = same
+        private const val PLATE_GOOD_CONF = 0.8f  // skip re-read above this
+    }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val roadPermit = Semaphore(1)
@@ -244,40 +251,98 @@ class MonitorService : Service() {
         com.google.mlkit.vision.text.TextRecognition.getClient(
             com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS)
     }
+    // Plate-read state for the CURRENT lead vehicle. We read a plate at most
+    // once per vehicle while it is closer than the safe distance, and only
+    // re-read if the prior read was low-confidence or the lead vehicle changed.
+    private var plateLeadCx = -1f          // last lead centre-x (identity proxy)
+    private var plateLeadW = -1f           // last lead width (identity proxy)
+    private var platePlate: String? = null // best plate read for this lead
+    private var plateConf = 0f             // confidence of that read
+    @Volatile private var plateReadInFlight = false
+
+    /** Decide whether the current lead is the SAME vehicle as the last plate
+     *  read, using box position/size continuity (track IDs are not propagated
+     *  into Detection). A large jump in either implies a different vehicle. */
+    private fun sameLeadVehicle(cx: Float, wNorm: Float): Boolean {
+        if (plateLeadCx < 0f) return false
+        val dCx = abs(cx - plateLeadCx)
+        val dW = abs(wNorm - plateLeadW) / plateLeadW.coerceAtLeast(0.01f)
+        return dCx < PLATE_SAME_CX && dW < PLATE_SAME_W
+    }
+
+    /**
+     * Plate reading, separate from hazard events: called every frame a lead is
+     * present. Reads only when the lead is closer than the safe distance, once
+     * per vehicle, re-reading only on a low-confidence prior read or a vehicle
+     * change. This keeps OCR rare (cheap) and at the closest/clearest range.
+     */
+    private fun maybeReadLeadPlate(
+        frame: Bitmap, lead: Detection, distM: Float?, stopM: Float?,
+    ) {
+        if (!capturePlate || distM == null || stopM == null) return
+        if (distM >= stopM) return                      // only when closer than safe
+        if (plateReadInFlight) return
+        val cx = (lead.left + lead.right) / 2f
+        val wNorm = lead.right - lead.left
+        val same = sameLeadVehicle(cx, wNorm)
+        // Skip if same vehicle already read with good confidence.
+        if (same && platePlate != null && plateConf >= PLATE_GOOD_CONF) {
+            plateLeadCx = cx; plateLeadW = wNorm; return
+        }
+        if (!same) { platePlate = null; plateConf = 0f }   // new vehicle: reset
+        plateLeadCx = cx; plateLeadW = wNorm
+
+        val w = frame.width; val h = frame.height
+        val l = (lead.left * w).toInt().coerceIn(0, w - 1)
+        val t = (lead.top * h).toInt().coerceIn(0, h - 1)
+        val r = (lead.right * w).toInt().coerceIn(l + 1, w)
+        val b = (lead.bottom * h).toInt().coerceIn(t + 1, h)
+        val crop = runCatching { Bitmap.createBitmap(frame, l, t, r - l, b - t) }
+            .getOrNull() ?: return
+        plateReadInFlight = true
+        scope.launch {
+            val (plate, conf) = runCatching {
+                val res = plateRecognizer.process(
+                    com.google.mlkit.vision.common.InputImage.fromBitmap(crop, 0)).await()
+                val m = plateRegex.find(res.text.uppercase().replace("\n", " "))
+                // Confidence proxy: a matched plate-like token of plausible
+                // length read at close range.
+                val txt = m?.value?.trim()
+                val c = when {
+                    txt == null -> 0f
+                    txt.replace(Regex("[ -]"), "").length in 5..8 -> 0.8f
+                    else -> 0.4f
+                }
+                txt to c
+            }.getOrDefault(null to 0f)
+            if (plate != null && conf > plateConf) { platePlate = plate; plateConf = conf }
+            DLog.i(TAG, "lead plate read: ${plate ?: "none"} (conf $conf)")
+            crop.recycle()
+            plateReadInFlight = false
+        }
+    }
 
     /** Capture an evidence image of the lead vehicle during a serious hazard,
-     *  and optionally attempt a best-effort plate read (user-enabled only). */
+     *  annotating with the most recent plate read for this lead if available. */
     private fun captureLeadEvidence(
         frame: Bitmap, leadBox: Detection, ev: RiskEventCandidate, tMs: Long,
     ) {
-        // Crop the lead vehicle region for the evidence image / OCR.
         val w = frame.width; val h = frame.height
         val l = (leadBox.left * w).toInt().coerceIn(0, w - 1)
         val t = (leadBox.top * h).toInt().coerceIn(0, h - 1)
         val r = (leadBox.right * w).toInt().coerceIn(l + 1, w)
         val b = (leadBox.bottom * h).toInt().coerceIn(t + 1, h)
         val crop = runCatching { Bitmap.createBitmap(frame, l, t, r - l, b - t) }.getOrNull()
-
-        if (capturePlate && crop != null) {
-            // Best-effort plate OCR. Often fails at distance — that is expected;
-            // a failed read simply records no plate rather than a wrong one.
-            scope.launch {
-                val plate = runCatching {
-                    val res = plateRecognizer.process(
-                        com.google.mlkit.vision.common.InputImage.fromBitmap(crop, 0)).await()
-                    plateRegex.find(res.text.uppercase().replace("\n", " "))?.value?.trim()
-                }.getOrNull()
-                val detail = if (plate != null) "${ev.detail} [plate ~ $plate]"
-                             else "${ev.detail} [plate unread]"
-                evidence.record(CameraRole.FRONT, ev.copy(detail = detail), crop, tMs)
-                DLog.i(TAG, "lead hazard evidence: $detail")
-                crop.recycle()
-            }
-        } else {
-            // Image-only evidence (no plate reading).
-            evidence.record(CameraRole.FRONT, ev, crop ?: frame, tMs)
-            crop?.recycle()
+        // Annotate with the plate already read for this lead (if any), rather
+        // than triggering a fresh OCR — reading is handled by maybeReadLeadPlate.
+        val detail = when {
+            !capturePlate -> ev.detail
+            platePlate != null -> "${ev.detail} [plate ~ $platePlate]"
+            else -> "${ev.detail} [plate unread]"
         }
+        evidence.record(CameraRole.FRONT, ev.copy(detail = detail), crop ?: frame, tMs)
+        DLog.i(TAG, "lead hazard evidence: $detail")
+        crop?.recycle()
     }
 
     fun submitFrame(role: CameraRole, frame: Bitmap, tMs: Long) {
@@ -400,6 +465,9 @@ class MonitorService : Service() {
                     v * v / (2f * FollowingDistanceMonitor.DECEL_MS2)
             } else null
             val (hazEvents, hazLead) = following.checkLeadHazards(lead, distM, stopM, tMs)
+            // Plate reading runs whenever a lead is closer than safe distance —
+            // independent of hazard events — reading once per vehicle.
+            if (lead != null) maybeReadLeadPlate(frame, lead, distM, stopM)
             if (hazEvents.isNotEmpty()) {
                 followEvents = followEvents + hazEvents
                 // Capture an evidence image of the lead vehicle making the risky
