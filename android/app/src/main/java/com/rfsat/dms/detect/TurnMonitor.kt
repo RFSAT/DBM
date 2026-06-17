@@ -50,7 +50,7 @@ class TurnMonitor {
             SignDetector.NO_U_TURN -> Restriction.NO_U
             SignDetector.NO_STRAIGHT -> Restriction.NONE   // straight handled elsewhere
             SignDetector.AHEAD_ONLY -> Restriction.AHEAD_ONLY
-            5 -> Restriction.NO_ENTRY          // EU "no entry" id 5
+            SignDetector.NO_ENTRY -> Restriction.NO_ENTRY
             else -> return
         }
         if (r != Restriction.NONE) { restriction = r; restrictionMs = tMs }

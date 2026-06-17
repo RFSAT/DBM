@@ -5,6 +5,25 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v16.0 — 21-class EU sign model + speed-limit tracking/OCR (major)
+- Integrated the newly trained 21-class Mapillary EU sign detector
+  (sign_eu.tflite, output [1,25,8400] = 4 box + 21 classes), replacing the old
+  27-class model. SignDetector NAMES/category/turn-IDs rewritten to match
+  labels.txt; numClasses now 21.
+- Speed limits are a SINGLE generic class (speed_limit, id 9). The number is
+  read at runtime by OCR with deferred reading: OCR runs only once the sign box
+  is large enough (SPEED_OCR_MIN_BOX) — i.e. close enough to be legible — and a
+  plausible value (multiple of 5, 5..130) is committed via the existing
+  majority-vote buffer. This removes the digit-confusion of the old per-number
+  classes.
+- TurnMonitor updated for the shifted class IDs (no_entry now 6, ahead_only 14,
+  no_turns 4 added). Turn logic is now driven ONLY by EU-detector signs
+  (fromEuDetector flag); GTSRB fallback IDs no longer mis-feed turn detection.
+- Model performance (validation): overall mAP50 0.54. Strong: speed_limit 0.75,
+  stop 0.73, yield 0.72, no_overtaking 0.73, no_u_turn 0.66. Weak (as expected
+  from sparse data): no_left_turn 0.23, no_right_turn 0.34; no_turns
+  effectively untrained (1 val image).
+
 ## v15.11 — build fix (correction)
 - FIX two missing imports introduced in v15.9/15.10:
   * FollowingDistanceMonitor used abs() (lead-sway detection) without importing

@@ -369,7 +369,6 @@ class MonitorService : Service() {
                 // Log each newly-seen sign once (dedup within a short window) so
                 // recognised signs are traceable in the diagnostic log.
                 result.signs.forEach { sg ->
-                    turns.onSign(sg.classId, tMs)
                     if (sg.name != lastLoggedSign) {
                         lastLoggedSign = sg.name
                         DLog.i(TAG, "sign recognised: ${sg.name} (${sg.category}, " +
@@ -503,6 +502,10 @@ class MonitorService : Service() {
             val out = signs.analyze(frame, cand)
             signDets = out.detections; limit = out.speedLimitSeen
             recognisedSigns = out.signs
+            // Drive turn-restriction logic only from EU-detector signs, whose
+            // class IDs match the SignDetector constants TurnMonitor uses. GTSRB
+            // fallback IDs differ and must not be fed here.
+            if (out.fromEuDetector) out.signs.forEach { turns.onSign(it.classId, tMs) }
             // Diagnostic logging of sign-shaped regions GTSRB could not
             // recognise (e.g. EU no-turn signs), rate-limited.
             if (out.unrecognised.isNotEmpty() &&

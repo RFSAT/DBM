@@ -45,6 +45,10 @@ class SignAnalyzer(context: android.content.Context? = null) {
         val speedLimitSeen: Int?,
         val signs: List<com.rfsat.dms.RecognisedSign>,
         val unrecognised: List<String> = emptyList(),
+        // True when signs came from the EU detector (whose class IDs match
+        // SignDetector constants used by TurnMonitor). False for the GTSRB
+        // fallback, whose IDs differ and must not drive turn logic.
+        val fromEuDetector: Boolean = false,
     )
 
     /**
@@ -70,24 +74,30 @@ class SignAnalyzer(context: android.content.Context? = null) {
                     hit.name, SignDetector.category(hit.classId), hit.score, hit.classId)
                 dets += Detection(hit.name, hit.score,
                     hit.left, hit.top, hit.right, hit.bottom, risky = false)
-                // Speed-limit adoption is error-prone (the model can confuse
-                // similar digits), so require a higher confidence AND a majority
-                // vote over the last few high-confidence readings before
-                // adopting, rather than just two consecutive frames. This cuts
-                // wrong numbers at the cost of a small, bounded delay.
-                hit.speedLimitKmh?.let { v ->
-                    if (hit.score >= SPEED_MIN_CONF) {
-                        speedVotes.addLast(v)
-                        while (speedVotes.size > SPEED_VOTE_WINDOW) speedVotes.removeFirst()
-                        val winner = speedVotes.groupingBy { it }.eachCount()
-                            .maxByOrNull { it.value }
-                        if (winner != null && winner.value >= SPEED_VOTE_MIN)
-                            adopted = winner.key
+                // Speed-limit signs are a single generic class; the NUMBER is
+                // read by OCR. The sign is approached over many frames, so OCR
+                // is DEFERRED until the box is large enough (close enough) to be
+                // legible, then a plausible reading is committed via majority
+                // vote. This avoids reading distant, unreadable signs and the
+                // digit-confusion of trying to classify the number directly.
+                if (hit.classId == SignDetector.SPEED_LIMIT_ID &&
+                    hit.score >= SPEED_MIN_CONF) {
+                    val boxH = hit.bottom - hit.top
+                    if (boxH >= SPEED_OCR_MIN_BOX) {
+                        val v = ocrSpeedLimit(frame, hit)
+                        if (v != null) {
+                            speedVotes.addLast(v)
+                            while (speedVotes.size > SPEED_VOTE_WINDOW) speedVotes.removeFirst()
+                            val winner = speedVotes.groupingBy { it }.eachCount()
+                                .maxByOrNull { it.value }
+                            if (winner != null && winner.value >= SPEED_VOTE_MIN)
+                                adopted = winner.key
+                        }
                     }
                 }
             }
             if (dets.isEmpty()) candidate = null
-            return SignOutput(dets, adopted, signs, unrecognised)
+            return SignOutput(dets, adopted, signs, unrecognised, fromEuDetector = true)
         }
 
         // Fallback path: propose sign regions for the GTSRB classifier.
@@ -132,7 +142,30 @@ class SignAnalyzer(context: android.content.Context? = null) {
             }
         }
 
-        // Stage fallback: OCR speed-limit digits in the upper ROI.
+    /** OCR the number on a detected speed-limit sign box. Returns a plausible
+     *  limit (multiple of 5, 5..130) or null. The crop is the detected box,
+     *  which by the time this runs is close/large enough to be legible. */
+    private suspend fun ocrSpeedLimit(frame: Bitmap, hit: SignDetector.SignHit): Int? {
+        val w = frame.width; val h = frame.height
+        val l = (hit.left * w).toInt().coerceIn(0, w - 1)
+        val t = (hit.top * h).toInt().coerceIn(0, h - 1)
+        val r = (hit.right * w).toInt().coerceIn(l + 1, w)
+        val b = (hit.bottom * h).toInt().coerceIn(t + 1, h)
+        val crop = runCatching { Bitmap.createBitmap(frame, l, t, r - l, b - t) }
+            .getOrNull() ?: return null
+        val ocr = runCatching {
+            recognizer.process(InputImage.fromBitmap(crop, 0)).await()
+        }.getOrNull()
+        crop.recycle()
+        if (ocr == null) return null
+        for (block in ocr.textBlocks) for (line in block.lines) {
+            val txt = line.text.trim().replace("O", "0").replace(" ", "")
+            val v = txt.toIntOrNull() ?: continue
+            if (v in 5..130 && v % 5 == 0) return v
+        }
+        return null
+    }
+
         val roiH = (frame.height * 0.6f).toInt()
         val roi = Bitmap.createBitmap(frame, 0, 0, frame.width, roiH)
         val ocr = runCatching {
@@ -230,5 +263,8 @@ class SignAnalyzer(context: android.content.Context? = null) {
         const val SPEED_MIN_CONF = 0.55f
         const val SPEED_VOTE_WINDOW = 5
         const val SPEED_VOTE_MIN = 3
+        // Minimum sign-box height (fraction of frame) before OCR is attempted —
+        // defers reading until the sign is close enough to be legible.
+        const val SPEED_OCR_MIN_BOX = 0.06f
     }
 }

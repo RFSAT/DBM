@@ -26,7 +26,7 @@ class SignDetector(
     private val iouThresh: Float = 0.45f,
 ) {
     private val inputSize = 640
-    private val numClasses = NAMES.size           // 27
+    private val numClasses = NAMES.size           // 21
     private val numAnchors = 8400
 
     private var nnApi: NnApiDelegate? = null
@@ -48,8 +48,7 @@ class SignDetector(
     private val output = Array(1) { Array(4 + numClasses) { FloatArray(numAnchors) } }
 
     data class SignHit(val classId: Int, val name: String, val score: Float,
-                       val left: Float, val top: Float, val right: Float, val bottom: Float,
-                       val speedLimitKmh: Int?)
+                       val left: Float, val top: Float, val right: Float, val bottom: Float)
 
     fun detect(frame: Bitmap): List<SignHit> {
         val (sx, sy, padX, padY) = fill(frame)
@@ -68,8 +67,7 @@ class SignDetector(
             val r = (((cx + bw / 2f) - padX) / sx) / frame.width
             val b = (((cy + bh / 2f) - padY) / sy) / frame.height
             cand += SignHit(bestC, NAMES[bestC], bestS,
-                l.coerceIn(0f, 1f), t.coerceIn(0f, 1f), r.coerceIn(0f, 1f), b.coerceIn(0f, 1f),
-                SPEED_LIMITS[bestC])
+                l.coerceIn(0f, 1f), t.coerceIn(0f, 1f), r.coerceIn(0f, 1f), b.coerceIn(0f, 1f))
         }
         return nms(cand)
     }
@@ -129,29 +127,36 @@ class SignDetector(
     fun close() { interpreter.close(); nnApi?.close() }
 
     companion object {
-        // Class order MUST match labels.txt produced by prepare_mapillary.py.
+        // Class order MUST match labels.txt (21-class Mapillary model).
+        // Index: 0 no_left_turn 1 no_right_turn 2 no_u_turn 3 no_straight
+        // 4 no_turns 5 no_overtaking 6 no_entry 7 stop 8 yield 9 speed_limit
+        // 10 end_limit 11 keep_right 12 keep_left 13 roundabout 14 ahead_only
+        // 15 warn_pedestrians 16 warn_children 17 warn_roadworks
+        // 18 warn_curve_left 19 warn_curve_right 20 warn_slippery
         val NAMES = arrayOf(
             "No left turn", "No right turn", "No U-turn", "No straight",
-            "No overtaking", "No entry", "Stop", "Yield",
-            "20 km/h", "30 km/h", "40 km/h", "50 km/h", "60 km/h", "70 km/h",
-            "80 km/h", "100 km/h", "120 km/h",
-            "Keep right", "Keep left", "Roundabout", "Ahead only",
+            "No turns", "No overtaking", "No entry", "Stop", "Yield",
+            "Speed limit", "End of limit", "Keep right", "Keep left",
+            "Roundabout", "Ahead only",
             "Pedestrians", "Children", "Roadworks", "Curve left", "Curve right",
             "Slippery road")
 
-        val SPEED_LIMITS = arrayOf<Int?>(
-            null, null, null, null, null, null, null, null,
-            20, 30, 40, 50, 60, 70, 80, 100, 120,
-            null, null, null, null, null, null, null, null, null, null)
+        // The single speed-limit class — the NUMBER is read by OCR at runtime,
+        // not encoded in the class. SPEED_LIMITS is therefore null everywhere;
+        // SPEED_LIMIT_ID marks the class that triggers OCR + tracking.
+        const val SPEED_LIMIT_ID = 9
+        const val END_LIMIT_ID = 10
 
-        // Category for colour-coding (Regulatory red, Warning amber).
-        fun category(id: Int): String = if (id in 21..26) "Warning" else "Regulatory"
+        // Category for colour-coding (warnings are the last six classes).
+        fun category(id: Int): String = if (id in 15..20) "Warning" else "Regulatory"
 
         // Turn-restriction class ids for illegal-turn detection.
         const val NO_LEFT_TURN = 0
         const val NO_RIGHT_TURN = 1
         const val NO_U_TURN = 2
         const val NO_STRAIGHT = 3
-        const val AHEAD_ONLY = 20
+        const val NO_TURNS = 4
+        const val NO_ENTRY = 6
+        const val AHEAD_ONLY = 14
     }
 }
