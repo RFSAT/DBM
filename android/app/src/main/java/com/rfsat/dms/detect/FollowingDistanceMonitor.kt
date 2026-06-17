@@ -4,6 +4,7 @@ import com.rfsat.dms.Detection
 import com.rfsat.dms.RiskEventCandidate
 import com.rfsat.dms.RiskType
 import com.rfsat.dms.Severity
+import kotlin.math.abs
 
 /**
  * Safe following-distance monitoring.

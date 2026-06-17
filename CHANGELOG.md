@@ -5,6 +5,16 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v15.11 — build fix (correction)
+- FIX two missing imports introduced in v15.9/15.10:
+  * FollowingDistanceMonitor used abs() (lead-sway detection) without importing
+    kotlin.math.abs;
+  * MonitorService used Detection as a parameter type (plate/evidence methods)
+    without importing com.rfsat.dms.Detection — which cascaded into all the
+    .left/.right/.top/.bottom member errors the compiler reported.
+  Both added. Audited every kotlin.math and com.rfsat.dms reference across the
+  module; all others are either imported or fully-qualified.
+
 ## v15.10 — smarter plate reading (refinement)
 - Plate reading is now decoupled from hazard events and runs whenever a lead
   vehicle is closer than the safe distance, with a read-once-per-vehicle policy:

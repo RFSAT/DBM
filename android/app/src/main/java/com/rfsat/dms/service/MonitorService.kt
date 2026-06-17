@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.IBinder
 import com.rfsat.dms.AnalysisResult
 import com.rfsat.dms.CameraRole
+import com.rfsat.dms.Detection
 import com.rfsat.dms.RiskType
 import com.rfsat.dms.RiskEventCandidate
 import com.rfsat.dms.alert.Alerter
