@@ -29,6 +29,8 @@ enum class RiskType(
     // Road / collision risks
     FRONT_COLLISION_RISK("Fast-approaching object ahead", 10),
     UNSAFE_FOLLOWING_DISTANCE("Following closer than stopping distance", 10),
+    LEAD_VEHICLE_SWAYING("Vehicle ahead swaying within its lane", 7),
+    LEAD_HARD_BRAKING("Vehicle ahead braking hard", 9),
     REAR_COLLISION_RISK("Fast-approaching vehicle behind", 6, implemented = false),
     VULNERABLE_ROAD_USER("Pedestrian / cyclist / scooter in risk zone", 8),
     // Road-regulation compliance

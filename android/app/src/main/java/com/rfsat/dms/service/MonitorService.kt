@@ -37,6 +37,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 
@@ -88,6 +89,11 @@ class MonitorService : Service() {
     @Volatile var detectHardShoulder = true; private set
     @Volatile var detectRoadObjects = true; private set
     @Volatile var detectFollowingDistance = true; private set
+    /** Optional: attempt to OCR the lead vehicle's plate on a serious lead
+     *  hazard. OFF by default — stored locally only, never transmitted; the
+     *  user must explicitly opt in (privacy/GDPR: user-consented forensic
+     *  capture, like a dashcam). */
+    @Volatile var capturePlate = false; private set
     @Volatile var detectTrafficLights = true; private set
     @Volatile var detectDriverState = true; private set
 
@@ -104,6 +110,7 @@ class MonitorService : Service() {
         "det_shoulder" -> detectHardShoulder = on
         "det_objects" -> detectRoadObjects = on
         "det_distance" -> detectFollowingDistance = on
+        "capture_plate" -> capturePlate = on
         "det_lights" -> detectTrafficLights = on
         "det_driver" -> detectDriverState = on
         else -> Unit
@@ -145,6 +152,7 @@ class MonitorService : Service() {
         getSharedPreferences("dbm", MODE_PRIVATE).let { p ->
             alerter.audioEnabled = p.getBoolean("alerts_audio", true)
             alerter.ttsEnabled = p.getBoolean("alerts_tts", true)
+            capturePlate = p.getBoolean("capture_plate", false)
             following.factor = p.getInt("stop_dist_pct", 100) / 100f
             com.rfsat.dms.RiskType.entries.forEach { rt ->
                 if (p.contains("weight_${rt.name}"))
@@ -230,6 +238,47 @@ class MonitorService : Service() {
 
     fun pauseAnalysis() { analysing.value = false; DLog.i(TAG, "analysis paused") }
     fun resumeAnalysis() { analysing.value = true; DLog.i(TAG, "analysis resumed") }
+
+    private val plateRegex = Regex("[A-Z0-9]{2,4}[ -]?[A-Z0-9]{1,4}[ -]?[A-Z0-9]{1,4}")
+    private val plateRecognizer by lazy {
+        com.google.mlkit.vision.text.TextRecognition.getClient(
+            com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS)
+    }
+
+    /** Capture an evidence image of the lead vehicle during a serious hazard,
+     *  and optionally attempt a best-effort plate read (user-enabled only). */
+    private fun captureLeadEvidence(
+        frame: Bitmap, leadBox: Detection, ev: RiskEventCandidate, tMs: Long,
+    ) {
+        // Crop the lead vehicle region for the evidence image / OCR.
+        val w = frame.width; val h = frame.height
+        val l = (leadBox.left * w).toInt().coerceIn(0, w - 1)
+        val t = (leadBox.top * h).toInt().coerceIn(0, h - 1)
+        val r = (leadBox.right * w).toInt().coerceIn(l + 1, w)
+        val b = (leadBox.bottom * h).toInt().coerceIn(t + 1, h)
+        val crop = runCatching { Bitmap.createBitmap(frame, l, t, r - l, b - t) }.getOrNull()
+
+        if (capturePlate && crop != null) {
+            // Best-effort plate OCR. Often fails at distance — that is expected;
+            // a failed read simply records no plate rather than a wrong one.
+            scope.launch {
+                val plate = runCatching {
+                    val res = plateRecognizer.process(
+                        com.google.mlkit.vision.common.InputImage.fromBitmap(crop, 0)).await()
+                    plateRegex.find(res.text.uppercase().replace("\n", " "))?.value?.trim()
+                }.getOrNull()
+                val detail = if (plate != null) "${ev.detail} [plate ~ $plate]"
+                             else "${ev.detail} [plate unread]"
+                evidence.record(CameraRole.FRONT, ev.copy(detail = detail), crop, tMs)
+                DLog.i(TAG, "lead hazard evidence: $detail")
+                crop.recycle()
+            }
+        } else {
+            // Image-only evidence (no plate reading).
+            evidence.record(CameraRole.FRONT, ev, crop ?: frame, tMs)
+            crop?.recycle()
+        }
+    }
 
     fun submitFrame(role: CameraRole, frame: Bitmap, tMs: Long) {
         if (!analysing.value) { frame.recycle(); return }   // paused: drop frames
@@ -341,8 +390,25 @@ class MonitorService : Service() {
                         (prevLeadWNorm * prevLeadWNorm) / dt
             }
             prevLeadWNorm = wNorm; prevLeadTms = tMs
-            val (ev, _) = following.check(obj.detections, spd, tMs)
+            val (ev, distM) = following.check(obj.detections, spd, tMs)
             ev?.let { followEvents = listOf(it) }
+
+            // Lead-vehicle hazards (sway + hard braking), gated on proximity.
+            val stopM = if (spd >= FollowingDistanceMonitor.MIN_SPEED_KMH) {
+                val v = spd / 3.6f
+                v * FollowingDistanceMonitor.REACTION_S +
+                    v * v / (2f * FollowingDistanceMonitor.DECEL_MS2)
+            } else null
+            val (hazEvents, hazLead) = following.checkLeadHazards(lead, distM, stopM, tMs)
+            if (hazEvents.isNotEmpty()) {
+                followEvents = followEvents + hazEvents
+                // Capture an evidence image of the lead vehicle making the risky
+                // manoeuvre, and (only if the user has enabled it) attempt to
+                // read its plate. Stored locally only; never transmitted.
+                hazLead?.let { leadBox ->
+                    captureLeadEvidence(frame, leadBox, hazEvents.first(), tMs)
+                }
+            }
         }
 
         // Traffic lights (toggleable).

@@ -618,6 +618,9 @@ class MainActivity : ComponentActivity() {
             DetectionElementRow("Unsafe following distance", "det_distance")
             DetectionElementRow("Traffic lights (red / amber crossing)", "det_lights")
             DetectionElementRow("Driver state (eyes, gaze, mirrors)", "det_driver")
+            DetectionElementRow(
+                "Read lead-vehicle plate on serious hazard (stored locally only)",
+                "capture_plate", default = false)
             Spacer(Modifier.height(14.dp))
             Text("Self-calibration", color = EnactGreen, fontSize = 15.sp,
                 fontWeight = FontWeight.Bold)
@@ -663,9 +666,9 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun DetectionElementRow(label: String, key: String) {
+    private fun DetectionElementRow(label: String, key: String, default: Boolean = true) {
         val prefs = remember { getSharedPreferences("dbm", MODE_PRIVATE) }
-        var on by remember { mutableStateOf(prefs.getBoolean(key, true)) }
+        var on by remember { mutableStateOf(prefs.getBoolean(key, default)) }
         SettingRow(label, on) {
             on = it
             service?.setElement(key, it) ?: prefs.edit().putBoolean(key, it).apply()

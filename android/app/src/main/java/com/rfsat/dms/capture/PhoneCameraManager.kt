@@ -55,6 +55,12 @@ class PhoneCameraManager(
     @Volatile private var thermalFactor = 1.0
     private val powerManager =
         context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+    /** At high thermal levels the road pipeline (4 ML models) is suspended to
+     *  shed the dominant heat source, keeping only the lighter driver pipeline.
+     *  This is a stronger measure than rate-throttling alone, added after a
+     *  drive where the phone hit CRITICAL thermal and was force-stopped. */
+    @Volatile var thermalSuspendRoad = false
+        private set
     @get:androidx.annotation.RequiresApi(Build.VERSION_CODES.Q)
     private val thermalListener by lazy {
         android.os.PowerManager.OnThermalStatusChangedListener { status ->
@@ -62,10 +68,13 @@ class PhoneCameraManager(
                 android.os.PowerManager.THERMAL_STATUS_NONE,
                 android.os.PowerManager.THERMAL_STATUS_LIGHT -> 1.0
                 android.os.PowerManager.THERMAL_STATUS_MODERATE -> 1.6
-                android.os.PowerManager.THERMAL_STATUS_SEVERE -> 2.5
-                else -> 4.0   // CRITICAL/EMERGENCY/SHUTDOWN: heavily throttle
+                android.os.PowerManager.THERMAL_STATUS_SEVERE -> 3.0
+                else -> 5.0
             }
-            DLog.i(TAG, "thermal status $status -> factor $thermalFactor")
+            // Suspend the heavy road pipeline at SEVERE+ to actually cool down.
+            thermalSuspendRoad = status >= android.os.PowerManager.THERMAL_STATUS_SEVERE
+            DLog.i(TAG, "thermal status $status -> factor $thermalFactor" +
+                if (thermalSuspendRoad) " (road analysis suspended)" else "")
         }
     }
     private val handler = Handler(Looper.getMainLooper())
@@ -253,6 +262,11 @@ class PhoneCameraManager(
                         else -> 500L
                     }
                     val minIntervalMs = (baseInterval * thermalFactor).toLong()
+                    // Under high thermal load, skip the heavy road pipeline
+                    // entirely (driver analysis continues at reduced rate).
+                    if (role == CameraRole.FRONT && thermalSuspendRoad) {
+                        img.close(); return@setAnalyzer
+                    }
                     if (now - lastT >= minIntervalMs) {
                         lastT = now
                         var bmp = img.toBitmap()

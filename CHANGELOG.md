@@ -5,6 +5,36 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v15.9 — mirror-aware gaze + lead-vehicle hazards + evidence capture (new features)
+- Feature 1: mirror glances no longer flagged as eyes-off-road. Head PITCH is
+  now estimated alongside yaw, and a glance is recognised as a mirror check
+  using real mirror geometry — rearview (up + centred) vs side mirrors (down +
+  to a side). Such glances suppress the off-road event and count as mirror
+  checks
+- Feature 2: NEW LEAD_VEHICLE_SWAYING — flags the vehicle ahead moving widely
+  side-to-side within its lane (large lateral span without a sustained one-way
+  move). Evaluated ONLY when the lead is closer than the safe distance (more
+  reliable and cheaper, per the brief)
+- Feature 3: NEW LEAD_HARD_BRAKING — flags the vehicle ahead braking hard /
+  closing fast (rapid bounding-box growth). Also gated on proximity
+- Evidence: on a serious lead-vehicle hazard, an image of the lead vehicle is
+  captured to the local evidence store. OPTIONAL best-effort plate OCR (new
+  Settings toggle, OFF by default) appends a plate reading when legible; stored
+  locally only, never transmitted (user-consented forensic capture). Plate
+  reading is unreliable at distance by nature — a failed read records no plate
+  rather than a wrong one
+- Thermal (from v15.8) retained
+
+## v15.8 — stronger thermal mitigation (correction)
+From the 2026-06-17 drive log: v15.6/15.7 fixes confirmed working (no launch
+crash; MediaPipe timestamp errors down from 197 to 3; EU sign model recognising
+signs well). However the phone still climbed to CRITICAL thermal and was
+force-stopped by Android after ~4 min, restarting the app.
+- Thermal response strengthened: at SEVERE+ the heavy road pipeline (4 ML
+  models) is now SUSPENDED entirely, keeping only the lighter driver pipeline,
+  which is the real way to shed heat. Rate factors also raised (severe x3,
+  critical x5). Road analysis resumes automatically when the device cools.
+
 ## v15.7 — lint fix for thermal API level (correction)
 - FIX lint error: PowerManager.addThermalStatusListener and the
   OnThermalStatusChangedListener type require API 29, but minSdk is 26. Both

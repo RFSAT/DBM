@@ -59,6 +59,8 @@ class DriverAnalyzer(context: Context) {
     private var earClosedThresh = EAR_CLOSED
     private val yawNeutralSamples = ArrayDeque<Float>()
     private var yawNeutral = 0f
+    private val pitchNeutralSamples = ArrayDeque<Float>()
+    private var pitchNeutral = 0f
     var calibrated = false; private set
 
     // --- temporal state ---
@@ -121,6 +123,35 @@ class DriverAnalyzer(context: Context) {
         }
         val yawDeg = yawRaw - yawNeutral
 
+        // Coarse head pitch proxy: nose tip (1) vertical position between the
+        // brow (10, top) and chin (152, bottom). Negative = looking up,
+        // positive = looking down, relative to the calibrated neutral.
+        val noseY = p(1).y()
+        val faceT = p(10).y(); val faceB = p(152).y()
+        val pitchNorm = ((noseY - faceT) / (faceB - faceT) - 0.5f) * 2f
+        val pitchRaw = pitchNorm * 60f
+        if (!closed) {
+            pitchNeutralSamples.addLast(pitchRaw)
+            if (pitchNeutralSamples.size > 300) pitchNeutralSamples.removeFirst()
+            if (pitchNeutralSamples.size >= 60) {
+                val sorted = pitchNeutralSamples.sorted()
+                pitchNeutral = sorted[sorted.size / 2]
+            }
+        }
+        val pitchDeg = pitchRaw - pitchNeutral
+
+        // Classify whether the current head pose points at a mirror, using both
+        // yaw and pitch and the real geometry of mirror placement:
+        //  - REARVIEW mirror: top-centre of the windscreen -> gaze UP, roughly
+        //    centred (small yaw, clearly negative pitch).
+        //  - SIDE mirrors: low on the door windows -> gaze DOWN and to the SIDE
+        //    (clear yaw left/right, positive pitch).
+        val lookingAtRearview = abs(yawDeg) < REARVIEW_YAW_MAX_DEG &&
+            pitchDeg < -REARVIEW_PITCH_MIN_DEG
+        val lookingAtSideMirror = abs(yawDeg) in SIDE_YAW_MIN_DEG..SIDE_YAW_MAX_DEG &&
+            pitchDeg > SIDE_PITCH_MIN_DEG
+        val lookingAtMirror = lookingAtRearview || lookingAtSideMirror
+
         val events = mutableListOf<RiskEventCandidate>()
 
         // -- microsleep: continuous closure --
@@ -158,15 +189,18 @@ class DriverAnalyzer(context: Context) {
             }
         } else yawnSinceMs = 0L
 
-        // -- gaze off road --
-        if (abs(yawDeg) > YAW_OFF_ROAD_DEG && !closed) {
+        // -- gaze off road (mirror glances are NOT off-road) --
+        // A glance toward a mirror is legitimate scanning, so it does not count
+        // as eyes-off-road even though the head is turned. Only sustained gaze
+        // that is NOT mirror-directed raises the event.
+        if (abs(yawDeg) > YAW_OFF_ROAD_DEG && !closed && !lookingAtMirror) {
             if (yawOffSinceMs == 0L) yawOffSinceMs = tMs
             if (tMs - yawOffSinceMs > 2000) events += RiskEventCandidate(
                 RiskType.EYES_OFF_ROAD, Severity.WARNING, 0.7f, "yaw %.0f deg".format(yawDeg))
         } else yawOffSinceMs = 0L
 
-        // -- mirror checks: brief yaw excursions count as checks --
-        if (abs(yawDeg) in YAW_MIRROR_MIN_DEG..YAW_MIRROR_MAX_DEG) lastMirrorCheckMs = tMs
+        // -- mirror checks: a pose pointing at a mirror counts as a check --
+        if (lookingAtMirror) lastMirrorCheckMs = tMs
         if (tMs - lastMirrorCheckMs > MIRROR_INTERVAL_MS) {
             events += RiskEventCandidate(
                 RiskType.NO_MIRROR_CHECK, Severity.INFO, 0.6f,
@@ -200,6 +234,12 @@ class DriverAnalyzer(context: Context) {
         const val YAW_OFF_ROAD_DEG = 30f
         const val YAW_MIRROR_MIN_DEG = 15f
         const val YAW_MIRROR_MAX_DEG = 45f
+        // Mirror-glance geometry (yaw + pitch), per real mirror placement.
+        const val REARVIEW_YAW_MAX_DEG = 18f    // rearview is near-centre
+        const val REARVIEW_PITCH_MIN_DEG = 8f   // and requires looking UP
+        const val SIDE_YAW_MIN_DEG = 15f        // side mirrors are off to a side
+        const val SIDE_YAW_MAX_DEG = 50f
+        const val SIDE_PITCH_MIN_DEG = 6f       // and DOWN toward the door
         const val MIRROR_INTERVAL_MS = 120_000L
         const val MAR_YAWN = 0.6f
         const val YAWN_MIN_MS = 1500L
