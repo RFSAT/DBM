@@ -142,6 +142,30 @@ class SignAnalyzer(context: android.content.Context? = null) {
             }
         }
 
+        // Stage fallback: OCR speed-limit digits in the upper ROI.
+        val roiH = (frame.height * 0.6f).toInt()
+        val roi = Bitmap.createBitmap(frame, 0, 0, frame.width, roiH)
+        val ocr = runCatching {
+            recognizer.process(InputImage.fromBitmap(roi, 0)).await()
+        }.getOrNull()
+        roi.recycle()
+        if (ocr != null) {
+            for (block in ocr.textBlocks) for (line in block.lines) {
+                val txt = line.text.trim().replace("O", "0")
+                val v = txt.toIntOrNull() ?: continue
+                if (v !in 20..130 || v % 10 != 0) continue
+                val bb = line.boundingBox ?: continue
+                if (bb.width().toFloat() / bb.height() > 2.5f) continue
+                dets += Detection("limit $v", 0.8f,
+                    bb.left.toFloat() / frame.width, bb.top.toFloat() / frame.height,
+                    bb.right.toFloat() / frame.width, bb.bottom.toFloat() / frame.height)
+                if (candidate == v) adopted = v else candidate = v
+            }
+        }
+        if (dets.isEmpty()) candidate = null
+        return SignOutput(dets, adopted, signs, unrecognised)
+    }
+
     /** OCR the number on a detected speed-limit sign box. Returns a plausible
      *  limit (multiple of 5, 5..130) or null. The crop is the detected box,
      *  which by the time this runs is close/large enough to be legible. */
@@ -164,29 +188,6 @@ class SignAnalyzer(context: android.content.Context? = null) {
             if (v in 5..130 && v % 5 == 0) return v
         }
         return null
-    }
-
-        val roiH = (frame.height * 0.6f).toInt()
-        val roi = Bitmap.createBitmap(frame, 0, 0, frame.width, roiH)
-        val ocr = runCatching {
-            recognizer.process(InputImage.fromBitmap(roi, 0)).await()
-        }.getOrNull()
-        roi.recycle()
-        if (ocr != null) {
-            for (block in ocr.textBlocks) for (line in block.lines) {
-                val txt = line.text.trim().replace("O", "0")
-                val v = txt.toIntOrNull() ?: continue
-                if (v !in 20..130 || v % 10 != 0) continue
-                val bb = line.boundingBox ?: continue
-                if (bb.width().toFloat() / bb.height() > 2.5f) continue
-                dets += Detection("limit $v", 0.8f,
-                    bb.left.toFloat() / frame.width, bb.top.toFloat() / frame.height,
-                    bb.right.toFloat() / frame.width, bb.bottom.toFloat() / frame.height)
-                if (candidate == v) adopted = v else candidate = v
-            }
-        }
-        if (dets.isEmpty()) candidate = null
-        return SignOutput(dets, adopted, signs, unrecognised)
     }
 
     /**

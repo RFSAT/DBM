@@ -5,6 +5,14 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v16.1 — build fix (correction)
+- FIX SignAnalyzer compile errors: the new ocrSpeedLimit function had been
+  inserted INSIDE analyze() (making it a local function — hence "private not
+  applicable to local function", "unresolved reference ocrSpeedLimit" at the
+  call site, and the cascaded Any-vs-Int type mismatch). Moved it out to be a
+  proper sibling method of analyze(); the fallback-OCR block stays within
+  analyze() as intended. Pure placement fix; logic unchanged.
+
 ## v16.0 — 21-class EU sign model + speed-limit tracking/OCR (major)
 - Integrated the newly trained 21-class Mapillary EU sign detector
   (sign_eu.tflite, output [1,25,8400] = 4 box + 21 classes), replacing the old
