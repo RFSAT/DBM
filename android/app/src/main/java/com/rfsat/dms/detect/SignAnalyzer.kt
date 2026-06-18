@@ -73,7 +73,13 @@ class SignAnalyzer(context: android.content.Context? = null) {
         // Preferred path: one-stage EU sign detector.
         val det = detector
         if (det != null) {
-            for (hit in det.detect(frame)) {
+            val tDet0 = android.os.SystemClock.elapsedRealtime()
+            val hits = det.detect(frame)
+            val detMs = android.os.SystemClock.elapsedRealtime() - tDet0
+            if (hits.isNotEmpty())
+                DLog.i(TAG, "timing: detector %d ms (%d hits, frame %dx%d)".format(
+                    detMs, hits.size, frame.width, frame.height))
+            for (hit in hits) {
                 signs += com.rfsat.dms.RecognisedSign(
                     hit.name, SignDetector.category(hit.classId), hit.score, hit.classId)
                 dets += Detection(hit.name, hit.score,
@@ -226,9 +232,12 @@ class SignAnalyzer(context: android.content.Context? = null) {
                     (crop.height * s).toInt(), true)
             }.getOrNull() ?: crop
         }
+        val tOcr0 = android.os.SystemClock.elapsedRealtime()
         val ocr = runCatching {
             recognizer.process(InputImage.fromBitmap(crop, 0)).await()
         }.getOrNull()
+        val ocrMs = android.os.SystemClock.elapsedRealtime() - tOcr0
+        DLog.i(TAG, "timing: OCR %d ms (crop %dx%d)".format(ocrMs, crop.width, crop.height))
         crop.recycle()
         if (ocr == null) return null
         for (block in ocr.textBlocks) for (line in block.lines) {

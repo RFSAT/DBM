@@ -80,6 +80,8 @@ import com.rfsat.dms.ui.theme.EnactSurface
 import com.rfsat.dms.ui.theme.EnactWarning
 import com.rfsat.dms.util.DLog
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -105,6 +107,35 @@ class MainActivity : ComponentActivity() {
 
     private var permissionsOk = false
     private var privacyAccepted = false
+    /** Map-database importer: opens the system file picker, copies the chosen
+     *  .db into the app's private maps dir where it can always be read (robust
+     *  under scoped storage on modern Android — manual placement in Download
+     *  does not work on Android 13+/Galaxy S24). */
+    private val importMapLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri == null) { DLog.i(TAG, "map import cancelled"); return@registerForActivityResult }
+            importMapDatabase(uri)
+        }
+
+    private fun importMapDatabase(uri: android.net.Uri) {
+        mapImportStatus.value = "Importing…"
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            val ok = runCatching {
+                val dir = java.io.File(filesDir, "maps").apply { mkdirs() }
+                val out = java.io.File(dir, "greece.db")
+                contentResolver.openInputStream(uri)!!.use { input ->
+                    out.outputStream().use { input.copyTo(it, 1 shl 20) }
+                }
+                DLog.i(TAG, "map imported -> ${out.path} (${out.length() / 1_000_000} MB)")
+                true
+            }.getOrElse { DLog.e(TAG, "map import failed", it); false }
+            mapImportStatus.value = if (ok)
+                "Imported. Restart monitoring to load the map." else "Import failed."
+        }
+    }
+
+    private val mapImportStatus = MutableStateFlow("")
+
     private val permLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
             DLog.i(TAG, "permission results: " + res.entries.joinToString {
@@ -682,6 +713,7 @@ class MainActivity : ComponentActivity() {
             Spacer(Modifier.height(6.dp))
             StoppingDistanceSlider()
             MirrorIntervalSliders()
+            MapManagerSection()
             LaneCalibrationSliders()
             Spacer(Modifier.height(14.dp))
             Text("Video recording", color = EnactGreen, fontSize = 15.sp,
@@ -714,6 +746,136 @@ class MainActivity : ComponentActivity() {
             service?.setElement(key, it) ?: prefs.edit().putBoolean(key, it).apply()
         }
     }
+
+    @Composable
+    private fun MapManagerSection() {
+        val scope = rememberCoroutineScope()
+        val repo = remember { com.rfsat.dms.maps.MapRepository(this) }
+        val downloader = remember { com.rfsat.dms.maps.MapDownloader(repo) }
+        var statuses by remember {
+            mutableStateOf<List<com.rfsat.dms.maps.RegionStatus>>(emptyList()) }
+        var note by remember { mutableStateOf("") }
+        var busy by remember { mutableStateOf(false) }
+        var pending by remember {
+            mutableStateOf<com.rfsat.dms.maps.MapRegion?>(null) }
+        val indexUrl = "https://www.rfsat.com/products/maps/index.json"
+
+        fun refresh() {
+            busy = true; note = "Checking rfsat.com…"
+            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                val cat = downloader.fetchCatalog(indexUrl)
+                runOnUiThread {
+                    busy = false
+                    if (cat == null) note = "Could not reach the map server."
+                    else { statuses = repo.statusFor(cat); note =
+                        "${statuses.size} regions • updated ${cat.updated}"
+                        currentCatalog = cat }
+                }
+            }
+        }
+
+        fun startDownload(r: com.rfsat.dms.maps.MapRegion) {
+            val cat = currentCatalog ?: return
+            busy = true; mapImportStatus.value = "Starting download…"
+            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                downloader.download(cat, r) { p ->
+                    val msg = when (p) {
+                        is com.rfsat.dms.maps.MapDownloader.Progress.Downloading ->
+                            "Downloading ${r.name}: %d / %d MB".format(
+                                p.bytes / 1_000_000, p.total / 1_000_000)
+                        com.rfsat.dms.maps.MapDownloader.Progress.Verifying ->
+                            "Verifying ${r.name}…"
+                        com.rfsat.dms.maps.MapDownloader.Progress.Done ->
+                            "${r.name} ready. Restart monitoring to load it."
+                        is com.rfsat.dms.maps.MapDownloader.Progress.Failed ->
+                            "Download failed: ${p.reason}"
+                    }
+                    runOnUiThread { mapImportStatus.value = msg }
+                }
+                runOnUiThread { busy = false; refresh() }
+            }
+        }
+
+        // confirmation dialog for a (possibly large) download / update
+        pending?.let { r ->
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { pending = null },
+                title = { Text("Download ${r.name}?") },
+                text = { Text("${r.name} map (data ${r.dataDate}), about " +
+                    "%.0f MB. Use Wi-Fi to avoid mobile data charges."
+                    .format(r.sizeBytes / 1e6)) },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        startDownload(r); pending = null }) { Text("Download") }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        pending = null }) { Text("Cancel") }
+                })
+        }
+
+        Column(Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp)).background(EnactSurface)
+                .padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Text("Speed-limit maps", color = EnactOnSurface, fontSize = 13.sp)
+            Text("Offline maps give speed limits from the map; the camera only " +
+                "corrects them. Download the region(s) you drive.",
+                color = EnactOnSurfaceDim, fontSize = 11.sp)
+
+            Row {
+                androidx.compose.material3.OutlinedButton(
+                    onClick = { refresh() }, enabled = !busy,
+                    modifier = Modifier.padding(top = 4.dp, end = 8.dp)) {
+                    Text("Check for maps")
+                }
+                androidx.compose.material3.OutlinedButton(
+                    onClick = {
+                        runCatching { importMapLauncher.launch(arrayOf("*/*")) }
+                    }, modifier = Modifier.padding(top = 4.dp)) {
+                    Text("Import file…")
+                }
+            }
+            if (note.isNotEmpty())
+                Text(note, color = EnactOnSurface, fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 2.dp))
+
+            for (st in statuses) {
+                val r = st.region
+                val label = when (st.state) {
+                    com.rfsat.dms.maps.MapState.INSTALLED -> "Installed v${r.version}"
+                    com.rfsat.dms.maps.MapState.UPDATE_AVAILABLE ->
+                        "Update available (v${r.version}, ${r.dataDate})"
+                    com.rfsat.dms.maps.MapState.NOT_INSTALLED ->
+                        "%.0f MB".format(r.sizeBytes / 1e6)
+                    com.rfsat.dms.maps.MapState.UNSUPPORTED_SCHEMA -> "Needs app update"
+                }
+                Row(Modifier.fillMaxWidth().padding(top = 6.dp),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("${r.country} • ${r.name}", color = EnactOnSurface, fontSize = 12.sp)
+                        Text(label, color = EnactOnSurfaceDim, fontSize = 10.sp)
+                    }
+                    when (st.state) {
+                        com.rfsat.dms.maps.MapState.NOT_INSTALLED,
+                        com.rfsat.dms.maps.MapState.UPDATE_AVAILABLE ->
+                            androidx.compose.material3.TextButton(
+                                enabled = !busy,
+                                onClick = { pending = r }) {
+                                Text(if (st.state == com.rfsat.dms.maps.MapState.UPDATE_AVAILABLE)
+                                    "Update" else "Download")
+                            }
+                        com.rfsat.dms.maps.MapState.INSTALLED ->
+                            androidx.compose.material3.TextButton(
+                                onClick = { repo.delete(r); refresh() }) { Text("Delete") }
+                        else -> {}
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+    }
+
+    private var currentCatalog: com.rfsat.dms.maps.MapCatalog? = null
 
     @Composable
     private fun MirrorIntervalSliders() {

@@ -63,11 +63,19 @@ class OsmMap private constructor(private val db: SQLiteDatabase) {
          * be opened — the fuser then runs sign+cache only (no crash).
          */
         fun open(ctx: Context, fileName: String): OsmMap? {
-            val candidates = listOf(
+            // Search order, all readable under scoped storage without permissions:
+            //  1. app internal files/maps        — where the importer/downloader writes
+            //  2. app external files/maps         — USB-droppable: Android/data/<pkg>/files/maps
+            //  3. legacy public Download paths    — only work on older Android / with
+            //                                       permission; kept as a dev fallback
+            val candidates = listOfNotNull(
                 File(File(ctx.filesDir, "maps"), fileName),
-                File(ctx.getExternalFilesDir("maps"), fileName),
+                ctx.getExternalFilesDir("maps")?.let { File(it, fileName) },
                 File("/sdcard/Download/RFSAT-DBM", fileName),
                 File("/sdcard/Download", fileName),
+                @Suppress("DEPRECATION")
+                File(android.os.Environment.getExternalStoragePublicDirectory(
+                    android.os.Environment.DIRECTORY_DOWNLOADS), fileName),
             )
             val f = candidates.firstOrNull { it.exists() }
             if (f == null) {

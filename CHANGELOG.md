@@ -5,6 +5,53 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v17.5 — map download manager (countries/regions, versioning) (step 3)
+The app can now download speed-limit maps from the RFSAT portal, with the
+country/region hierarchy mirroring geofabrik (Greece is a single country-level
+entry, as geofabrik does not subdivide it; countries geofabrik splits — Germany,
+France, UK — would appear with their sub-regions automatically).
+New package com.rfsat.dms.maps:
+- MapCatalog — parses the manifest at www.rfsat.com/products/maps/index.json
+  (nested countries->regions, or flat regions). Mirrors geofabrik ids/names.
+- MapRepository — tracks installed regions and versions (installed.json), and
+  compares against the catalog to flag NOT_INSTALLED / INSTALLED /
+  UPDATE_AVAILABLE / UNSUPPORTED_SCHEMA.
+- MapDownloader — downloads a region .db with progress, VERIFIES sha256 before
+  committing (downloads to .part, renames on success), and can fetch the catalog.
+Settings -> Speed-limit maps: "Check for maps" lists regions with size/version;
+Download/Update (with a confirm dialog showing size + data date and a Wi-Fi
+hint), Delete, and Import file (for manual/offline install). Outdated maps are
+detected by version and re-downloaded only after user confirmation.
+Validated: catalog parse + version-status logic (incl. Greece-no-subregion,
+Germany-with-subregions, outdated->UPDATE_AVAILABLE, future-schema->UNSUPPORTED).
+Note: the live fetch/download works against the real server once index.json and
+the .db files are hosted; sha256/size come from the server manifest.
+
+## v17.4 — sign-recognition timing instrumentation + CPU fallback bump
+Speed-limit recognition measured 2-3 s on a desktop screen test. To find where
+the time goes on-device (detector vs OCR, and whether the NPU is used), added:
+- Per-stage timing logs: "timing: detector N ms" and "timing: OCR N ms (crop WxH)".
+- Delegate log at startup: whether the sign detector runs on the NNAPI (NPU)
+  delegate or fell back to CPU — the most likely cause of a slow detector stage.
+- CPU fallback raised from 2 to 4 threads (S24 has 8 cores) — roughly halves
+  detector time IF it is running on CPU.
+No behavioural change to detection logic; this is to gather real on-road numbers
+before optimising (e.g. a possible input-size reduction, which trades against
+small-sign range and should not be done blind).
+
+## v17.3 — map import via file picker (fix for scoped storage / Galaxy S24)
+A manually-placed greece.db in the Download folder could not be opened on modern
+Android (13+, e.g. Galaxy S24): scoped storage blocks the app from reading
+arbitrary shared-storage files, and the legacy /sdcard path does not resolve on
+SD-card-less devices. Fixes:
+- New "Import map database…" button in Settings -> Speed-limit map. It opens the
+  system file picker; pick greece.db wherever it is, and the app copies it into
+  its own private storage (filesDir/maps/greece.db) where it can always be read.
+  This works regardless of scoped-storage rules. Restart monitoring to load it.
+- OsmMap search paths now prefer the app private/external dirs (always readable,
+  no permission) and only fall back to public Download paths for older devices.
+After importing, the log shows "opened map db ... region=Greece schema=2".
+
 ## v17.2 — slim map database (schema v2) + RFSAT-DBM dev path
 All-of-Greece came to 537 MB (74% of it geometry stored as float64). Schema v2
 slims it, handled in the off-device pre-processor (dbm-tools); the app side is

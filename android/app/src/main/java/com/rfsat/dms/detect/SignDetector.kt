@@ -1,5 +1,6 @@
 package com.rfsat.dms.detect
 
+import com.rfsat.dms.util.DLog
 import android.content.Context
 import android.graphics.Bitmap
 import com.rfsat.dms.Detection
@@ -36,10 +37,14 @@ class SignDetector(
         val model = loadAsset(context, assetName)
         interpreter = try {
             nnApi = NnApiDelegate()
-            Interpreter(model, Interpreter.Options().apply { addDelegate(nnApi) })
-        } catch (_: Throwable) {
+            val itp = Interpreter(model, Interpreter.Options().apply { addDelegate(nnApi) })
+            DLog.i("SignDetector", "interpreter: NNAPI delegate active (input ${inputSize})")
+            itp
+        } catch (e: Throwable) {
             nnApi?.close(); nnApi = null
-            Interpreter(model, Interpreter.Options().apply { setNumThreads(2) })
+            DLog.w("SignDetector", "NNAPI unavailable, CPU 2-thread fallback " +
+                "(input ${inputSize}): ${e.message}")
+            Interpreter(model, Interpreter.Options().apply { setNumThreads(4) })
         }
     }
 
