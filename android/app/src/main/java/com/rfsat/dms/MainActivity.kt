@@ -911,6 +911,15 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    override fun onResume() {
+        super.onResume()
+        // Returning from another app: re-establish the camera binding, which
+        // CameraX dropped when the activity was stopped. Without this the
+        // previews come back blank. Safe no-op if cameras aren't set up yet.
+        cameras?.resume()
+        DLog.i(TAG, "MainActivity onResume (cameras=${cameras != null})")
+    }
+
     override fun onDestroy() {
         cameras?.release()
         runCatching { unbindService(conn) }   // may already be unbound (Exit)

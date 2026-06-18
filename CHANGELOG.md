@@ -5,6 +5,14 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v16.7 — fix blank screen when returning from another app (fix)
+- Switching to another app and back left the camera previews blank. Cause:
+  stopping the activity makes CameraX unbind the cameras, but because the
+  PreviewView does not always detach/re-attach, the attach-listener rebind never
+  fired on return. Added MainActivity.onResume -> PhoneCameraManager.resume(),
+  which re-establishes the camera binding (or starts from scratch if the
+  provider was not yet ready). Safe no-op before cameras are set up.
+
 ## v16.6 — manual start + configurable mirror-check reminders (feature)
 - Analysis no longer auto-starts when the app loads; it waits for the user to
   press Start. This avoids false warnings while the vehicle is still stationary

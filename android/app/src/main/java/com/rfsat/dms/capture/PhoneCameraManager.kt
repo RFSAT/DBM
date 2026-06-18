@@ -146,6 +146,23 @@ class PhoneCameraManager(
         }.onFailure { DLog.e(TAG, "rebind failed", it) }
     }
 
+    /** Call when the activity returns to the foreground. Switching to another
+     *  app stops the activity; CameraX unbinds, and because the PreviewView may
+     *  not detach/re-attach, the attach-listener rebind does not fire — leaving
+     *  blank previews on return. This re-establishes the camera binding. If the
+     *  provider is not ready yet, start() from scratch. */
+    fun resume() {
+        if (released) return
+        handler.removeCallbacks(rebindRunnable)
+        if (provider != null) {
+            handler.postDelayed(rebindRunnable, 150)
+            DLog.i(TAG, "resume: rebind scheduled")
+        } else {
+            DLog.i(TAG, "resume: provider not ready, starting")
+            start()
+        }
+    }
+
     private fun hookAttach(view: PreviewView, role: CameraRole) {
         view.addOnAttachStateChangeListener(object :
                 android.view.View.OnAttachStateChangeListener {
