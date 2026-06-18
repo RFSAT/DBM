@@ -5,6 +5,26 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v17.0 — speed-limit fusion ported into the app (major feature)
+Ports the validated MATLAB fusion prototype to Kotlin. The current speed limit is
+now derived by combining three sources instead of the camera alone:
+  1. LIVE camera sign (highest priority; also recorded to the cache)
+  2. Remembered-sign CACHE (per-segment, from earlier passes)
+  3. OSM MAP baseline (bundled extract)
+New package com.rfsat.dms.fusion:
+- OsmMap.kt — loads a bundled OSM extract and matches GPS to road segments with
+  heading-consistency + hysteresis (ports loadOSM.m + the upgraded matchSegment.m).
+- SignLimitCache.kt — per-segment remembered-sign store with confirm-before-trust,
+  age decay, and roadworks-as-temporary (ports the signCache .m files). Local only.
+- SpeedLimitFuser.kt — the three-source priority ladder (ports fuseSpeedLimit.m).
+Integration: fusion runs in the 1 Hz GPS loop, consuming SpeedMonitor.position
+(v16.3), the camera's committed OCR read, and the warn_roadworks class; the fused
+limit feeds the existing compliance scorer / speed-limit roundel.
+Map data: optional bundled assets/speedlimits.osm (see assets/README-speedlimits.md).
+If absent, fusion runs sign+cache only — no crash. Map parsing is off the main
+thread. Logic validated against the MATLAB two-pass behaviour before shipping.
+Also added: docs/context-gated-throttling-sketch.md (next-step design).
+
 ## v16.9 — improve speed-limit sign reading rate (fix)
 Ground-truth scoring of the 18-June-2 drive showed the camera read only 7 of 19
 speed signs, so fusion was no better than map-only. Funnel analysis found the

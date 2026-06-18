@@ -22,6 +22,7 @@ import com.rfsat.dms.detect.CrossChecker
 import com.rfsat.dms.detect.FollowingDistanceMonitor
 import com.rfsat.dms.location.YawRateMonitor
 import com.rfsat.dms.detect.DriverAnalyzer
+import com.rfsat.dms.fusion.OsmMap
 import com.rfsat.dms.detect.LaneAnalyzer
 import com.rfsat.dms.detect.RoadAnalyzer
 import com.rfsat.dms.detect.SignAnalyzer
@@ -65,6 +66,17 @@ class MonitorService : Service() {
     private val roadPermit = Semaphore(1)
 
     private var driver: DriverAnalyzer? = null
+
+    // --- speed-limit fusion (map + remembered signs + live camera) ---
+    private var osmMap: OsmMap? = null
+    private val signCache = com.rfsat.dms.fusion.SignLimitCache()
+    private val fuser = com.rfsat.dms.fusion.SpeedLimitFuser(signCache)
+    /** Latest live speed-limit read from the camera, consumed by the fuser.
+     *  -1 when none pending. Confidence proxied from detection. */
+    @Volatile private var pendingSignLimit = -1
+    @Volatile private var pendingSignConf = 0.0
+    @Volatile private var roadworksInView = false
+    private var lastFusePos: Pair<Double, Double>? = null
     private var road: RoadAnalyzer? = null
     private lateinit var lanes: LaneAnalyzer
     private lateinit var signs: SignAnalyzer
@@ -175,6 +187,13 @@ class MonitorService : Service() {
         speed = SpeedMonitor(this)
         speed.logTrace = getSharedPreferences("dbm", MODE_PRIVATE)
             .getBoolean("log_gps", false)
+        // Load the bundled OSM extract for map-based speed limits, off the main
+        // thread (parsing is heavy). Until it is ready, fusion runs sign+cache
+        // only (map source returns nothing), which is safe.
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            osmMap = OsmMap.fromAsset(this@MonitorService, "speedlimits.osm")
+            DLog.i(TAG, "OSM map ready: ${osmMap?.size ?: 0} segments")
+        }
         getSharedPreferences("dbm", MODE_PRIVATE).let { p ->
             lanes.horizonOffset = p.getFloat("lane_horizon", 0f)
             lanes.centerOffset = p.getFloat("lane_center", 0f)
@@ -195,6 +214,34 @@ class MonitorService : Service() {
                     else -> 0 to SpeedSource.NONE
                 }
                 cameraManager?.vehicleMoving = v >= 5
+
+                // --- speed-limit fusion: map + remembered signs + live camera ---
+                val pos = speed.position.value
+                if (pos != null) {
+                    val (lat, lon) = pos
+                    val heading = lastFusePos?.let { (plat, plon) ->
+                        val lat0 = lat * Math.PI / 180.0
+                        val dx = 6371000.0 * ((lon - plon) * Math.PI / 180.0) * kotlin.math.cos(lat0)
+                        val dy = 6371000.0 * ((lat - plat) * Math.PI / 180.0)
+                        if (kotlin.math.hypot(dx, dy) > 1.0)
+                            ((kotlin.math.atan2(dy, dx) * 180.0 / Math.PI) % 360.0 + 360.0) % 360.0
+                        else Double.NaN
+                    } ?: Double.NaN
+                    lastFusePos = pos
+
+                    val mr = osmMap?.match(lat, lon, heading)
+                    val mapLimit = mr?.mapLimit ?: -1
+                    val segId = mr?.segId ?: -1L
+                    val fused = fuser.fuse(
+                        t, mapLimit, pendingSignLimit, pendingSignConf, segId, roadworksInView)
+                    pendingSignLimit = -1; pendingSignConf = 0.0   // consume the read
+                    if (fused.limitKmh > 0) {
+                        scorer.onSpeedLimitSeen(fused.limitKmh)
+                        if (fused.disagree) DLog.i(TAG,
+                            "limit ${fused.limitKmh} from ${fused.source} (disagrees with map)")
+                    }
+                }
+
                 scorer.onSpeed(v, src, t)?.let { raw ->
                     crossChecker.gpsSpeed = if (speed.healthy) speed.speedKmh.value else null
                     crossChecker.visualSpeed = visualSpeedKmh
@@ -414,7 +461,14 @@ class MonitorService : Service() {
                 (if (role == CameraRole.DRIVER) recDriver else recRoad)
                     ?.encode(frame, result, tMs)
             }
-            result.speedLimitSeen?.let { scorer.onSpeedLimitSeen(it) }
+            // The camera's read becomes the LIVE-sign input to the fusion (run
+            // in the 1 Hz GPS loop), rather than feeding the scorer directly, so
+            // it is combined with the map and remembered-sign cache.
+            result.speedLimitSeen?.let {
+                pendingSignLimit = it
+                pendingSignConf = 0.8           // a committed OCR read is high-confidence
+            }
+            roadworksInView = result.signs.any { s -> s.classId == 17 }  // warn_roadworks
             // Cross-detector consensus: corroborate or suppress using
             // independent signals before an event fires.
             crossChecker.gpsSpeed = if (speed.healthy) speed.speedKmh.value else null
