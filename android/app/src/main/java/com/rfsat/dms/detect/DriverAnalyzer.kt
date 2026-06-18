@@ -66,7 +66,21 @@ class DriverAnalyzer(context: Context) {
     // --- temporal state ---
     private var eyesClosedSinceMs = 0L
     private var yawOffSinceMs = 0L
-    private var lastMirrorCheckMs = System.currentTimeMillis()
+    private var lastRearviewCheckMs = System.currentTimeMillis()
+    private var lastSideMirrorCheckMs = System.currentTimeMillis()
+
+    /** Seconds without a glance before warning, settable from Settings.
+     *  0 disables the respective warning. Defaults preserve prior behaviour. */
+    @Volatile var rearviewIntervalMs = 120_000L
+    @Volatile var sideMirrorIntervalMs = 120_000L
+
+    /** Re-arm the mirror-check timers, e.g. when analysis is (re)started, so the
+     *  countdown does not include time spent parked before the drive began. */
+    fun resetMirrorTimers() {
+        val now = System.currentTimeMillis()
+        lastRearviewCheckMs = now
+        lastSideMirrorCheckMs = now
+    }
     private var yawnSinceMs = 0L
     private var lastYawnEventMs = 0L
     private val perclosWindow = ArrayDeque<Pair<Long, Boolean>>() // (t, closed)
@@ -199,13 +213,23 @@ class DriverAnalyzer(context: Context) {
                 RiskType.EYES_OFF_ROAD, Severity.WARNING, 0.7f, "yaw %.0f deg".format(yawDeg))
         } else yawOffSinceMs = 0L
 
-        // -- mirror checks: a pose pointing at a mirror counts as a check --
-        if (lookingAtMirror) lastMirrorCheckMs = tMs
-        if (tMs - lastMirrorCheckMs > MIRROR_INTERVAL_MS) {
+        // -- mirror checks: track rearview and side mirrors SEPARATELY, each
+        // with its own configurable interval, so a side glance does not mask a
+        // missing rearview check (and vice versa). A value of 0 disables that
+        // particular warning.
+        if (lookingAtRearview) lastRearviewCheckMs = tMs
+        if (lookingAtSideMirror) lastSideMirrorCheckMs = tMs
+        if (rearviewIntervalMs > 0 && tMs - lastRearviewCheckMs > rearviewIntervalMs) {
             events += RiskEventCandidate(
                 RiskType.NO_MIRROR_CHECK, Severity.INFO, 0.6f,
-                "no mirror glance for ${fmtSecs(tMs - lastMirrorCheckMs)}")
-            lastMirrorCheckMs = tMs // re-arm
+                "no rearview-mirror glance for ${fmtSecs(tMs - lastRearviewCheckMs)}")
+            lastRearviewCheckMs = tMs // re-arm
+        }
+        if (sideMirrorIntervalMs > 0 && tMs - lastSideMirrorCheckMs > sideMirrorIntervalMs) {
+            events += RiskEventCandidate(
+                RiskType.NO_MIRROR_CHECK, Severity.INFO, 0.6f,
+                "no side-mirror glance for ${fmtSecs(tMs - lastSideMirrorCheckMs)}")
+            lastSideMirrorCheckMs = tMs // re-arm
         }
 
         // Face box overlay
@@ -240,7 +264,6 @@ class DriverAnalyzer(context: Context) {
         const val SIDE_YAW_MIN_DEG = 15f        // side mirrors are off to a side
         const val SIDE_YAW_MAX_DEG = 50f
         const val SIDE_PITCH_MIN_DEG = 6f       // and DOWN toward the door
-        const val MIRROR_INTERVAL_MS = 120_000L
         const val MAR_YAWN = 0.6f
         const val YAWN_MIN_MS = 1500L
     }

@@ -660,6 +660,7 @@ class MainActivity : ComponentActivity() {
                 fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
             StoppingDistanceSlider()
+            MirrorIntervalSliders()
             LaneCalibrationSliders()
             Spacer(Modifier.height(14.dp))
             Text("Video recording", color = EnactGreen, fontSize = 15.sp,
@@ -691,6 +692,37 @@ class MainActivity : ComponentActivity() {
             on = it
             service?.setElement(key, it) ?: prefs.edit().putBoolean(key, it).apply()
         }
+    }
+
+    @Composable
+    private fun MirrorIntervalSliders() {
+        val prefs = remember { getSharedPreferences("dbm", MODE_PRIVATE) }
+        var rear by remember { mutableStateOf(prefs.getInt("mirror_rearview_sec", 120).toFloat()) }
+        var side by remember { mutableStateOf(prefs.getInt("mirror_side_sec", 120).toFloat()) }
+        Column(Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp)).background(EnactSurface)
+                .padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Text("Mirror-check reminders", color = EnactOnSurface, fontSize = 13.sp)
+            Text("Warn if no glance toward a mirror for this long. Set to 0 to " +
+                "disable that reminder.", color = EnactOnSurfaceDim, fontSize = 11.sp)
+            Text("Rearview mirror: ${if (rear.toInt()==0) "off" else "${rear.toInt()} s"}",
+                color = EnactOnSurface, fontSize = 12.sp)
+            Slider(value = rear, onValueChange = { rear = it },
+                onValueChangeFinished = {
+                    service?.setMirrorIntervals(rear.toInt(), side.toInt())
+                        ?: prefs.edit().putInt("mirror_rearview_sec", rear.toInt()).apply()
+                },
+                valueRange = 0f..300f, steps = 29)
+            Text("Side mirrors: ${if (side.toInt()==0) "off" else "${side.toInt()} s"}",
+                color = EnactOnSurface, fontSize = 12.sp)
+            Slider(value = side, onValueChange = { side = it },
+                onValueChangeFinished = {
+                    service?.setMirrorIntervals(rear.toInt(), side.toInt())
+                        ?: prefs.edit().putInt("mirror_side_sec", side.toInt()).apply()
+                },
+                valueRange = 0f..300f, steps = 29)
+        }
+        Spacer(Modifier.height(8.dp))
     }
 
     @Composable

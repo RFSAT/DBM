@@ -5,6 +5,17 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v16.6 — manual start + configurable mirror-check reminders (feature)
+- Analysis no longer auto-starts when the app loads; it waits for the user to
+  press Start. This avoids false warnings while the vehicle is still stationary
+  (parked / GPS settling) before the drive begins. The mirror-check timers also
+  re-arm on Start, so the countdown excludes parked time.
+- Mirror-check reminders are now SEPARATE for the rearview mirror and the side
+  mirrors, each with its own configurable interval in Settings
+  ("Mirror-check reminders", 0-300 s, 0 = disabled). Previously a single 120 s
+  timer was re-armed by any mirror glance, so a side glance could mask a missing
+  rearview check; they are now tracked independently with distinct warnings.
+
 ## v16.5 — speed-limit reading actually works now (fix)
 The 18-June drive log (with v16.2 OCR diagnostics) revealed the speed icon never
 showed because of TWO bugs, both fixed:

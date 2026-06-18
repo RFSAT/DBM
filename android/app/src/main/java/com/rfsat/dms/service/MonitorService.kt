@@ -178,6 +178,8 @@ class MonitorService : Service() {
         getSharedPreferences("dbm", MODE_PRIVATE).let { p ->
             lanes.horizonOffset = p.getFloat("lane_horizon", 0f)
             lanes.centerOffset = p.getFloat("lane_center", 0f)
+            driver?.rearviewIntervalMs = p.getInt("mirror_rearview_sec", 120) * 1000L
+            driver?.sideMirrorIntervalMs = p.getInt("mirror_side_sec", 120) * 1000L
         }
         yawRate = YawRateMonitor(this)
         DLog.i(TAG, "onCreate complete (driver=${driver != null}, road=${road != null})")
@@ -227,6 +229,15 @@ class MonitorService : Service() {
         lanes.horizonOffset = horizon
         lanes.centerOffset = center
     }
+
+    /** Seconds without a mirror glance before a warning (0 = disabled). */
+    fun setMirrorIntervals(rearviewSec: Int, sideSec: Int) {
+        getSharedPreferences("dbm", MODE_PRIVATE).edit()
+            .putInt("mirror_rearview_sec", rearviewSec)
+            .putInt("mirror_side_sec", sideSec).apply()
+        driver?.rearviewIntervalMs = rearviewSec * 1000L
+        driver?.sideMirrorIntervalMs = sideSec * 1000L
+    }
     fun setWeight(type: com.rfsat.dms.RiskType, w: Int) {
         getSharedPreferences("dbm", MODE_PRIVATE).edit().putInt("weight_${type.name}", w).apply()
         scorer.setWeight(type, w)
@@ -258,10 +269,17 @@ class MonitorService : Service() {
     }
 
     /** Detector run state, observed by the UI controls. */
-    val analysing = MutableStateFlow(true)
+    // Analysis is OFF until the user presses Start. This avoids false warnings
+    // while the vehicle is still stationary (e.g. parked, settling) before the
+    // driver is actually under way.
+    val analysing = MutableStateFlow(false)
 
     fun pauseAnalysis() { analysing.value = false; DLog.i(TAG, "analysis paused") }
-    fun resumeAnalysis() { analysing.value = true; DLog.i(TAG, "analysis resumed") }
+    fun resumeAnalysis() {
+        analysing.value = true
+        driver?.resetMirrorTimers()   // start the mirror countdown from now
+        DLog.i(TAG, "analysis resumed")
+    }
 
     private val plateRegex = Regex("[A-Z0-9]{2,4}[ -]?[A-Z0-9]{1,4}[ -]?[A-Z0-9]{1,4}")
     private val plateRecognizer by lazy {
