@@ -5,6 +5,40 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v16.9 — improve speed-limit sign reading rate (fix)
+Ground-truth scoring of the 18-June-2 drive showed the camera read only 7 of 19
+speed signs, so fusion was no better than map-only. Funnel analysis found the
+bottleneck: of 51 speed-sign sightings, 42 were "too small for OCR" — the OCR
+itself succeeded 7/9 times when it ran, but it rarely ran. Two fixes:
+- Sign detection throttle raised from every-3rd to every-2nd road frame, giving
+  more chances to catch the brief window where a passing sign is readable.
+- OCR-attempt gate lowered 0.035 -> 0.028 (more signs attempt OCR), WITH a new
+  safeguard: a read from a crop smaller than 0.036 (the smallest proven-readable
+  size) is tentative and must be confirmed by a second agreeing read before it
+  commits — so lowering the gate cannot let a tiny-crop misread set the limit.
+Modelled on the real drive: OCR-eligible sightings roughly double (9 -> 17), and
+the finer sampling adds more on top. Reads from large crops still commit
+immediately as before.
+
+## v16.8 — camera-restore robustness + large speed-limit sign overlay
+- Recents restore: added launchMode="singleTask" so tapping the app from the
+  Recents list (not just the launcher icon) brings the existing screen to front
+  instead of landing on a stale task.
+- Frozen/blank camera on start: the camera could bind before the preview surface
+  was ready, showing a frozen or blank image until the user switched tabs. start()
+  and resume() now re-issue the surface providers and rebind shortly after
+  (700 ms / a second pass at 600 ms), self-healing this without a tab switch.
+- resume() now does a double rebind to cover slow surfaces on foreground return.
+- NEW large speed-limit sign: a big (96 dp) red-ring roundel showing the current
+  limit is overlaid in the lower-right of the road view, ~3-4x the small status
+  roundel, for at-a-glance visibility while driving.
+- NOTE on the 18-June-2 drive: the speed icon appearing "stuck" was the OCR
+  missing most signs (7 of 19 ground-truth signs read; 0 of the 70s and 120s,
+  which pass fastest), compounded by thermal throttling (status 3 most of the
+  drive). The limit held its last read value through the gaps. This is what the
+  map-fusion (in development) is designed to fix; the ground-truth CSV will help
+  validate it.
+
 ## v16.7 — fix blank screen when returning from another app (fix)
 - Switching to another app and back left the camera previews blank. Cause:
   stopping the activity makes CameraX unbind the cameras, but because the

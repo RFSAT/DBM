@@ -528,7 +528,14 @@ class MonitorService : Service() {
         var limit: Int? = null
         var signDets = emptyList<com.rfsat.dms.Detection>()
         var recognisedSigns = emptyList<com.rfsat.dms.RecognisedSign>()
-        if (detectSigns && roadFrameCount++ % 3 == 0) {
+        // Sign detection (incl. the EU YOLO detector) is throttled to limit
+        // compute/heat. Raised from every-3rd to every-2nd road frame: the
+        // 18-June-2 drive showed speed-limit signs are legible for only ~1-2
+        // frames as they pass, and the coarser sampling was missing that
+        // window (42 of 51 sign sightings were "too small" by the time a frame
+        // was sampled). Every-2nd is a modest cost rise for materially more
+        // chances to catch the readable moment.
+        if (detectSigns && roadFrameCount++ % 2 == 0) {
             // Upstream sign hints (YOLO "stop sign"); SignAnalyzer adds its own
             // colour/shape region proposals so all sign types are covered.
             val cand = (obj?.detections ?: emptyList())

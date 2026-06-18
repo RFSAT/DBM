@@ -419,6 +419,27 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+            // Large, driver-visible speed-limit sign in the lower-right of the
+            // road view. Sized ~3-4x the small status-strip roundel so it is
+            // readable at a glance while driving.
+            if (role == CameraRole.FRONT) {
+                val scState by (service?.scorer?.state
+                    ?: MutableStateFlow(ComplianceState())).collectAsState()
+                val lim = if (analysing) scState.activeSpeedLimitKmh else null
+                lim?.let { value ->
+                    Box(Modifier.align(Alignment.BottomEnd).padding(12.dp)
+                            .size(96.dp), contentAlignment = Alignment.Center) {
+                        androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+                            val r = size.minDimension / 2f
+                            drawCircle(Color.White, r, center)
+                            drawCircle(Color(0xFFD32F2F), r, center,
+                                style = Stroke(width = r * 0.30f))
+                        }
+                        Text("$value", fontSize = 34.sp,
+                            fontWeight = FontWeight.Bold, color = Color.Black)
+                    }
+                }
+            }
             Text(role.label, color = EnactOnSurface, fontSize = 11.sp,
                 modifier = Modifier.padding(8.dp)
                     .clip(RoundedCornerShape(6.dp))

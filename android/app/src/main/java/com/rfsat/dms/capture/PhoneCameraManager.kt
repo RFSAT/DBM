@@ -108,6 +108,12 @@ class PhoneCameraManager(
                         bindMultiplexed(p)
                     }
             } else bindMultiplexed(p)
+            // Self-heal the "frozen image on first start" case: re-issue the
+            // surface providers and rebind shortly after, once the preview
+            // TextureViews have had time to create their surfaces.
+            handler.postDelayed({
+                if (!released) { refreshSurfaces(); rebind() }
+            }, 700)
         }, ContextCompat.getMainExecutor(context))
     }
 
@@ -150,13 +156,20 @@ class PhoneCameraManager(
      *  app stops the activity; CameraX unbinds, and because the PreviewView may
      *  not detach/re-attach, the attach-listener rebind does not fire — leaving
      *  blank previews on return. This re-establishes the camera binding. If the
-     *  provider is not ready yet, start() from scratch. */
+     *  provider is not ready yet, start() from scratch. A second, later rebind
+     *  catches the case where the preview surface was not ready at the first
+     *  attempt (the "frozen image until you switch tabs" symptom). */
     fun resume() {
         if (released) return
         handler.removeCallbacks(rebindRunnable)
         if (provider != null) {
+            // First rebind soon, then refresh surfaces and rebind again a little
+            // later in case the TextureView surface was not ready yet.
             handler.postDelayed(rebindRunnable, 150)
-            DLog.i(TAG, "resume: rebind scheduled")
+            handler.postDelayed({
+                if (!released) { refreshSurfaces(); rebind() }
+            }, 600)
+            DLog.i(TAG, "resume: rebind scheduled (x2)")
         } else {
             DLog.i(TAG, "resume: provider not ready, starting")
             start()

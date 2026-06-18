@@ -98,7 +98,17 @@ class SignAnalyzer(context: android.content.Context? = null) {
                             val same = (v == adopted)
                             val strong = hit.score >= SPEED_STRONG_CONF
                             val confirming = (v == lastOcrValue)
+                            // A read from a SMALL crop (below the proven-readable
+                            // size) is treated as tentative: it must be confirmed
+                            // by a second agreeing read before it is committed, so
+                            // a tiny-crop misread cannot set the limit on its own.
+                            // Reads from large crops commit immediately as before.
+                            val smallCrop = boxH < SPEED_OCR_TRUST_BOX
                             when {
+                                smallCrop && !confirming && !same -> {
+                                    DLog.i(TAG, "speed-limit $v from small crop " +
+                                        "(box=%.3f), awaiting confirmation".format(boxH))
+                                }
                                 adopted == null || same ->
                                     adopted = v                       // first / reaffirm
                                 strong || confirming -> {
@@ -304,8 +314,13 @@ class SignAnalyzer(context: android.content.Context? = null) {
         const val SPEED_MIN_CONF = 0.45f
         const val SPEED_STRONG_CONF = 0.7f
         // Minimum sign-box height (fraction of frame) before OCR is attempted.
-        // Lowered to 0.035: at the 17/18-June drives several legible signs sat
-        // just under 0.04 (e.g. 0.036) and were skipped.
-        const val SPEED_OCR_MIN_BOX = 0.035f
+        // Lowered to 0.028: the 18-June-2 drive showed 42 of 51 sign sightings
+        // were "too small" — signs are detected small and only briefly reach a
+        // readable size, so the window was missed. Reads from crops below
+        // SPEED_OCR_TRUST_BOX are confirmed before use (see analyze()).
+        const val SPEED_OCR_MIN_BOX = 0.028f
+        // Box height at/above which a single OCR read is trusted immediately
+        // (the smallest size that read correctly on real drives was ~0.036).
+        const val SPEED_OCR_TRUST_BOX = 0.036f
     }
 }
