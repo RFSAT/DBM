@@ -660,6 +660,7 @@ class MainActivity : ComponentActivity() {
                 fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
             StoppingDistanceSlider()
+            LaneCalibrationSliders()
             Spacer(Modifier.height(14.dp))
             Text("Video recording", color = EnactGreen, fontSize = 15.sp,
                 fontWeight = FontWeight.Bold)
@@ -690,6 +691,37 @@ class MainActivity : ComponentActivity() {
             on = it
             service?.setElement(key, it) ?: prefs.edit().putBoolean(key, it).apply()
         }
+    }
+
+    @Composable
+    private fun LaneCalibrationSliders() {
+        val prefs = remember { getSharedPreferences("dbm", MODE_PRIVATE) }
+        var horizon by remember { mutableStateOf(prefs.getFloat("lane_horizon", 0f)) }
+        var center by remember { mutableStateOf(prefs.getFloat("lane_center", 0f)) }
+        Column(Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp)).background(EnactSurface)
+                .padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Text("Lane detection — mount calibration", color = EnactOnSurface, fontSize = 13.sp)
+            Text("Adjust if lane tracking is off due to how the phone is " +
+                "tilted/mounted. Horizon: move the road area up or down. " +
+                "Centre: shift left/right if the mount is not centred.",
+                color = EnactOnSurfaceDim, fontSize = 11.sp)
+            Text("Horizon: ${"%+.2f".format(horizon)}", color = EnactOnSurface, fontSize = 12.sp)
+            Slider(value = horizon, onValueChange = { horizon = it },
+                onValueChangeFinished = {
+                    service?.setLaneCalibration(horizon, center)
+                        ?: prefs.edit().putFloat("lane_horizon", horizon).apply()
+                },
+                valueRange = -0.2f..0.2f, steps = 15)
+            Text("Centre: ${"%+.2f".format(center)}", color = EnactOnSurface, fontSize = 12.sp)
+            Slider(value = center, onValueChange = { center = it },
+                onValueChangeFinished = {
+                    service?.setLaneCalibration(horizon, center)
+                        ?: prefs.edit().putFloat("lane_center", center).apply()
+                },
+                valueRange = -0.2f..0.2f, steps = 15)
+        }
+        Spacer(Modifier.height(8.dp))
     }
 
     @Composable

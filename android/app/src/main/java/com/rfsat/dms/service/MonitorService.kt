@@ -175,6 +175,10 @@ class MonitorService : Service() {
         speed = SpeedMonitor(this)
         speed.logTrace = getSharedPreferences("dbm", MODE_PRIVATE)
             .getBoolean("log_gps", false)
+        getSharedPreferences("dbm", MODE_PRIVATE).let { p ->
+            lanes.horizonOffset = p.getFloat("lane_horizon", 0f)
+            lanes.centerOffset = p.getFloat("lane_center", 0f)
+        }
         yawRate = YawRateMonitor(this)
         DLog.i(TAG, "onCreate complete (driver=${driver != null}, road=${road != null})")
 
@@ -213,6 +217,15 @@ class MonitorService : Service() {
     fun setStoppingDistanceFactor(pct: Int) {
         getSharedPreferences("dbm", MODE_PRIVATE).edit().putInt("stop_dist_pct", pct).apply()
         following.factor = pct / 100f
+    }
+
+    /** Mount calibration for lane detection (horizon/tilt and centring),
+     *  values in roughly -0.2..+0.2 of frame dimension. */
+    fun setLaneCalibration(horizon: Float, center: Float) {
+        getSharedPreferences("dbm", MODE_PRIVATE).edit()
+            .putFloat("lane_horizon", horizon).putFloat("lane_center", center).apply()
+        lanes.horizonOffset = horizon
+        lanes.centerOffset = center
     }
     fun setWeight(type: com.rfsat.dms.RiskType, w: Int) {
         getSharedPreferences("dbm", MODE_PRIVATE).edit().putInt("weight_${type.name}", w).apply()

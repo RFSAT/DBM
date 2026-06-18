@@ -35,13 +35,28 @@ import kotlin.math.abs
  */
 class LaneAnalyzer {
 
+    /** Mount calibration. The lane logic assumes the camera looks straight
+     *  ahead and level. A tilted or offset phone mount shifts where the road
+     *  sits in the frame, degrading lane fitting. These offsets let the user
+     *  correct for the mount:
+     *   - horizonOffset: shifts the road region-of-interest up/down. Positive
+     *     moves the ROI top DOWN (camera tilted up / horizon higher in frame);
+     *     negative moves it UP. Range about -0.2..+0.2 of frame height.
+     *   - centerOffset: shifts the expected road centre left/right from 0.5,
+     *     for a mount that is not centred. Range about -0.2..+0.2. */
+    @Volatile var horizonOffset = 0f
+    @Volatile var centerOffset = 0f
+
     private var leftCrossSinceMs = 0L
     private var rightCrossSinceMs = 0L
     private var shoulderSinceMs = 0L
 
     fun analyze(frame: Bitmap, tMs: Long): Pair<List<LaneLine>, List<RiskEventCandidate>> {
         val w = frame.width; val h = frame.height
-        val roiTop = (h * 0.55f).toInt()
+        // ROI top with mount calibration: base lower 45%, shifted by the
+        // horizon offset, clamped to a sane band.
+        val roiFrac = (0.55f + horizonOffset).coerceIn(0.35f, 0.75f)
+        val roiTop = (h * roiFrac).toInt()
         val px = IntArray(w * (h - roiTop))
         frame.getPixels(px, 0, w, 0, roiTop, w, h - roiTop)
 
@@ -104,7 +119,7 @@ class LaneAnalyzer {
             // its BOTTOM. A fit where the top is further from centre than the
             // bottom (lines "opening outward" with distance) is physically wrong
             // and is rejected rather than drawn.
-            val centre = 0.5f
+            val centre = 0.5f + centerOffset
             val bottomDist = abs(xb - centre)
             val topDist = abs(xt - centre)
             if (topDist > bottomDist + 0.04f) return null      // diverging -> reject
@@ -119,7 +134,7 @@ class LaneAnalyzer {
 
         // --- crossing logic: a line's bottom intercept inside vehicle corridor ---
         fun crossing(line: LaneLine?, sinceSet: (Long) -> Unit, since: Long): Boolean {
-            if (line == null || abs(line.xBottom - 0.5f) > CORRIDOR) { sinceSet(0); return false }
+            if (line == null || abs(line.xBottom - (0.5f + centerOffset)) > CORRIDOR) { sinceSet(0); return false }
             if (since == 0L) { sinceSet(tMs); return false }
             return tMs - since > CROSS_PERSIST_MS
         }
@@ -130,7 +145,7 @@ class LaneAnalyzer {
 
         // --- hard shoulder heuristic: solid line left of corridor, nothing right ---
         val solidLeftOfUs = left != null && left.kind != LaneLine.Kind.DASHED &&
-                left.xBottom < 0.5f - CORRIDOR
+                left.xBottom < (0.5f + centerOffset) - CORRIDOR
         if (solidLeftOfUs && right == null) {
             if (shoulderSinceMs == 0L) shoulderSinceMs = tMs
             if (tMs - shoulderSinceMs > SHOULDER_PERSIST_MS) {

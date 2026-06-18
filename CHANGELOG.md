@@ -5,6 +5,38 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v16.5 — speed-limit reading actually works now (fix)
+The 18-June drive log (with v16.2 OCR diagnostics) revealed the speed icon never
+showed because of TWO bugs, both fixed:
+- OCR read the numbers CORRECTLY (log shows reads 20, 80, 60, 70, 120 matching
+  the route) but they were never adopted: the majority vote required 2 matching
+  reads, yet at driving speed each sign is legible for only ~1 frame, so two
+  agreeing reads never accumulated. A single confident read is now ADOPTED
+  IMMEDIATELY, with a misread guard (switching to a DIFFERENT value needs strong
+  detection confidence or a confirming read).
+- The adopted limit was a per-frame local reset to null every frame, so even the
+  one adoption that occurred was lost immediately. The committed limit now
+  PERSISTS across frames (committedLimit field) so the speed icon stays shown
+  until a new sign changes it.
+- Lowered SPEED_OCR_MIN_BOX 0.04->0.035 (legible signs sat just under the gate)
+  and SPEED_MIN_CONF 0.55->0.45 (good reads were rejected at 0.45-0.46 conf).
+- Removed the now-unused vote machinery.
+
+## v16.4 — lane mount-calibration (feature)
+- NEW Settings: "Lane detection — mount calibration" with two sliders. The lane
+  detector assumed a level, centred, forward-facing camera; a tilted or offset
+  phone mount shifted where the road sits in frame and degraded lane tracking.
+  * Horizon (-0.2..+0.2): shifts the road region-of-interest up/down for camera
+    tilt.
+  * Centre (-0.2..+0.2): shifts the expected road centre left/right for an
+    off-centre mount.
+  Persisted and applied live. (From the 18-June drive: lane tracking failed to
+  follow road markings, likely mount-tilt related.)
+- NOTE: the 960-imgsz sign model (patience=75) was evaluated and NOT adopted —
+  it matches the 640 model's accuracy (mAP50 0.541 vs 0.54) while costing ~2.25x
+  more compute per frame (18900 vs 8400 anchors), worsening thermal load for no
+  accuracy gain. Kept the 640 model.
+
 ## v16.3 — GPS trace logging for map-based speed-limit cross-check (feature)
 - SpeedMonitor now exposes the latest GNSS position (lat, lon) as a flow, for
   the planned map-based speed-limit cross-check, and can log each fix as a

@@ -27,7 +27,10 @@ class SignAnalyzer(context: android.content.Context? = null) {
 
     private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     private var candidate: Int? = null
-    private val speedVotes = ArrayDeque<Int>()
+    /** The currently committed speed limit (km/h), persisted across frames so
+     *  the limit stays shown until a new sign changes it. */
+    private var committedLimit: Int? = null
+    private var lastOcrValue: Int? = null
 
     // Preferred: one-stage EU sign DETECTOR (Mapillary-trained, 27 classes).
     private val detector: SignDetector? = context?.let { ctx ->
@@ -65,7 +68,7 @@ class SignAnalyzer(context: android.content.Context? = null) {
         val dets = mutableListOf<Detection>()
         val signs = mutableListOf<com.rfsat.dms.RecognisedSign>()
         val unrecognised = mutableListOf<String>()
-        var adopted: Int? = null
+        var adopted: Int? = committedLimit
 
         // Preferred path: one-stage EU sign detector.
         val det = detector
@@ -76,11 +79,14 @@ class SignAnalyzer(context: android.content.Context? = null) {
                 dets += Detection(hit.name, hit.score,
                     hit.left, hit.top, hit.right, hit.bottom, risky = false)
                 // Speed-limit signs are a single generic class; the NUMBER is
-                // read by OCR. The sign is approached over many frames, so OCR
-                // is DEFERRED until the box is large enough (close enough) to be
-                // legible, then a plausible reading is committed via majority
-                // vote. This avoids reading distant, unreadable signs and the
-                // digit-confusion of trying to classify the number directly.
+                // read by OCR. OCR is deferred until the box is large enough to
+                // be legible. At driving speed a sign is only legible for ~1
+                // frame, so a single confident read is ADOPTED immediately
+                // rather than requiring repeated agreeing reads (which never
+                // accumulate at speed). A misread guard prevents a one-off bad
+                // read from overriding a stable limit: switching to a DIFFERENT
+                // value requires either high detection confidence or a second
+                // agreeing read.
                 if (hit.classId == SignDetector.SPEED_LIMIT_ID &&
                     hit.score >= SPEED_MIN_CONF) {
                     val boxH = hit.bottom - hit.top
@@ -89,14 +95,22 @@ class SignAnalyzer(context: android.content.Context? = null) {
                         DLog.i(TAG, "speed-limit OCR: box=%.3f read=%s".format(boxH,
                             v?.toString() ?: "none"))
                         if (v != null) {
-                            speedVotes.addLast(v)
-                            while (speedVotes.size > SPEED_VOTE_WINDOW) speedVotes.removeFirst()
-                            val winner = speedVotes.groupingBy { it }.eachCount()
-                                .maxByOrNull { it.value }
-                            if (winner != null && winner.value >= SPEED_VOTE_MIN) {
-                                adopted = winner.key
-                                DLog.i(TAG, "speed limit adopted: ${winner.key} km/h")
+                            val same = (v == adopted)
+                            val strong = hit.score >= SPEED_STRONG_CONF
+                            val confirming = (v == lastOcrValue)
+                            when {
+                                adopted == null || same ->
+                                    adopted = v                       // first / reaffirm
+                                strong || confirming -> {
+                                    adopted = v                       // confident change
+                                    DLog.i(TAG, "speed limit adopted: $v km/h")
+                                }
+                                else ->
+                                    DLog.i(TAG, "speed-limit $v pending confirm " +
+                                        "(current $adopted)")
                             }
+                            lastOcrValue = v
+                            committedLimit = adopted                  // persist
                         }
                     } else {
                         DLog.i(TAG, "speed-limit sign seen but too small for OCR " +
@@ -133,7 +147,10 @@ class SignAnalyzer(context: android.content.Context? = null) {
                         res.name, SignClassifier.category(res.classId), res.score,
                         res.classId)
                     dets += cand.copy(labelText = res.name, risky = false)
-                    res.speedLimitKmh?.let { if (candidate == it) adopted = it else candidate = it }
+                    res.speedLimitKmh?.let {
+                        if (candidate == it) { adopted = it; committedLimit = it }
+                        else candidate = it
+                    }
                 } else {
                     // Diagnostic: a sign-shaped region the model could not
                     // confidently recognise. Log its border colour and the best
@@ -284,12 +301,11 @@ class SignAnalyzer(context: android.content.Context? = null) {
 
     companion object {
         private const val TAG = "SignAnalyzer"
-        const val SPEED_MIN_CONF = 0.55f
-        const val SPEED_VOTE_WINDOW = 4
-        const val SPEED_VOTE_MIN = 2
+        const val SPEED_MIN_CONF = 0.45f
+        const val SPEED_STRONG_CONF = 0.7f
         // Minimum sign-box height (fraction of frame) before OCR is attempted.
-        // Lowered from 0.06: real speed signs often pass before reaching 6% of
-        // frame height, so OCR was never triggered on the road.
-        const val SPEED_OCR_MIN_BOX = 0.04f
+        // Lowered to 0.035: at the 17/18-June drives several legible signs sat
+        // just under 0.04 (e.g. 0.036) and were skipped.
+        const val SPEED_OCR_MIN_BOX = 0.035f
     }
 }
