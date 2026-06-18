@@ -5,6 +5,19 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v17.2 — slim map database (schema v2) + RFSAT-DBM dev path
+All-of-Greece came to 537 MB (74% of it geometry stored as float64). Schema v2
+slims it, handled in the off-device pre-processor (dbm-tools); the app side is
+the matching decoder change:
+- Coordinates now decoded as scaled int32 (degrees * 1e7, ~1 cm) — half the size
+  of float64, lossless at GPS scale. App unpackCoords reads the v2 int32 format.
+- (Pre-processor also: Douglas-Peucker polyline simplification at 2 m, road-type
+  filtering of non-driveable ways, and an optional --drop-untagged-minor flag.)
+- OsmMap now also searches /sdcard/Download/RFSAT-DBM for the db (matches where
+  the test file was placed), in addition to the app dirs and /sdcard/Download.
+IMPORTANT: regenerate greece.db with the v2 tool — a v1 (float64) db will not
+decode correctly in this app version.
+
 ## v17.1 — map backend: SQLite + R-tree spatial database (step 2)
 OsmMap now reads a SQLite + R-tree speed-limit database (produced off-device by
 dbm-tools/osm_to_speedlimitdb.py) instead of parsing a bundled .osm in memory.

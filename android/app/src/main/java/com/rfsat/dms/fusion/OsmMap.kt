@@ -66,6 +66,7 @@ class OsmMap private constructor(private val db: SQLiteDatabase) {
             val candidates = listOf(
                 File(File(ctx.filesDir, "maps"), fileName),
                 File(ctx.getExternalFilesDir("maps"), fileName),
+                File("/sdcard/Download/RFSAT-DBM", fileName),
                 File("/sdcard/Download", fileName),
             )
             val f = candidates.firstOrNull { it.exists() }
@@ -167,12 +168,16 @@ class OsmMap private constructor(private val db: SQLiteDatabase) {
         return out
     }
 
-    /** Decode packed float64 (lat,lon) pairs written by the pre-processor. */
+    /** Decode packed coordinates written by the pre-processor. Schema v2 stores
+     *  scaled int32 (degrees * 1e7) — half the size of float64, ~1 cm precision. */
     private fun unpackCoords(blob: ByteArray): Pair<DoubleArray, DoubleArray> {
-        val n = blob.size / 16
+        val n = blob.size / 8                       // 2 x int32 per point
         val la = DoubleArray(n); val lo = DoubleArray(n)
         val bb = java.nio.ByteBuffer.wrap(blob).order(java.nio.ByteOrder.LITTLE_ENDIAN)
-        for (i in 0 until n) { la[i] = bb.double; lo[i] = bb.double }
+        for (i in 0 until n) {
+            la[i] = bb.int / 1e7
+            lo[i] = bb.int / 1e7
+        }
         return la to lo
     }
 
