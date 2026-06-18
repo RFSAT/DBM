@@ -5,6 +5,21 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v17.1 — map backend: SQLite + R-tree spatial database (step 2)
+OsmMap now reads a SQLite + R-tree speed-limit database (produced off-device by
+dbm-tools/osm_to_speedlimitdb.py) instead of parsing a bundled .osm in memory.
+Per GPS fix it queries the R-tree for segments NEAR the point and applies the
+SAME validated heading/hysteresis matching to that small candidate set — so it
+scales to a whole-country database (e.g. all of Greece) without loading the
+network into memory. The matching/fusion logic is unchanged.
+- Database lookup order: app files/maps, app external files/maps, then
+  /sdcard/Download (for manual adb-push during development).
+- Default db name greece.db; absent db -> sign+cache only, no crash.
+- Validated: R-tree returns only nearby candidates and matching correctly
+  disambiguates parallel roads (60 road vs parallel 30 service road).
+Next (step 3): region-download manager fetching per-region .db from
+www.rfsat.com/public/maps/v1/ with an index.json.
+
 ## v17.0 — speed-limit fusion ported into the app (major feature)
 Ports the validated MATLAB fusion prototype to Kotlin. The current speed limit is
 now derived by combining three sources instead of the camera alone:

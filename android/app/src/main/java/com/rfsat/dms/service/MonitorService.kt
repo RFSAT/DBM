@@ -187,12 +187,13 @@ class MonitorService : Service() {
         speed = SpeedMonitor(this)
         speed.logTrace = getSharedPreferences("dbm", MODE_PRIVATE)
             .getBoolean("log_gps", false)
-        // Load the bundled OSM extract for map-based speed limits, off the main
-        // thread (parsing is heavy). Until it is ready, fusion runs sign+cache
-        // only (map source returns nothing), which is safe.
+        // Open the on-device speed-limit database (SQLite + R-tree) off the
+        // main thread. Looks in the app files dir (where the downloader places
+        // it) then /sdcard/Download (manual adb-push during dev). Until present,
+        // fusion runs sign+cache only — safe, no crash.
         kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
-            osmMap = OsmMap.fromAsset(this@MonitorService, "speedlimits.osm")
-            DLog.i(TAG, "OSM map ready: ${osmMap?.size ?: 0} segments")
+            osmMap = OsmMap.open(this@MonitorService, "greece.db")
+            DLog.i(TAG, "map db ready: ${osmMap != null}")
         }
         getSharedPreferences("dbm", MODE_PRIVATE).let { p ->
             lanes.horizonOffset = p.getFloat("lane_horizon", 0f)
@@ -648,6 +649,7 @@ class MonitorService : Service() {
         speed.stop(); yawRate.stop()
         recDriver?.stop(); recRoad?.stop()
         driver?.close(); road?.close(); signs.close(); lights.close(); alerter.release()
+        osmMap?.close()
         runCatching {
             stopForeground(STOP_FOREGROUND_REMOVE)
         }

@@ -1,138 +1,108 @@
 package com.rfsat.dms.fusion
 
 import android.content.Context
+import android.database.sqlite.SQLiteDatabase
 import com.rfsat.dms.util.DLog
+import java.io.File
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.min
 
-/** A road segment from OSM: an ordered polyline with an optional speed limit. */
+/** A road segment: an ordered polyline with an optional speed limit (km/h, or
+ *  -1 if untagged). */
 data class RoadSegment(
     val id: Long,
     val lat: DoubleArray,
     val lon: DoubleArray,
-    val maxSpeed: Int,            // km/h, or -1 if untagged
+    val maxSpeed: Int,
 )
 
 /** Result of matching a GPS point to the road network. */
 data class MatchResult(val mapLimit: Int, val segId: Long, val distM: Double)
 
 /**
- * On-device OSM road network with nearest-segment matching, ported from the
- * validated MATLAB prototype (loadOSM.m + matchSegment.m). Loads a bundled .osm
- * XML extract once, then answers "what is the speed limit on the road at this
- * lat/lon" with heading consistency + hysteresis to avoid parallel-road and
- * single-sample mismatches.
+ * On-device OSM road network backed by a SQLite + R-tree spatial database
+ * (produced off-device by osm_to_speedlimitdb.py). Per GPS fix it queries the
+ * R-tree for segments NEAR the point — not the whole region — then applies the
+ * validated heading-consistency + hysteresis matching to that small candidate
+ * set. This scales to a whole-country database where loading every segment into
+ * memory would not.
  *
- * The matcher state (last matched segment) is held here, so call match() once
- * per GPS fix in order.
+ * The matching logic (heading folding, hysteresis, point-to-polyline distance)
+ * is unchanged from the validated MATLAB prototype; only the data source moved
+ * from an in-memory list to a spatial query.
+ *
+ * Stateful (hysteresis): call match() once per GPS fix in order. Close with
+ * close() when done.
  */
-class OsmMap private constructor(private val roads: List<RoadSegment>) {
+class OsmMap private constructor(private val db: SQLiteDatabase) {
 
     private var lastSeg: Long = -1L
 
     companion object {
         private const val TAG = "OsmMap"
 
-        // Tunables — copied from defaultFuseConfig.m (validated on real drives).
+        // Tunables — from defaultFuseConfig.m (validated on real drives).
         const val MATCH_MAX_DIST_M = 25.0
         const val MATCH_HYSTERESIS_M = 8.0
         const val HEADING_TOL_DEG = 35.0
-        const val HEADING_WEIGHT = 0.5      // metres of penalty per degree over tol
-
+        const val HEADING_WEIGHT = 0.5
         private const val EARTH_R = 6371000.0
 
-        /** Load from a bundled assets file (e.g. "attiki.osm"). Returns null on
-         *  failure so the caller can run without a map (sign-only). */
-        fun fromAsset(ctx: Context, assetName: String): OsmMap? = runCatching {
-            ctx.assets.open(assetName).use { parse(it) }
-        }.onFailure { DLog.e(TAG, "OSM load failed: $assetName", it) }.getOrNull()
+        // Spatial-query window: ~250 m in degrees. Big enough to include the
+        // correct road plus neighbours for hysteresis, small enough that the
+        // R-tree returns only a handful of candidates.
+        private const val QUERY_MARGIN_DEG = 0.0025
 
-        /** Minimal OSM XML parser: nodes (id->lat/lon) then ways (highway with
-         *  node refs + maxspeed). Mirrors loadOSM.m. */
-        private fun parse(input: java.io.InputStream): OsmMap {
-            val factory = org.xmlpull.v1.XmlPullParserFactory.newInstance()
-            val xpp = factory.newPullParser()
-            xpp.setInput(input, null)
-
-            val nodeLat = HashMap<Long, Double>(100_000)
-            val nodeLon = HashMap<Long, Double>(100_000)
-            val roads = ArrayList<RoadSegment>(10_000)
-
-            var inWay = false
-            var wayIsHighway = false
-            var wayMax = -1
-            var wayId = 0L
-            val wayNodes = ArrayList<Long>(64)
-
-            var event = xpp.eventType
-            while (event != org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
-                if (event == org.xmlpull.v1.XmlPullParser.START_TAG) {
-                    when (xpp.name) {
-                        "node" -> {
-                            val id = xpp.getAttributeValue(null, "id")?.toLongOrNull()
-                            val la = xpp.getAttributeValue(null, "lat")?.toDoubleOrNull()
-                            val lo = xpp.getAttributeValue(null, "lon")?.toDoubleOrNull()
-                            if (id != null && la != null && lo != null) {
-                                nodeLat[id] = la; nodeLon[id] = lo
-                            }
-                        }
-                        "way" -> {
-                            inWay = true; wayIsHighway = false; wayMax = -1
-                            wayId = xpp.getAttributeValue(null, "id")?.toLongOrNull() ?: 0L
-                            wayNodes.clear()
-                        }
-                        "nd" -> if (inWay) {
-                            xpp.getAttributeValue(null, "ref")?.toLongOrNull()
-                                ?.let { wayNodes.add(it) }
-                        }
-                        "tag" -> if (inWay) {
-                            val k = xpp.getAttributeValue(null, "k")
-                            val v = xpp.getAttributeValue(null, "v")
-                            if (k == "highway") wayIsHighway = true
-                            if (k == "maxspeed" && v != null) {
-                                val num = Regex("\\d+").find(v)?.value?.toIntOrNull()
-                                if (num != null) {
-                                    wayMax = if (v.contains("mph"))
-                                        (num * 1.60934).toInt() else num
-                                }
-                            }
-                        }
-                    }
-                } else if (event == org.xmlpull.v1.XmlPullParser.END_TAG && xpp.name == "way") {
-                    if (inWay && wayIsHighway && wayNodes.size >= 2) {
-                        val la = DoubleArray(wayNodes.size)
-                        val lo = DoubleArray(wayNodes.size)
-                        var k = 0
-                        for (ref in wayNodes) {
-                            val a = nodeLat[ref]; val b = nodeLon[ref]
-                            if (a != null && b != null) { la[k] = a; lo[k] = b; k++ }
-                        }
-                        if (k >= 2) roads.add(
-                            RoadSegment(wayId, la.copyOf(k), lo.copyOf(k), wayMax))
-                    }
-                    inWay = false
-                }
-                event = xpp.next()
+        /**
+         * Open a speed-limit database. Looks in the app's files dir first (where
+         * the downloader places it), then /sdcard/Download (for manual adb-push
+         * during development). Returns null if no database is found or it cannot
+         * be opened — the fuser then runs sign+cache only (no crash).
+         */
+        fun open(ctx: Context, fileName: String): OsmMap? {
+            val candidates = listOf(
+                File(File(ctx.filesDir, "maps"), fileName),
+                File(ctx.getExternalFilesDir("maps"), fileName),
+                File("/sdcard/Download", fileName),
+            )
+            val f = candidates.firstOrNull { it.exists() }
+            if (f == null) {
+                DLog.w(TAG, "no map db '$fileName' found in ${candidates.map { it.path }}")
+                return null
             }
-            val tagged = roads.count { it.maxSpeed > 0 }
-            DLog.i(TAG, "OSM parsed: ${roads.size} road segments ($tagged with maxspeed)")
-            return OsmMap(roads)
+            return runCatching {
+                val db = SQLiteDatabase.openDatabase(
+                    f.path, null, SQLiteDatabase.OPEN_READONLY)
+                val meta = readMeta(db)
+                DLog.i(TAG, "opened map db ${f.path}: region=${meta["region"]} " +
+                    "segments=${meta["segments"]} schema=${meta["schema_version"]}")
+                OsmMap(db)
+            }.onFailure { DLog.e(TAG, "open map db failed: ${f.path}", it) }.getOrNull()
+        }
+
+        private fun readMeta(db: SQLiteDatabase): Map<String, String> {
+            val m = HashMap<String, String>()
+            runCatching {
+                db.rawQuery("SELECT key,value FROM meta", null).use { c ->
+                    while (c.moveToNext()) m[c.getString(0)] = c.getString(1)
+                }
+            }
+            return m
         }
     }
 
-    val size: Int get() = roads.size
-
     /**
-     * Match a GPS point to the best road segment. heading in degrees (0=east in
-     * the local metric frame) or NaN if unknown. Returns a limit of -1 when the
-     * matched road has no maxspeed, or when nothing is within MATCH_MAX_DIST_M.
+     * Match a GPS point to the best nearby road segment. headingDeg in degrees
+     * (0=east in the local metric frame) or NaN if unknown. Returns limit -1
+     * when the matched road has no maxspeed, or when nothing is within range.
      */
     fun match(lat: Double, lon: Double, headingDeg: Double): MatchResult {
-        if (roads.isEmpty()) return MatchResult(-1, -1L, Double.MAX_VALUE)
         val lat0 = lat * Math.PI / 180.0
+        val candidates = queryNear(lat, lon)
+        if (candidates.isEmpty()) { lastSeg = -1L; return MatchResult(-1, -1L, Double.MAX_VALUE) }
 
         var bestScore = Double.MAX_VALUE
         var bestDist = Double.MAX_VALUE
@@ -142,22 +112,19 @@ class OsmMap private constructor(private val roads: List<RoadSegment>) {
         var prevLimit = -1
         var prevId = -1L
 
-        for (r in roads) {
+        for (r in candidates) {
             val (d, segHead) = pointToPolyline(lat, lon, lat0, r.lat, r.lon)
-            if (d > MATCH_MAX_DIST_M) {
-                if (r.id == lastSeg) { prevDist = d }   // still track prev even if far
-                continue
-            }
+            if (r.id == lastSeg) { prevDist = d; prevLimit = r.maxSpeed; prevId = r.id }
+            if (d > MATCH_MAX_DIST_M) continue
             var score = d
             if (!headingDeg.isNaN() && !segHead.isNaN()) {
                 var dh = angDiff(headingDeg, segHead)
-                dh = min(dh, 180.0 - dh)                // roads undirected
+                dh = min(dh, 180.0 - dh)               // roads undirected
                 if (dh > HEADING_TOL_DEG) score += HEADING_WEIGHT * (dh - HEADING_TOL_DEG)
             }
             if (score < bestScore) {
                 bestScore = score; bestDist = d; bestId = r.id; bestLimit = r.maxSpeed
             }
-            if (r.id == lastSeg) { prevDist = d; prevLimit = r.maxSpeed; prevId = r.id }
         }
 
         // Hysteresis: keep the previous segment unless clearly beaten.
@@ -166,10 +133,50 @@ class OsmMap private constructor(private val roads: List<RoadSegment>) {
             bestId = prevId; bestDist = prevDist; bestLimit = prevLimit
         }
 
-        if (bestDist > MATCH_MAX_DIST_M) { lastSeg = -1L; return MatchResult(-1, -1L, bestDist) }
+        if (bestId == -1L || bestDist > MATCH_MAX_DIST_M) {
+            lastSeg = -1L; return MatchResult(-1, -1L, bestDist)
+        }
         lastSeg = bestId
         return MatchResult(bestLimit, bestId, bestDist)
     }
+
+    /** R-tree query: segments whose bounding box overlaps a small window around
+     *  the point. Reads only those segments' geometry, not the whole network. */
+    private fun queryNear(lat: Double, lon: Double): List<RoadSegment> {
+        val out = ArrayList<RoadSegment>(16)
+        val sql = """
+            SELECT s.id, s.maxspeed, s.coords
+            FROM segment_rtree r JOIN segments s ON s.id = r.id
+            WHERE r.maxLat >= ? AND r.minLat <= ? AND r.maxLon >= ? AND r.minLon <= ?
+        """.trimIndent()
+        val args = arrayOf(
+            (lat - QUERY_MARGIN_DEG).toString(), (lat + QUERY_MARGIN_DEG).toString(),
+            (lon - QUERY_MARGIN_DEG).toString(), (lon + QUERY_MARGIN_DEG).toString(),
+        )
+        runCatching {
+            db.rawQuery(sql, args).use { c ->
+                while (c.moveToNext()) {
+                    val id = c.getLong(0)
+                    val ms = c.getInt(1)
+                    val blob = c.getBlob(2)
+                    val (la, lo) = unpackCoords(blob)
+                    if (la.size >= 2) out.add(RoadSegment(id, la, lo, ms))
+                }
+            }
+        }.onFailure { DLog.e(TAG, "spatial query failed", it) }
+        return out
+    }
+
+    /** Decode packed float64 (lat,lon) pairs written by the pre-processor. */
+    private fun unpackCoords(blob: ByteArray): Pair<DoubleArray, DoubleArray> {
+        val n = blob.size / 16
+        val la = DoubleArray(n); val lo = DoubleArray(n)
+        val bb = java.nio.ByteBuffer.wrap(blob).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        for (i in 0 until n) { la[i] = bb.double; lo[i] = bb.double }
+        return la to lo
+    }
+
+    fun close() = runCatching { db.close() }
 
     private fun pointToPolyline(
         plat: Double, plon: Double, lat0: Double, vlat: DoubleArray, vlon: DoubleArray
@@ -204,8 +211,6 @@ class OsmMap private constructor(private val roads: List<RoadSegment>) {
         return d to head
     }
 
-    private fun angDiff(a: Double, b: Double): Double {
-        val d = abs((((a - b) % 360.0) + 540.0) % 360.0 - 180.0)
-        return d
-    }
+    private fun angDiff(a: Double, b: Double): Double =
+        abs((((a - b) % 360.0) + 540.0) % 360.0 - 180.0)
 }
