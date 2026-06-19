@@ -5,6 +5,22 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v17.6 — CRITICAL fixes: map R-tree unavailable on Android + crash
+The 19-June drive exposed two serious bugs:
+- MAP DID NOT WORK ON DEVICE: "no such module: rtree" fired on every GPS fix
+  (28,848 times). Android's built-in SQLite omits the R-tree extension, so the
+  spatial query always failed and the map contributed nothing. Fixed WITHOUT a
+  new dependency: the pre-processor now stores plain bbox columns
+  (minLat,maxLat,minLon,maxLon) with an index on segments, and the app queries
+  those instead of an rtree virtual table. DB schema bumped to v3 — REGENERATE
+  greece.db with the updated tool (v2 dbs lack the bbox columns).
+- FATAL CRASH "Can't copy a recycled bitmap" in EvidenceStore: the camera could
+  recycle the road frame before the async evidence copy ran. Now guards
+  isRecycled and catches the race so evidence-saving can never crash the service.
+(Camera front-view init still needs the earlier tab-switch workaround in some
+cases; and the map-first sign procedure + GPS-timed OCR you proposed are coming
+next — they are features, handled separately from these stop-the-bleeding fixes.)
+
 ## v17.5 — map download manager (countries/regions, versioning) (step 3)
 The app can now download speed-limit maps from the RFSAT portal, with the
 country/region hierarchy mirroring geofabrik (Greece is a single country-level

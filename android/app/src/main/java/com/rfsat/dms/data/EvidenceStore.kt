@@ -1,5 +1,6 @@
 package com.rfsat.dms.data
 
+import com.rfsat.dms.util.DLog
 import android.content.Context
 import android.graphics.Bitmap
 import com.rfsat.dms.CameraRole
@@ -43,8 +44,15 @@ class EvidenceStore(private val ctx: Context) {
             if (tMs - last < debounce) return
             lastWrite[key] = tMs
         }
-        // Copy bitmap before going async — caller's frame buffer is reused.
-        val copy = frame?.copy(Bitmap.Config.ARGB_8888, false)
+        // Copy bitmap before going async — caller's frame buffer is reused (and
+        // may be recycled by the camera pipeline at any moment). Guard against a
+        // racing recycle so evidence-saving can never crash the service.
+        val copy = try {
+            if (frame != null && !frame.isRecycled)
+                frame.copy(Bitmap.Config.ARGB_8888, false) else null
+        } catch (e: Exception) {
+            DLog.w(TAG, "evidence frame copy skipped (recycled): ${e.message}"); null
+        }
         scope.launch {
             var path: String? = null
             var sha: String? = null
@@ -77,5 +85,5 @@ class EvidenceStore(private val ctx: Context) {
         return md.digest().joinToString("") { "%02x".format(it) }
     }
 
-    companion object { const val DEBOUNCE_MS = 10_000L }
+    companion object { const val DEBOUNCE_MS = 10_000L; private const val TAG = "EvidenceStore" }
 }

@@ -153,10 +153,11 @@ class OsmMap private constructor(private val db: SQLiteDatabase) {
      *  the point. Reads only those segments' geometry, not the whole network. */
     private fun queryNear(lat: Double, lon: Double): List<RoadSegment> {
         val out = ArrayList<RoadSegment>(16)
+        // Android's built-in SQLite has no rtree module, so we filter on plain
+        // bbox columns (indexed on minLat/maxLat). Schema v3 stores these.
         val sql = """
-            SELECT s.id, s.maxspeed, s.coords
-            FROM segment_rtree r JOIN segments s ON s.id = r.id
-            WHERE r.maxLat >= ? AND r.minLat <= ? AND r.maxLon >= ? AND r.minLon <= ?
+            SELECT id, maxspeed, coords FROM segments
+            WHERE maxLat >= ? AND minLat <= ? AND maxLon >= ? AND minLon <= ?
         """.trimIndent()
         val args = arrayOf(
             (lat - QUERY_MARGIN_DEG).toString(), (lat + QUERY_MARGIN_DEG).toString(),
