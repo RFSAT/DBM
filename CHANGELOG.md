@@ -5,6 +5,22 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v17.8 — box-alignment diagnostics (shifted speed-sign boxes)
+Investigating the reported speed-sign bounding boxes shifting toward frame centre
+(right near the left edge, left near the right edge — the signature of an
+aspect-ratio mismatch). Code review found:
+- The detector's coordinate math is correct (letterbox fit + proper inverse).
+- The overlay display math accounts for PreviewView FILL_CENTER crop via
+  result.frameAspect.
+- IMPORTANTLY: the OCR crop uses the detector's normalized coords against the
+  actual frame dimensions — INDEPENDENT of the overlay display mapping. So the
+  visible shift is most likely cosmetic (overlay-only) and is probably NOT
+  cropping the wrong region for OCR.
+Added diagnostics to confirm at runtime: logs the analysed frame dimensions/aspect
+per camera, and logs each OCR crop's normalized + pixel region. These will show
+whether the crop lands on the sign (cosmetic shift) or off it (real OCR problem),
+so the fix — if any is needed — targets the right path instead of guessing.
+
 ## v17.7 — sign overlay UI + MediaPipe timestamp & evidence fixes
 Map now confirmed WORKING on-device (v17.6 fix verified: zero rtree errors, db
 opened schema=3, 1.26M segments). This release adds the requested overlay and

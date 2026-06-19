@@ -222,6 +222,8 @@ class SignAnalyzer(context: android.content.Context? = null) {
         val b = ((hit.bottom + bh * pad) * h).toInt().coerceIn(t + 1, h)
         var crop = runCatching { Bitmap.createBitmap(frame, l, t, r - l, b - t) }
             .getOrNull() ?: return null
+        DLog.i(TAG, "OCR crop: norm[%.3f,%.3f,%.3f,%.3f] px[%d,%d,%d,%d] of %dx%d".format(
+            hit.left, hit.top, hit.right, hit.bottom, l, t, r, b, w, h))
         // Upscale so the shorter side is at least ~96px — ML Kit reads digits
         // far better when they are not tiny.
         val minSide = minOf(crop.width, crop.height)

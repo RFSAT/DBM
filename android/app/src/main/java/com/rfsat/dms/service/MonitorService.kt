@@ -428,10 +428,21 @@ class MonitorService : Service() {
         crop?.recycle()
     }
 
+    private val loggedAspect = mutableSetOf<CameraRole>()
+
     fun submitFrame(role: CameraRole, frame: Bitmap, tMs: Long) {
         if (!analysing.value) { frame.recycle(); return }   // paused: drop frames
         val frameAspect = if (frame.height > 0)
             frame.width.toFloat() / frame.height else 16f / 9f
+        // One-time per-role diagnostic: the analysed frame's real dimensions and
+        // aspect. If box overlays appear shifted horizontally (toward centre near
+        // the edges), compare this aspect against the PreviewView's displayed
+        // aspect — a mismatch there is the usual cause.
+        if (role !in loggedAspect) {
+            loggedAspect.add(role)
+            DLog.i(TAG, "frame dims for $role: ${frame.width}x${frame.height} " +
+                "(aspect ${"%.3f".format(frameAspect)})")
+        }
         scope.launch {
             val result = runCatching {
                 when (role) {
