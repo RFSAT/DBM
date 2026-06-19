@@ -5,6 +5,25 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v17.12 — CRITICAL OCR fix (digit clipping) + dual-sign split
+Real drive proved the box misalignment is NOT cosmetic: 50 read as 5, 100 as 10,
+worse for signs on the RIGHT — the crop was clipping the trailing digit (box
+shifted toward centre, so a right-side sign loses its right edge). Fixes:
+- OCR crop horizontal padding widened 0.12 -> 0.45 (asymmetric: wide horizontally
+  to recover a clipped digit even when the detector box is offset; vertical pad
+  0.20). Reading the whole number matters more than a tight crop.
+- DUAL-SIGN SPLIT (user idea): a box taller than ~1.6x its width is treated as
+  possibly two stacked signs; it is split into top/bottom halves, each OCR'd
+  separately, and the plausible speed-limit reading wins (prefers the top). This
+  targets the commonly-missed stacked-sign case.
+- Retains the v17.8 "OCR crop:" diagnostic so the exact box vs crop numbers are
+  visible next drive.
+STILL OPEN (next): the ROOT cause of the box shift (detector coordinate mapping)
+needs the OCR-crop log numbers from a drive to pin down — the wide pad is a
+robust mitigation, not the root fix. Also pending: 3-axis lane calibration
+(up/down, left/right, perspective), camera-init delay on Detector view, optional
+log tab. These follow once the OCR fix is confirmed.
+
 ## v17.11 — fix release build (R8 missing-classes) so signed APK completes
 The v17.10 signing wiring worked (validateSigningRelease passed — keystore,
 alias, passwords all accepted), but the release build then failed at

@@ -97,7 +97,19 @@ class SignAnalyzer(context: android.content.Context? = null) {
                     hit.score >= SPEED_MIN_CONF) {
                     val boxH = hit.bottom - hit.top
                     if (boxH >= SPEED_OCR_MIN_BOX) {
-                        val v = ocrSpeedLimit(frame, hit)
+                        // Dual-sign check: a box much taller than wide often means
+                        // two stacked signs (e.g. a speed limit above a secondary
+                        // sign). Split into top/bottom halves and OCR each, taking
+                        // the most plausible speed-limit reading, rather than
+                        // OCR-ing the merged box (which usually fails).
+                        val boxW = hit.right - hit.left
+                        val aspect = if (boxW > 0) boxH / boxW else 1f
+                        val v = if (aspect >= DUAL_SIGN_ASPECT) {
+                            DLog.i(TAG, "dual-sign suspected (aspect %.2f), splitting".format(aspect))
+                            ocrDualSign(frame, hit)
+                        } else {
+                            ocrSpeedLimit(frame, hit)
+                        }
                         DLog.i(TAG, "speed-limit OCR: box=%.3f read=%s".format(boxH,
                             v?.toString() ?: "none"))
                         if (v != null) {
@@ -210,16 +222,37 @@ class SignAnalyzer(context: android.content.Context? = null) {
     /** OCR the number on a detected speed-limit sign box. Returns a plausible
      *  limit (multiple of 5, 5..130) or null. The crop is padded slightly and
      *  upscaled if small, because ML Kit struggles with tiny text. */
+    /** For a suspected stacked dual-sign box: OCR the top and bottom halves
+     *  separately and return the most plausible speed limit found. The speed
+     *  limit may be in either half, so both are tried; a valid reading wins. */
+    private suspend fun ocrDualSign(frame: Bitmap, hit: SignDetector.SignHit): Int? {
+        val mid = (hit.top + hit.bottom) / 2f
+        val topHalf = hit.copy(bottom = mid)
+        val botHalf = hit.copy(top = mid)
+        val vTop = ocrSpeedLimit(frame, topHalf)
+        val vBot = ocrSpeedLimit(frame, botHalf)
+        DLog.i(TAG, "dual-sign halves: top=%s bottom=%s".format(
+            vTop?.toString() ?: "none", vBot?.toString() ?: "none"))
+        // Prefer a reading that exists; if both do, prefer the top (speed limit
+        // is usually the upper sign in a stack).
+        return vTop ?: vBot
+    }
+
     private suspend fun ocrSpeedLimit(frame: Bitmap, hit: SignDetector.SignHit): Int? {
         val w = frame.width; val h = frame.height
-        // Pad the box ~12% each side: the digits sit inside the sign border and
-        // a tight crop can clip them.
-        val pad = 0.12f
+        // Pad generously and ASYMMETRICALLY wide. Evidence from real drives
+        // (50 read as 5, 100 as 10, worse for signs on the right) shows the
+        // detector box can be shifted/narrow horizontally and clip the trailing
+        // digit. A wide horizontal pad recovers the whole number even when the
+        // box is offset; vertical pad stays moderate. Better to include some
+        // border than to lose a digit.
+        val padX = 0.45f      // was 0.12 — wide, to survive a horizontally-off box
+        val padY = 0.20f
         val bw = (hit.right - hit.left); val bh = (hit.bottom - hit.top)
-        val l = ((hit.left - bw * pad) * w).toInt().coerceIn(0, w - 1)
-        val t = ((hit.top - bh * pad) * h).toInt().coerceIn(0, h - 1)
-        val r = ((hit.right + bw * pad) * w).toInt().coerceIn(l + 1, w)
-        val b = ((hit.bottom + bh * pad) * h).toInt().coerceIn(t + 1, h)
+        val l = ((hit.left - bw * padX) * w).toInt().coerceIn(0, w - 1)
+        val t = ((hit.top - bh * padY) * h).toInt().coerceIn(0, h - 1)
+        val r = ((hit.right + bw * padX) * w).toInt().coerceIn(l + 1, w)
+        val b = ((hit.bottom + bh * padY) * h).toInt().coerceIn(t + 1, h)
         var crop = runCatching { Bitmap.createBitmap(frame, l, t, r - l, b - t) }
             .getOrNull() ?: return null
         DLog.i(TAG, "OCR crop: norm[%.3f,%.3f,%.3f,%.3f] px[%d,%d,%d,%d] of %dx%d".format(
@@ -330,6 +363,10 @@ class SignAnalyzer(context: android.content.Context? = null) {
         // readable size, so the window was missed. Reads from crops below
         // SPEED_OCR_TRUST_BOX are confirmed before use (see analyze()).
         const val SPEED_OCR_MIN_BOX = 0.028f
+        // A detected box taller than this ratio (height/width) is treated as a
+        // possible stacked dual-sign and split for OCR. Single round speed signs
+        // are ~1:1; ~1.6+ suggests two signs stacked vertically.
+        const val DUAL_SIGN_ASPECT = 1.6f
         // Box height at/above which a single OCR read is trusted immediately
         // (the smallest size that read correctly on real drives was ~0.036).
         const val SPEED_OCR_TRUST_BOX = 0.036f
