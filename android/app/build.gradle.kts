@@ -16,7 +16,7 @@ plugins {
 //   in-app About screen (via BuildConfig.VERSION_NAME).
 // ---------------------------------------------------------------------------
 val dmsVersionMajor = 17
-val dmsVersionMinor = 10
+val dmsVersionMinor = 11
 val dmsVersionName = "$dmsVersionMajor.$dmsVersionMinor"
 
 android {
@@ -56,7 +56,13 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = true
+            // Minification is OFF during active development: R8 on an ML-heavy
+            // app (TFLite + MediaPipe + ML Kit) can strip reflection-loaded code
+            // and cause launch-time crashes that don't show at build time. The
+            // proguard-rules.pro (keep + dontwarn rules) is already in place, so
+            // re-enabling for a Play Store build is just flipping this to true
+            // and testing the shrunk APK thoroughly.
+            isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // Apply the release signing config only when the keystore is present
             // (CI with secrets). Otherwise the build stays unsigned rather than

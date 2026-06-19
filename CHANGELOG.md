@@ -5,6 +5,23 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v17.11 — fix release build (R8 missing-classes) so signed APK completes
+The v17.10 signing wiring worked (validateSigningRelease passed — keystore,
+alias, passwords all accepted), but the release build then failed at
+minifyReleaseWithR8: R8 fails on missing classes by default, and MediaPipe/
+TensorFlow-Lite-GPU/AutoValue reference optional classes not on the runtime
+classpath. Fixes:
+- Added -dontwarn rules (proguard-rules.pro) for every missing reference R8
+  reported: com.google.mediapipe.proto.**, javax.lang.model.**,
+  autovalue.shaded.**, com.google.auto.value.**, org.tensorflow.lite.gpu.**.
+- Disabled R8 minification on release for now (isMinifyEnabled=false): on an
+  ML-heavy app, shrinking can strip reflection-loaded code and crash at launch
+  in ways that don't show at build time. During active development a reliable
+  signed APK matters more than a shrunk one. The proguard rules remain in place,
+  so re-enabling for a Play Store build is one line + thorough testing.
+Result: assembleRelease now completes and produces a SIGNED release APK
+(DBM-apk-release artifact) that installs as an update over prior releases.
+
 ## v17.10 — release APK signing via GitHub secrets
 CI now produces a properly SIGNED release APK, so app updates install over each
 other without requiring an uninstall (the debug-keystore mismatch is resolved).
