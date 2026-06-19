@@ -47,6 +47,10 @@ class LaneAnalyzer {
     @Volatile var horizonOffset = 0f
     @Volatile var centerOffset = 0f
 
+    /** The ROI top fraction actually used on the last frame (after calibration
+     *  and clamping), so the overlay can draw lane lines to the same top. */
+    @Volatile var lastRoiFrac = 0.55f
+
     private var leftCrossSinceMs = 0L
     private var rightCrossSinceMs = 0L
     private var shoulderSinceMs = 0L
@@ -54,8 +58,11 @@ class LaneAnalyzer {
     fun analyze(frame: Bitmap, tMs: Long): Pair<List<LaneLine>, List<RiskEventCandidate>> {
         val w = frame.width; val h = frame.height
         // ROI top with mount calibration: base lower 45%, shifted by the
-        // horizon offset, clamped to a sane band.
-        val roiFrac = (0.55f + horizonOffset).coerceIn(0.35f, 0.75f)
+        // horizon offset. Clamp widened to 0.15..0.90 so a steeply tilted or
+        // offset mount can pull the road region far enough; the overlay uses the
+        // same roiFrac so the drawn lines track the calibrated region.
+        val roiFrac = (0.55f + horizonOffset).coerceIn(0.15f, 0.90f)
+        lastRoiFrac = roiFrac
         val roiTop = (h * roiFrac).toInt()
         val px = IntArray(w * (h - roiTop))
         frame.getPixels(px, 0, w, 0, roiTop, w, h - roiTop)

@@ -435,7 +435,7 @@ class MainActivity : ComponentActivity() {
                         LaneLine.Kind.DASHED -> EnactLime
                     }
                     val pB = Offset(mx(l.xBottom), my(1f))
-                    val pT = Offset(mx(l.xTop), my(0.55f))
+                    val pT = Offset(mx(l.xTop), my(result.roiTopFrac))
                     when (l.kind) {
                         LaneLine.Kind.DASHED ->
                             drawLine(col, pB, pT, strokeWidth = 7f,
@@ -992,13 +992,14 @@ class MainActivity : ComponentActivity() {
                 "tilted/mounted. Horizon: move the road area up or down. " +
                 "Centre: shift left/right if the mount is not centred.",
                 color = EnactOnSurfaceDim, fontSize = 11.sp)
-            Text("Horizon: ${"%+.2f".format(horizon)}", color = EnactOnSurface, fontSize = 12.sp)
+            Text("Horizon: ${"%+.2f".format(horizon)} (move road area up/down)",
+                color = EnactOnSurface, fontSize = 12.sp)
             Slider(value = horizon, onValueChange = { horizon = it },
                 onValueChangeFinished = {
                     service?.setLaneCalibration(horizon, center)
                         ?: prefs.edit().putFloat("lane_horizon", horizon).apply()
                 },
-                valueRange = -0.2f..0.2f, steps = 15)
+                valueRange = -0.4f..0.4f, steps = 31)
             Text("Centre: ${"%+.2f".format(center)}", color = EnactOnSurface, fontSize = 12.sp)
             Slider(value = center, onValueChange = { center = it },
                 onValueChangeFinished = {

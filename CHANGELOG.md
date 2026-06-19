@@ -5,6 +5,22 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v17.9 — lane overlay alignment + wider horizon calibration
+Fixes the "lane lines sit too high / do not match the road" positioning:
+- ROOT CAUSE found: the overlay drew every lane line's TOP at a hardcoded 0.55
+  of frame height, regardless of the horizon calibration or where detection
+  actually started. So adjusting the horizon moved the detection ROI but NOT the
+  drawn lines. The overlay now draws to the actual calibrated ROI top
+  (result.roiTopFrac), so lines track the road region and follow calibration.
+- Horizon calibration range widened from +-0.2 to +-0.4, and the internal ROI
+  clamp relaxed from 0.35..0.75 to 0.15..0.90, so a steeply tilted/offset mount
+  can pull the road region far enough.
+NOTE (honest scope): this fixes lane-line POSITIONING. It does NOT improve how
+well the classical detector LOCKS ONTO real markings — that, and reliable
+solid/double-solid/dashed distinction, need a learned lane-segmentation model
+(UFLD-style), planned AFTER the two pipeline features (map-first sign procedure,
+GPS-predicted OCR timing).
+
 ## v17.8 — box-alignment diagnostics (shifted speed-sign boxes)
 Investigating the reported speed-sign bounding boxes shifting toward frame centre
 (right near the left edge, left near the right edge — the signature of an

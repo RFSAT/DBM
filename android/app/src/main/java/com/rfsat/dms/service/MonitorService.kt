@@ -631,6 +631,7 @@ class MonitorService : Service() {
             events = (obj?.events ?: emptyList()) + laneEvents + followEvents + lightEvents,
             speedLimitSeen = limit,
             signs = recognisedSigns,
+            roiTopFrac = lanes.lastRoiFrac,
         )
     }
 

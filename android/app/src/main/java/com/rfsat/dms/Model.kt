@@ -91,6 +91,11 @@ data class AnalysisResult(
     /** Aspect ratio (width/height) of the analysed frame, for correct overlay
      *  alignment. Defaults to 16:9, the requested analysis resolution. */
     val frameAspect: Float = 16f / 9f,
+    /** Fraction down the frame where the lane region-of-interest starts (i.e.
+     *  the top of the detected lane lines), AFTER mount calibration. The overlay
+     *  draws lane lines from the frame bottom up to this fraction, so they track
+     *  the calibrated road region instead of a fixed height. */
+    val roiTopFrac: Float = 0.55f,
 )
 
 /** A classified road sign for on-screen display. */
