@@ -77,7 +77,7 @@ class OsmMap private constructor(private val db: SQLiteDatabase) {
                 File(android.os.Environment.getExternalStoragePublicDirectory(
                     android.os.Environment.DIRECTORY_DOWNLOADS), fileName),
             )
-            val f = candidates.firstOrNull { it.exists() }
+            val f = candidates.firstOrNull { it.exists() && it.canRead() }
             if (f == null) {
                 DLog.w(TAG, "no map db '$fileName' found in ${candidates.map { it.path }}")
                 return null

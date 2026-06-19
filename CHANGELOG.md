@@ -5,6 +5,23 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v17.7 — sign overlay UI + MediaPipe timestamp & evidence fixes
+Map now confirmed WORKING on-device (v17.6 fix verified: zero rtree errors, db
+opened schema=3, 1.26M segments). This release adds the requested overlay and
+fixes two issues seen in the 19-June-2 log:
+- Speed-limit roundel (lower-right) reduced 20% (96 -> 77 dp).
+- NEW lower-left overlay: other detected signs (no-left/right/U-turn, no-entry,
+  warnings, etc.) shown ~3 s after they leave the frame, so the driver can
+  register turn restrictions at lights/junctions. Up to 3 at a time.
+- MediaPipe "smaller timestamp than processed" errors (which killed driver
+  analysis repeatedly): now feeds a strictly-monotonic timestamp and catches any
+  landmarker timestamp exception so one bad frame can't break the run.
+- Map db open no longer logs a scary permission error: picks the first READABLE
+  candidate path (the unreadable legacy /sdcard path was tried first and threw).
+Observations 1-4 (wrong limits on Agios Thomas/highway/Markopoulou) are real
+OSM map-data / matching issues now that the map works — these are the validation
+targets for the next step (map-first sign procedure with cache eviction).
+
 ## v17.6 — CRITICAL fixes: map R-tree unavailable on Android + crash
 The 19-June drive exposed two serious bugs:
 - MAP DID NOT WORK ON DEVICE: "no such module: rtree" fired on every GPS fix

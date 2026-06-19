@@ -1,5 +1,6 @@
 package com.rfsat.dms.detect
 
+import com.rfsat.dms.util.DLog
 import android.content.Context
 import android.graphics.Bitmap
 import com.google.mediapipe.framework.image.BitmapImageBuilder
@@ -88,12 +89,20 @@ class DriverAnalyzer(context: Context) {
     private var lastMpTs = -1L
 
     fun analyze(frame: Bitmap, tMs: Long): AnalysisResult {
-        // MediaPipe's video API requires strictly increasing timestamps. Under
-        // thermal load frames can arrive late/out of order; feeding a stale
-        // timestamp throws. Skip any frame not newer than the last processed.
-        if (tMs <= lastMpTs) return AnalysisResult()
-        lastMpTs = tMs
-        val res = landmarker.detectForVideo(BitmapImageBuilder(frame).build(), tMs)
+        // MediaPipe's video API requires STRICTLY increasing timestamps. The
+        // passed-in tMs can repeat or go backwards (frame reordering under
+        // thermal load, or a clock reset across a restart), which makes the
+        // landmarker throw and kills driver analysis. Use a monotonic counter
+        // derived from tMs but never allowed to stall or regress, and catch any
+        // timestamp exception defensively so one bad frame can't break the run.
+        val ts = if (tMs > lastMpTs) tMs else lastMpTs + 1
+        lastMpTs = ts
+        val res = try {
+            landmarker.detectForVideo(BitmapImageBuilder(frame).build(), ts)
+        } catch (e: Exception) {
+            DLog.w(TAG, "face landmarker skipped frame: ${e.message}")
+            return AnalysisResult()
+        }
         if (res.faceLandmarks().isEmpty()) {
             resetTransient()
             return AnalysisResult()
@@ -252,6 +261,7 @@ class DriverAnalyzer(context: Context) {
     fun close() = landmarker.close()
 
     companion object {
+        private const val TAG = "DriverAnalyzer"
         const val EAR_CLOSED = 0.18f
         const val EYES_CLOSED_WARN_MS = 800L
         const val EYES_CLOSED_CRITICAL_MS = 1500L

@@ -42,6 +42,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.text.style.TextAlign
+import com.rfsat.dms.detect.SignDetector
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -457,19 +461,24 @@ class MainActivity : ComponentActivity() {
                 val scState by (service?.scorer?.state
                     ?: MutableStateFlow(ComplianceState())).collectAsState()
                 val lim = if (analysing) scState.activeSpeedLimitKmh else null
+                // Speed-limit roundel, lower-right. Reduced 20% (96 -> 77 dp).
                 lim?.let { value ->
                     Box(Modifier.align(Alignment.BottomEnd).padding(12.dp)
-                            .size(96.dp), contentAlignment = Alignment.Center) {
+                            .size(77.dp), contentAlignment = Alignment.Center) {
                         androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
                             val r = size.minDimension / 2f
                             drawCircle(Color.White, r, center)
                             drawCircle(Color(0xFFD32F2F), r, center,
                                 style = Stroke(width = r * 0.30f))
                         }
-                        Text("$value", fontSize = 34.sp,
+                        Text("$value", fontSize = 27.sp,
                             fontWeight = FontWeight.Bold, color = Color.Black)
                     }
                 }
+                // Other detected signs (no-turn, no-entry, warnings, etc.) shown
+                // lower-left for a few seconds after they leave the frame, for
+                // the driver's information (e.g. turn restrictions at lights).
+                if (analysing) RecentSignsOverlay()
             }
             Text(role.label, color = EnactOnSurface, fontSize = 11.sp,
                 modifier = Modifier.padding(8.dp)
@@ -745,6 +754,68 @@ class MainActivity : ComponentActivity() {
             on = it
             service?.setElement(key, it) ?: prefs.edit().putBoolean(key, it).apply()
         }
+    }
+
+    /** Lower-left overlay: non-speed road signs (no-turn, no-entry, warnings…)
+     *  recently seen, kept on screen ~3 s after they leave the frame so the
+     *  driver can register turn restrictions etc. at lights or junctions. */
+    @Composable
+    private fun androidx.compose.foundation.layout.BoxScope.RecentSignsOverlay() {
+        val sgns by (service?.recognisedSigns
+            ?: MutableStateFlow(emptyList<com.rfsat.dms.RecognisedSign>()))
+            .collectAsState()
+        // remember name -> last-seen time; drop speed-limit (shown as roundel)
+        val seen = remember { mutableStateMapOf<String, Long>() }
+        val now = System.currentTimeMillis()
+        sgns.forEach { s ->
+            if (s.classId != SignDetector.SPEED_LIMIT_ID && s.score >= 0.5f)
+                seen[s.name] = now
+        }
+        // recompose periodically so expired signs disappear
+        var tick by remember { mutableStateOf(0L) }
+        LaunchedEffect(Unit) {
+            while (true) { kotlinx.coroutines.delay(500); tick = System.currentTimeMillis() }
+        }
+        val holdMs = 3000L
+        val active = seen.filter { (tick.coerceAtLeast(now)) - it.value < holdMs }
+            .keys.toList().takeLast(3)
+        seen.keys.toList().forEach { k -> if (now - (seen[k] ?: 0) > holdMs + 2000) seen.remove(k) }
+
+        if (active.isNotEmpty()) {
+            Column(Modifier.align(Alignment.BottomStart).padding(12.dp)) {
+                active.forEach { name ->
+                    Box(Modifier.padding(top = 4.dp)
+                            .size(77.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.White.copy(alpha = 0.92f)),
+                        contentAlignment = Alignment.Center) {
+                        androidx.compose.foundation.Canvas(Modifier.fillMaxSize()
+                                .padding(4.dp)) {
+                            // generic red-ring regulatory disc behind the label
+                            val r = size.minDimension / 2f
+                            drawCircle(Color(0xFFD32F2F), r, center, style = Stroke(width = r * 0.18f))
+                        }
+                        Text(shortSignLabel(name), fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold, color = Color.Black,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.padding(8.dp))
+                    }
+                }
+            }
+        }
+    }
+
+    /** Compact label for the small sign chip. */
+    private fun shortSignLabel(name: String): String = when {
+        name.contains("U-turn", true) -> "NO\nU-TURN"
+        name.contains("left", true) -> "NO\nLEFT"
+        name.contains("right", true) -> "NO\nRIGHT"
+        name.contains("straight", true) -> "NO\nSTRAIGHT"
+        name.contains("overtak", true) -> "NO\nOVERTAKE"
+        name.contains("entry", true) -> "NO\nENTRY"
+        name.contains("stop", true) -> "STOP"
+        name.contains("yield", true) || name.contains("give way", true) -> "YIELD"
+        else -> name.uppercase().take(10)
     }
 
     @Composable
