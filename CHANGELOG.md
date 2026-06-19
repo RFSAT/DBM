@@ -5,6 +5,21 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v17.10 — release APK signing via GitHub secrets
+CI now produces a properly SIGNED release APK, so app updates install over each
+other without requiring an uninstall (the debug-keystore mismatch is resolved).
+- build.gradle.kts: added a `release` signingConfig that reads the keystore path
+  (KEYSTORE_FILE) and STORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD from environment
+  variables. Applied to the release build type only when the keystore is present,
+  so local/secret-less builds still succeed (unsigned) instead of failing.
+- android-ci.yml: decodes KEYSTORE_BASE64 secret into a keystore file, passes the
+  alias/passwords as env vars, and runs assembleRelease (plus assembleDebug).
+  Uploads DBM-apk-debug and DBM-apk-release artifacts separately.
+Secrets used (must exist in the repo): KEYSTORE_BASE64, KEY_ALIAS (com-dbm),
+KEY_PASSWORD, STORE_PASSWORD. applicationId = com.DBM.
+NOTE: the KEY_ALIAS value must match the alias actually inside the keystore
+(verify with: keytool -list -keystore <file>).
+
 ## v17.9 — lane overlay alignment + wider horizon calibration
 Fixes the "lane lines sit too high / do not match the road" positioning:
 - ROOT CAUSE found: the overlay drew every lane line's TOP at a hardcoded 0.55

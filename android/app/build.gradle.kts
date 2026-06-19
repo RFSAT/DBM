@@ -16,7 +16,7 @@ plugins {
 //   in-app About screen (via BuildConfig.VERSION_NAME).
 // ---------------------------------------------------------------------------
 val dmsVersionMajor = 17
-val dmsVersionMinor = 9
+val dmsVersionMinor = 10
 val dmsVersionName = "$dmsVersionMajor.$dmsVersionMinor"
 
 android {
@@ -38,10 +38,33 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    signingConfigs {
+        create("release") {
+            // Values come from environment variables populated by CI from GitHub
+            // secrets (KEYSTORE_BASE64 is decoded to a file by the workflow).
+            // If the keystore file is absent (e.g. local debug build with no
+            // secrets), this config is simply not applied — see buildTypes.
+            val storePath = System.getenv("KEYSTORE_FILE")
+            if (storePath != null && file(storePath).exists()) {
+                storeFile = file(storePath)
+                storePassword = System.getenv("STORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // Apply the release signing config only when the keystore is present
+            // (CI with secrets). Otherwise the build stays unsigned rather than
+            // failing — useful for local/debug CI without secrets.
+            val storePath = System.getenv("KEYSTORE_FILE")
+            if (storePath != null && file(storePath).exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     androidResources { noCompress += listOf("tflite", "task") }

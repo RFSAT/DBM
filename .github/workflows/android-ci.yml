@@ -18,13 +18,39 @@ jobs:
           # committed and validated; do NOT overwrite them.
           curl -fLO https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task
           curl -fL -o efficientdet_lite0.tflite https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/latest/efficientdet_lite0.tflite
+      - name: Decode release keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            echo "KEYSTORE_FILE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+            echo "Release keystore decoded."
+          else
+            echo "No KEYSTORE_BASE64 secret — will build debug only."
+          fi
       - name: Build
         working-directory: android
+        env:
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
         run: |
           gradle wrapper --gradle-version 8.10.2
-          ./gradlew lint assembleDebug
+          if [ -n "$KEYSTORE_FILE" ]; then
+            ./gradlew lint assembleDebug assembleRelease
+          else
+            echo "No signing secrets present — building debug only."
+            ./gradlew lint assembleDebug
+          fi
       - uses: actions/upload-artifact@v5
-        with: { name: DBM-apk, path: android/app/build/outputs/apk/debug/*.apk }
+        with: { name: DBM-apk-debug, path: android/app/build/outputs/apk/debug/*.apk }
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: DBM-apk-release
+          path: android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v5
         if: always()
         with: { name: lint-report, path: android/app/build/reports/lint-results-*.html }
