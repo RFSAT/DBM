@@ -16,7 +16,7 @@ plugins {
 //   in-app About screen (via BuildConfig.VERSION_NAME).
 // ---------------------------------------------------------------------------
 val dmsVersionMajor = 17
-val dmsVersionMinor = 12
+val dmsVersionMinor = 13
 val dmsVersionName = "$dmsVersionMajor.$dmsVersionMinor"
 
 android {

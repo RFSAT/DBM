@@ -5,6 +5,22 @@ added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the
 in-app About screen.
 
+## v17.13 — real EU sign graphics in the lower-left overlay
+The lower-left "recent signs" overlay previously drew a red ring + TEXT label.
+Replaced with actual EU-standard sign graphics, transparent OUTSIDE the sign
+shape (the sign keeps its proper white/coloured interior; no white box around it).
+- Added 21 VectorDrawables (res/drawable/sign_*.xml) for the full detector class
+  set, authored to EU/Vienna-Convention style: prohibition (red ring, white
+  interior) for the no-turn/no-overtaking signs; red disc + white bar for no
+  entry; blue discs for keep-left/right, ahead-only, roundabout; red octagon for
+  stop; inverted triangle for yield; white/red warning triangles for
+  pedestrians/children/roadworks/curves/slippery; derestriction circle for end
+  of limit; and a generic speed-limit ring.
+- signDrawable(classId) maps each of the 21 detector classes to its drawable;
+  the overlay now renders the graphic at 77 dp, keeping the 3 s linger.
+Authored as vectors (not third-party image assets) for correct licensing, crisp
+scaling, transparent background, and minimal APK size.
+
 ## v17.12 — CRITICAL OCR fix (digit clipping) + dual-sign split
 Real drive proved the box misalignment is NOT cosmetic: 50 read as 5, 100 as 10,
 worse for signs on the RIGHT — the crop was clipping the trailing digit (box

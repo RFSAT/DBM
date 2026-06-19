@@ -758,20 +758,21 @@ class MainActivity : ComponentActivity() {
 
     /** Lower-left overlay: non-speed road signs (no-turn, no-entry, warnings…)
      *  recently seen, kept on screen ~3 s after they leave the frame so the
-     *  driver can register turn restrictions etc. at lights or junctions. */
+     *  driver can register turn restrictions etc. at lights or junctions.
+     *  Rendered as actual EU-standard sign graphics (transparent outside the
+     *  sign shape), not text labels. */
     @Composable
     private fun androidx.compose.foundation.layout.BoxScope.RecentSignsOverlay() {
         val sgns by (service?.recognisedSigns
             ?: MutableStateFlow(emptyList<com.rfsat.dms.RecognisedSign>()))
             .collectAsState()
-        // remember name -> last-seen time; drop speed-limit (shown as roundel)
-        val seen = remember { mutableStateMapOf<String, Long>() }
+        // remember classId -> last-seen time; drop speed-limit (shown as roundel)
+        val seen = remember { mutableStateMapOf<Int, Long>() }
         val now = System.currentTimeMillis()
         sgns.forEach { s ->
             if (s.classId != SignDetector.SPEED_LIMIT_ID && s.score >= 0.5f)
-                seen[s.name] = now
+                seen[s.classId] = now
         }
-        // recompose periodically so expired signs disappear
         var tick by remember { mutableStateOf(0L) }
         LaunchedEffect(Unit) {
             while (true) { kotlinx.coroutines.delay(500); tick = System.currentTimeMillis() }
@@ -783,39 +784,43 @@ class MainActivity : ComponentActivity() {
 
         if (active.isNotEmpty()) {
             Column(Modifier.align(Alignment.BottomStart).padding(12.dp)) {
-                active.forEach { name ->
-                    Box(Modifier.padding(top = 4.dp)
-                            .size(77.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color.White.copy(alpha = 0.92f)),
-                        contentAlignment = Alignment.Center) {
-                        androidx.compose.foundation.Canvas(Modifier.fillMaxSize()
-                                .padding(4.dp)) {
-                            // generic red-ring regulatory disc behind the label
-                            val r = size.minDimension / 2f
-                            drawCircle(Color(0xFFD32F2F), r, center, style = Stroke(width = r * 0.18f))
-                        }
-                        Text(shortSignLabel(name), fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold, color = Color.Black,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                            modifier = Modifier.padding(8.dp))
+                active.forEach { classId ->
+                    val res = signDrawable(classId)
+                    if (res != 0) {
+                        androidx.compose.foundation.Image(
+                            painter = androidx.compose.ui.res.painterResource(res),
+                            contentDescription = null,
+                            modifier = Modifier.padding(top = 4.dp).size(77.dp))
                     }
                 }
             }
         }
     }
 
-    /** Compact label for the small sign chip. */
-    private fun shortSignLabel(name: String): String = when {
-        name.contains("U-turn", true) -> "NO\nU-TURN"
-        name.contains("left", true) -> "NO\nLEFT"
-        name.contains("right", true) -> "NO\nRIGHT"
-        name.contains("straight", true) -> "NO\nSTRAIGHT"
-        name.contains("overtak", true) -> "NO\nOVERTAKE"
-        name.contains("entry", true) -> "NO\nENTRY"
-        name.contains("stop", true) -> "STOP"
-        name.contains("yield", true) || name.contains("give way", true) -> "YIELD"
-        else -> name.uppercase().take(10)
+    /** Map a detector class id to its EU sign drawable. */
+    private fun signDrawable(classId: Int): Int = when (classId) {
+        0 -> R.drawable.sign_no_left_turn
+        1 -> R.drawable.sign_no_right_turn
+        2 -> R.drawable.sign_no_u_turn
+        3 -> R.drawable.sign_no_straight
+        4 -> R.drawable.sign_no_turns
+        5 -> R.drawable.sign_no_overtaking
+        6 -> R.drawable.sign_no_entry
+        7 -> R.drawable.sign_stop
+        8 -> R.drawable.sign_yield
+        9 -> R.drawable.sign_speed_limit
+        10 -> R.drawable.sign_end_limit
+        11 -> R.drawable.sign_keep_right
+        12 -> R.drawable.sign_keep_left
+        13 -> R.drawable.sign_roundabout
+        14 -> R.drawable.sign_ahead_only
+        15 -> R.drawable.sign_pedestrians
+        16 -> R.drawable.sign_children
+        17 -> R.drawable.sign_roadworks
+        18 -> R.drawable.sign_curve_left
+        19 -> R.drawable.sign_curve_right
+        20 -> R.drawable.sign_slippery_road
+        else -> 0
     }
 
     @Composable
