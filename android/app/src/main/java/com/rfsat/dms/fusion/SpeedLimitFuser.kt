@@ -47,10 +47,14 @@ class SpeedLimitFuser(private val cache: SignLimitCache) {
      * @param signConfNow   confidence [0,1] of the live reading (0 if none)
      * @param segId  matched segment id, or -1 if unmatched
      * @param roadworksNear true if a roadworks sign is currently in view
+     * @param sawSignCandidate true if a sign-sized speed-limit detection was
+     *        processed this step (OCR had a genuine chance to read it). Used to
+     *        decide a cache re-confirmation "miss": a real read opportunity that
+     *        did not confirm the cached value counts toward eviction.
      */
     fun fuse(
         nowMs: Long, mapLimit: Int, signLimitNow: Int, signConfNow: Double,
-        segId: Long, roadworksNear: Boolean,
+        segId: Long, roadworksNear: Boolean, sawSignCandidate: Boolean = false,
     ): FusedLimit {
         val haveSign = signLimitNow > 0 && signConfNow >= SIGN_MIN_CONF
 
@@ -82,6 +86,19 @@ class SpeedLimitFuser(private val cache: SignLimitCache) {
 
         // 2. CACHE — remembered sign for this segment.
         cache.lookup(segId, nowMs)?.let { hit ->
+            // Re-confirmation miss: we had a genuine read opportunity here (a
+            // sign-sized detection was processed) but it did not produce a
+            // confident reading that matched the cache. Count it; if the sign has
+            // now gone missing enough times, evict and fall through to the map.
+            if (sawSignCandidate) {
+                val evicted = cache.missedConfirmation(segId)
+                if (evicted) {
+                    DLog.i(TAG, "cache evicted seg=$segId (sign gone); reverting to map")
+                    if (mapLimit > 0)
+                        return FusedLimit(mapLimit, FusedLimit.Source.MAP, MAP_CONFIDENCE, false)
+                    return FusedLimit(-1, FusedLimit.Source.NONE, 0.0, false)
+                }
+            }
             val disagree = mapLimit > 0 && kotlin.math.abs(mapLimit - hit.limit) >= DISAGREE_TOL
             return FusedLimit(hit.limit, FusedLimit.Source.CACHE, hit.confidence, disagree)
         }

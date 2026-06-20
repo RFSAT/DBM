@@ -2,5 +2,6 @@
     android:width="120dp" android:height="120dp"
     android:viewportWidth="120" android:viewportHeight="120">
     <path android:fillColor="#1565C0" android:pathData="M60,4 a56,56 0 1,0 0.1,0 z"/>
-    <path android:fillColor="#FFFFFF" android:pathData="M60,38 l-16,20 l10,0 l0,24 l12,0 l0,-24 l10,0 z"/>
+    <!-- larger upward arrow -->
+    <path android:fillColor="#FFFFFF" android:pathData="M60,26 l-22,28 l13,0 l0,34 l18,0 l0,-34 l13,0 z"/>
 </vector>

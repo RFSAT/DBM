@@ -1,5 +1,119 @@
 # Changelog
 
+## v18.1 — real thermal backoff wired to the governor
+Added ThermalMonitor: reads the OS thermal STATUS (API 29+ listener) and HEADROOM
+forecast (API 30+), maps them to a backoff multiplier (NONE/LIGHT x1, MODERATE
+x1.5, SEVERE x2.5, CRITICAL x4+), and feeds it to the ProcessingGovernor so the
+expensive analyses slow down as the device heats up — easing off before the OS
+forcibly throttles. Headroom gives earlier backoff than the discrete status.
+Driver monitoring stays full-rate until CRITICAL. All thermal readings are logged
+(status changes immediately; headroom every ~15 s) and the governor's effective
+intervals are logged every ~10 s, so the behaviour can be verified on a drive.
+Version-guarded for older devices (no-ops below API 29/30); needs no permission.
+
+## v18.0 — performance pipeline: map-first eviction, predictive OCR, context throttling, GPU
+Four linked performance features:
+- Map-first cache eviction: a remembered sign that fails re-confirmation N times
+  (Settings-configurable, default 3) when there was a genuine read opportunity is
+  forgotten, reverting that segment to the map. Handles temporary signs being
+  removed. Validated: normal eviction, no false eviction without a read chance,
+  miss-streak reset on re-read.
+- GPS-speed-predicted OCR timing (SignApproachPredictor): OCR fires at the frame
+  where an approaching sign is largest within its readable window, not every
+  frame. Fast approaches read early; distant readable signs still always get a
+  read (fallback). The map carries the limit meanwhile, so deferral is free.
+- Context-gated throttling (ProcessingGovernor): driver monitoring always full
+  rate; sign/lights/following/lane throttled by map context, lead presence and
+  lane stability. Cuts heat on long open stretches, surges in town. Driver path
+  resists thermal backoff except under severe pressure.
+- Sign detector delegate upgraded to GPU -> NNAPI -> CPU (was NNAPI -> CPU), for
+  better sustained throughput and lower heat; logs which delegate is active.
+
+These were validated as components in Python mirrors; on-device behaviour (and
+the GPU delegate availability on the S24) needs a real run with logs.
+
+## v17.27 — no_turns harmonised
+no_turns redrawn as two curved arrows (left + right) sharing a stem, both under a
+single red slash, consistent with the curved no_left_turn/no_right_turn signs.
+
+## v17.26 — stop sign from supplied artwork
+Replaced the hand-built STOP sign with the user-supplied artwork (AB4.svg):
+clean red octagon, white border, proper STOP lettering.
+
+## v17.25 — curve and children signs from supplied artwork
+Replaced the hand-drawn curve_left, curve_right and children signs with the
+user-supplied official EU artwork (A1b -> curve_left, A1a -> curve_right,
+A13a -> children). Converted from SVG with nested transforms resolved and
+strokes/fills preserved.
+
+## v17.24 — pedestrian and roadworks signs from supplied artwork
+Replaced the hand-drawn pedestrian and roadworks pictograms with the user-supplied
+vector artwork: pedestrians is now the Greek-style yellow-background crossing sign
+(figure walking on zebra stripes); roadworks is the standard worker-with-shovel.
+Pictograms extracted from the source SVGs and composited into the sign templates.
+
+## v17.23 — curve signs centred on triangle incentre
+curve_left/curve_right centred on the triangle's incentre so spacing to each red
+edge is equal; curve enlarged slightly while staying clear of the edges.
+
+## v17.22 — curve sign sizing
+curve_left/curve_right symbols reduced to sit comfortably within the triangle
+with clear margin from the red edges.
+
+## v17.21 — curve signs as continuous curve
+curve_left/curve_right redrawn as a smooth continuous curve (no straight segment),
+with a larger arrowhead, centred within the triangle.
+
+## v17.20 — u-turn and curve sign tweaks
+no_u_turn arrow mirrored horizontally and slightly reduced; curve_left/curve_right
+fitted within the triangle with arrowheads now wider than the line stroke.
+
+## v17.19 — no-turn, no-u-turn and curve signs redrawn to EU standard
+Checked against the Vienna Convention designs and corrected:
+- no_left_turn / no_right_turn now use a curved arrow (rising then hooking to the
+  side) with the 45-degree red slash, instead of the previous angular shaft.
+- no_u_turn now a smooth U-shaped arrow with downward head and red slash.
+- curve_left / curve_right now the EU bent-road shape (no arrowhead).
+
+## v17.18 — sign artwork refinements (round 3)
+roundabout arcs moved nearer the outer edge with arrowheads wider than the line;
+slippery_road car moved lower with wheels tucked under the body; no_left_turn /
+no_right_turn arrows enlarged and solid black with the broken stub aligned under
+the shaft.
+
+## v17.17 — sign artwork refinements (round 2)
+keep_left/keep_right now use the ahead_only arrow rotated diagonally;
+roundabout arrows moved nearer the outer edge with larger gaps and arrowheads
+aligned to the arc centrelines; slippery_road car made smaller with the two
+skid lines now vertical.
+
+## v17.16 — sign artwork refinements
+Per-sign visual corrections: larger ahead_only arrow; end_limit ring widened to
+match restriction signs with thicker diagonals reaching the ring; keep_left/right
+now proper diagonal arrows; centred STOP text; larger no_straight arrow;
+roundabout shown as three arrows around the border; no_left_turn/no_right_turn
+now broken (gapped) turn arrows; slippery_road now a car over two wavy lines.
+
+## v17.15 — fix no-overtaking and roadworks sign artwork
+Audited all 21 sign drawables by rendering them. Two more were wrong:
+- no_overtaking showed two plain rectangles; redrawn as the correct two cars
+  (red + black) in a red ring.
+- roadworks showed an unclear figure; redrawn as a worker with a shovel at a
+  mound, distinct from the pedestrian/children warnings.
+The other 19 (including the v17.14 stop/yield fixes) verified correct against
+EU/Vienna Convention designs. Overlay artwork only; detection unchanged.
+
+## v17.14 — correct stop and give-way sign artwork
+Two sign icons were drawn incorrectly (reported from a test drive):
+- Stop sign was a red octagon with a plain white bar, which read as a no-entry
+  sign. Redrawn as the correct red octagon with white "STOP" text.
+- Give-way (yield) had a white interior. Greece (per the Vienna Convention,
+  like Finland/Poland/Sweden/Iceland) uses the YELLOW-background give-way sign;
+  redrawn with a red border and yellow interior.
+Both verified by rendering the vector drawables. Detection/classification was
+already correct — this was overlay artwork only.
+
+
 Versioning convention: **major** version increments when new features are
 added; **minor** version increments for corrections. The version appears in
 every produced package filename (e.g. `DMS-v1.0-release.apk`) and in the

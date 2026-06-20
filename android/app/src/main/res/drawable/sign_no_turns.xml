@@ -1,10 +1,19 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="120dp" android:height="120dp"
     android:viewportWidth="120" android:viewportHeight="120">
-    <!-- white interior -->
     <path android:fillColor="#FFFFFF" android:pathData="M60,12 a48,48 0 1,0 0.1,0 z"/>
-    <!-- red ring -->
     <path android:fillColor="#D32F2F" android:pathData="M60,4 a56,56 0 1,0 0.1,0 z M60,20 a40,40 0 1,1 -0.1,0 z"/>
-    <path android:strokeColor="#1A1A1A" android:strokeWidth="8" android:fillColor="#00000000" android:pathData="M60,80 L60,58 M60,58 l-12,0 M60,58 l12,0"/>
-    <path android:strokeColor="#D32F2F" android:strokeWidth="9" android:pathData="M30,86 L90,34"/>
+    <!-- shared lower stem -->
+    <path android:strokeColor="#1A1A1A" android:strokeWidth="9" android:fillColor="#00000000"
+          android:strokeLineCap="butt" android:pathData="M60,84 L60,64"/>
+    <!-- left curved arm: from stem top, curve up-left -->
+    <path android:strokeColor="#1A1A1A" android:strokeWidth="9" android:fillColor="#00000000"
+          android:strokeLineCap="butt" android:pathData="M60,64 Q60,50 48,50 L44,50"/>
+    <path android:fillColor="#1A1A1A" android:pathData="M46,42 L32,50 L46,58 Z"/>
+    <!-- right curved arm: from stem top, curve up-right -->
+    <path android:strokeColor="#1A1A1A" android:strokeWidth="9" android:fillColor="#00000000"
+          android:strokeLineCap="butt" android:pathData="M60,64 Q60,50 72,50 L76,50"/>
+    <path android:fillColor="#1A1A1A" android:pathData="M74,42 L88,50 L74,58 Z"/>
+    <!-- single red diagonal slash over both -->
+    <path android:strokeColor="#D32F2F" android:strokeWidth="10" android:pathData="M30,30 L90,90"/>
 </vector>

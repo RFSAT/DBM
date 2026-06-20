@@ -5,6 +5,12 @@
     <path android:fillColor="#FFFFFF" android:pathData="M60,12 a48,48 0 1,0 0.1,0 z"/>
     <!-- red ring -->
     <path android:fillColor="#D32F2F" android:pathData="M60,4 a56,56 0 1,0 0.1,0 z M60,20 a40,40 0 1,1 -0.1,0 z"/>
-    <path android:fillColor="#D32F2F" android:pathData="M40,52 h12 v22 h-12 z"/>
-    <path android:fillColor="#1A1A1A" android:pathData="M68,52 h12 v22 h-12 z"/>
+    <!-- left car (red) : body + cabin + wheels -->
+    <path android:fillColor="#D32F2F" android:pathData="M30,62 h26 v10 h-26 z"/>
+    <path android:fillColor="#D32F2F" android:pathData="M35,54 h16 l4,8 h-24 z"/>
+    <path android:fillColor="#1A1A1A" android:pathData="M34,72 a4,4 0 1,0 0.1,0 z M50,72 a4,4 0 1,0 0.1,0 z"/>
+    <!-- right car (black), drawn slightly higher to read as overtaking -->
+    <path android:fillColor="#1A1A1A" android:pathData="M64,50 h26 v10 h-26 z"/>
+    <path android:fillColor="#1A1A1A" android:pathData="M69,42 h16 l4,8 h-24 z"/>
+    <path android:fillColor="#1A1A1A" android:pathData="M68,60 a4,4 0 1,0 0.1,0 z M84,60 a4,4 0 1,0 0.1,0 z"/>
 </vector>

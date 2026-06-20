@@ -71,10 +71,19 @@ class MonitorService : Service() {
     private var osmMap: OsmMap? = null
     private val signCache = com.rfsat.dms.fusion.SignLimitCache()
     private val fuser = com.rfsat.dms.fusion.SpeedLimitFuser(signCache)
+    private val governor = ProcessingGovernor()
+    private val signApproach = com.rfsat.dms.detect.SignApproachPredictor()
+    private val thermal = ThermalMonitor(this)
     /** Latest live speed-limit read from the camera, consumed by the fuser.
      *  -1 when none pending. Confidence proxied from detection. */
     @Volatile private var pendingSignLimit = -1
     @Volatile private var pendingSignConf = 0.0
+    // true when a speed-limit sign was DETECTED (a real read opportunity) since the
+    // last fuse step, even if OCR did not yield a confident number. Drives cache
+    // re-confirmation/eviction: a genuine chance that didn't confirm counts as a miss.
+    @Volatile private var pendingSawSignCandidate = false
+    @Volatile private var lastMatchedSegId = -1L
+    private var lastGovernorLogMs = 0L
     @Volatile private var roadworksInView = false
     private var lastFusePos: Pair<Double, Double>? = null
     private var road: RoadAnalyzer? = null
@@ -100,7 +109,6 @@ class MonitorService : Service() {
     private var recRoad: OverlayVideoRecorder? = null
     @Volatile private var recordVideo = false
 
-    private var roadFrameCount = 0
 
     /** Selective detection-element switches (persisted in "dbm" prefs). */
     @Volatile var detectSigns = true; private set
@@ -200,8 +208,11 @@ class MonitorService : Service() {
             lanes.centerOffset = p.getFloat("lane_center", 0f)
             driver?.rearviewIntervalMs = p.getInt("mirror_rearview_sec", 120) * 1000L
             driver?.sideMirrorIntervalMs = p.getInt("mirror_side_sec", 120) * 1000L
+            signCache.evictMisses = p.getInt("cache_evict_misses",
+                com.rfsat.dms.fusion.SignLimitCache.DEFAULT_EVICT_MISSES)
         }
         yawRate = YawRateMonitor(this)
+        thermal.start()
         DLog.i(TAG, "onCreate complete (driver=${driver != null}, road=${road != null})")
 
         // 1 Hz speed-compliance loop: GPS preferred, visual estimate as fallback
@@ -233,9 +244,12 @@ class MonitorService : Service() {
                     val mr = osmMap?.match(lat, lon, heading)
                     val mapLimit = mr?.mapLimit ?: -1
                     val segId = mr?.segId ?: -1L
+                    lastMatchedSegId = segId
                     val fused = fuser.fuse(
-                        t, mapLimit, pendingSignLimit, pendingSignConf, segId, roadworksInView)
+                        t, mapLimit, pendingSignLimit, pendingSignConf, segId,
+                        roadworksInView, sawSignCandidate = pendingSawSignCandidate)
                     pendingSignLimit = -1; pendingSignConf = 0.0   // consume the read
+                    pendingSawSignCandidate = false
                     if (fused.limitKmh > 0) {
                         scorer.onSpeedLimitSeen(fused.limitKmh)
                         if (fused.disagree) DLog.i(TAG,
@@ -264,6 +278,12 @@ class MonitorService : Service() {
 
     fun setAudioAlerts(on: Boolean) { alerter.audioEnabled = on }
     fun setTtsAlerts(on: Boolean) { alerter.ttsEnabled = on }
+    /** N: how many failed re-confirmations evict a cached sign (sign-removed). */
+    fun setCacheEvictMisses(n: Int) {
+        val v = n.coerceIn(1, 10)
+        signCache.evictMisses = v
+        getSharedPreferences("dbm", MODE_PRIVATE).edit().putInt("cache_evict_misses", v).apply()
+    }
     fun setStoppingDistanceFactor(pct: Int) {
         getSharedPreferences("dbm", MODE_PRIVATE).edit().putInt("stop_dist_pct", pct).apply()
         following.factor = pct / 100f
@@ -326,6 +346,7 @@ class MonitorService : Service() {
     fun resumeAnalysis() {
         analysing.value = true
         driver?.resetMirrorTimers()   // start the mirror countdown from now
+        governor.reset(); signApproach.reset()
         DLog.i(TAG, "analysis resumed")
     }
 
@@ -513,6 +534,23 @@ class MonitorService : Service() {
         latestRoadFrame?.recycle()
         latestRoadFrame = frame.copy(Bitmap.Config.ARGB_8888, false)
 
+        // ---- feed context-gated throttling governor from cheap, always-on signals ----
+        governor.speedMs = (if (speed.healthy) speed.speedKmh.value else 0) / 3.6f
+        // Real thermal backoff: status listener + headroom forecast (logged).
+        thermal.pollHeadroom(tMs)
+        governor.thermalMult = thermal.multiplier
+        // signsExpectedAhead / nearJunction come from the map: if the current
+        // segment is known (we are in a mapped area), treat signs as likely. This
+        // uses the segment matched in the GPS fusion loop.
+        governor.signsExpectedAhead = lastMatchedSegId >= 0L
+        governor.nearJunction = lastMatchedSegId >= 0L
+        // Periodically log the effective intervals so the throttling (incl. thermal
+        // backoff) can be verified on a drive.
+        if (tMs - lastGovernorLogMs > 10_000) {
+            lastGovernorLogMs = tMs
+            DLog.i(TAG, "governor: ${governor.debugState()}")
+        }
+
         // Visual speed: estimates when GNSS is down, auto-calibrates when it is up.
         visualSpeedKmh = visualSpeed.onFrame(
             frame, tMs,
@@ -522,6 +560,11 @@ class MonitorService : Service() {
 
         // Object detection (toggleable).
         val obj = if (detectRoadObjects) road?.analyze(frame, tMs) else null
+        // Cheap presence gate for the expensive following-distance pipeline.
+        governor.leadPresent = (obj?.detections ?: emptyList()).any {
+            it.labelText in FollowingDistanceMonitor.VEHICLES &&
+                (it.left + it.right) / 2f in 0.35f..0.65f
+        }
 
         // Lane markings (toggleable), with crossing/shoulder sub-filters.
         var laneLines = emptyList<com.rfsat.dms.LaneLine>()
@@ -601,14 +644,21 @@ class MonitorService : Service() {
         // window (42 of 51 sign sightings were "too small" by the time a frame
         // was sampled). Every-2nd is a modest cost rise for materially more
         // chances to catch the readable moment.
-        if (detectSigns && roadFrameCount++ % 2 == 0) {
+        if (detectSigns && governor.shouldRun(ProcessingGovernor.Role.SIGN)) {
             // Upstream sign hints (YOLO "stop sign"); SignAnalyzer adds its own
             // colour/shape region proposals so all sign types are covered.
             val cand = (obj?.detections ?: emptyList())
                 .filter { it.labelText == "stop sign" }
-            val out = signs.analyze(frame, cand)
+            val out = signs.analyze(frame, cand,
+                speedMs = (if (speed.healthy) speed.speedKmh.value else 0) / 3.6f,
+                approach = signApproach)
             signDets = out.detections; limit = out.speedLimitSeen
             recognisedSigns = out.signs
+            // If a speed-limit sign was detected at all this step, that is a genuine
+            // re-read opportunity — record it so the cache can count a miss when the
+            // read does not confirm the remembered value (sign-removed eviction).
+            if (out.signs.any { it.classId == com.rfsat.dms.detect.SignDetector.SPEED_LIMIT_ID })
+                pendingSawSignCandidate = true
             // Drive turn-restriction logic only from EU-detector signs, whose
             // class IDs match the SignDetector constants TurnMonitor uses. GTSRB
             // fallback IDs differ and must not be fed here.
@@ -658,7 +708,7 @@ class MonitorService : Service() {
 
     override fun onDestroy() {
         scope.cancel()
-        speed.stop(); yawRate.stop()
+        speed.stop(); yawRate.stop(); thermal.stop()
         recDriver?.stop(); recRoad?.stop()
         driver?.close(); road?.close(); signs.close(); lights.close(); alerter.release()
         osmMap?.close()

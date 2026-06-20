@@ -64,6 +64,8 @@ class SignAnalyzer(context: android.content.Context? = null) {
     suspend fun analyze(
         frame: Bitmap,
         signCandidates: List<Detection> = emptyList(),
+        speedMs: Float = -1f,
+        approach: SignApproachPredictor? = null,
     ): SignOutput {
         val dets = mutableListOf<Detection>()
         val signs = mutableListOf<com.rfsat.dms.RecognisedSign>()
@@ -79,6 +81,7 @@ class SignAnalyzer(context: android.content.Context? = null) {
             if (hits.isNotEmpty())
                 DLog.i(TAG, "timing: detector %d ms (%d hits, frame %dx%d)".format(
                     detMs, hits.size, frame.width, frame.height))
+            var sawSpeedSign = false
             for (hit in hits) {
                 signs += com.rfsat.dms.RecognisedSign(
                     hit.name, SignDetector.category(hit.classId), hit.score, hit.classId)
@@ -95,8 +98,16 @@ class SignAnalyzer(context: android.content.Context? = null) {
                 // agreeing read.
                 if (hit.classId == SignDetector.SPEED_LIMIT_ID &&
                     hit.score >= SPEED_MIN_CONF) {
+                    sawSpeedSign = true
                     val boxH = hit.bottom - hit.top
-                    if (boxH >= SPEED_OCR_MIN_BOX) {
+                    // OCR timing: size gate as before, plus (when supplied) the
+                    // GPS-speed-aware approach predictor, which aims the OCR call at
+                    // the frame where the sign is largest within its readable window
+                    // rather than every frame it is visible. The map already carries
+                    // the limit, so deferring OCR by a frame or two costs nothing.
+                    val timingOk = approach?.shouldOcr(
+                        boxH, speedMs, android.os.SystemClock.elapsedRealtime()) ?: true
+                    if (boxH >= SPEED_OCR_MIN_BOX && timingOk) {
                         // Dual-sign check: a box much taller than wide often means
                         // two stacked signs (e.g. a speed limit above a secondary
                         // sign). Split into top/bottom halves and OCR each, taking
@@ -147,6 +158,9 @@ class SignAnalyzer(context: android.content.Context? = null) {
                 }
             }
             if (dets.isEmpty()) candidate = null
+            // No speed-limit sign in view: clear the approach history so the next
+            // sign's growth is tracked from scratch (don't blend two signs).
+            if (!sawSpeedSign) approach?.reset()
             return SignOutput(dets, adopted, signs, unrecognised, fromEuDetector = true)
         }
 

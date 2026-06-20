@@ -15,8 +15,8 @@ plugins {
 //   The version number appears in every produced package filename and in the
 //   in-app About screen (via BuildConfig.VERSION_NAME).
 // ---------------------------------------------------------------------------
-val dmsVersionMajor = 17
-val dmsVersionMinor = 13
+val dmsVersionMajor = 18
+val dmsVersionMinor = 1
 val dmsVersionName = "$dmsVersionMajor.$dmsVersionMinor"
 
 android {

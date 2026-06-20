@@ -721,6 +721,7 @@ class MainActivity : ComponentActivity() {
                 fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
             StoppingDistanceSlider()
+            CacheEvictionSlider()
             MirrorIntervalSliders()
             MapManagerSection()
             LaneCalibrationSliders()
@@ -1035,6 +1036,30 @@ class MainActivity : ComponentActivity() {
                     service?.setStoppingDistanceFactor(v)
                 },
                 valueRange = 50f..200f, steps = 14)
+        }
+        Spacer(Modifier.height(8.dp))
+    }
+
+    @Composable
+    private fun CacheEvictionSlider() {
+        val prefs = remember { getSharedPreferences("dbm", MODE_PRIVATE) }
+        var n by remember { mutableStateOf(prefs.getInt("cache_evict_misses", 3).toFloat()) }
+        Column(Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp)).background(EnactSurface)
+                .padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Text("Forget a remembered sign after ${n.toInt()} missed re-reads",
+                color = EnactOnSurface, fontSize = 13.sp)
+            Text("When a speed-limit sign that was learned on a road can no longer " +
+                "be read there this many times in a row, it is forgotten and the " +
+                "map value is used again (handles temporary signs being removed).",
+                color = EnactOnSurfaceDim, fontSize = 11.sp)
+            Slider(value = n, onValueChange = { n = it },
+                onValueChangeFinished = {
+                    val v = n.toInt()
+                    prefs.edit().putInt("cache_evict_misses", v).apply()
+                    service?.setCacheEvictMisses(v)
+                },
+                valueRange = 1f..10f, steps = 8)
         }
         Spacer(Modifier.height(8.dp))
     }

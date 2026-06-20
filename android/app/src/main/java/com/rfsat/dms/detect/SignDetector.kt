@@ -31,19 +31,43 @@ class SignDetector(
     private val numAnchors = 8400
 
     private var nnApi: NnApiDelegate? = null
+    private var gpu: org.tensorflow.lite.gpu.GpuDelegate? = null
     private val interpreter: Interpreter
 
     init {
         val model = loadAsset(context, assetName)
-        interpreter = try {
-            nnApi = NnApiDelegate()
-            val itp = Interpreter(model, Interpreter.Options().apply { addDelegate(nnApi) })
-            DLog.i("SignDetector", "interpreter: NNAPI delegate active (input ${inputSize})")
-            itp
+        // Delegate selection, best-throughput-first for this conv-heavy YOLO model:
+        //   1. GPU delegate  — runs inference on the GPU; typically the best
+        //      sustained throughput on mobile and keeps it off the CPU (cooler
+        //      than CPU threads on long drives).
+        //   2. NNAPI (NPU)   — vendor accelerator; good when all ops are supported,
+        //      but silently partial-falls-back to CPU when they are not.
+        //   3. CPU 4-thread  — universal fallback.
+        var itp: Interpreter? = null
+        // try GPU
+        try {
+            val g = org.tensorflow.lite.gpu.GpuDelegate()
+            itp = Interpreter(model, Interpreter.Options().apply { addDelegate(g) })
+            gpu = g
+            DLog.i("SignDetector", "interpreter: GPU delegate active (input $inputSize)")
         } catch (e: Throwable) {
-            nnApi?.close(); nnApi = null
-            DLog.w("SignDetector", "NNAPI unavailable, CPU 2-thread fallback " +
-                "(input ${inputSize}): ${e.message}")
+            DLog.w("SignDetector", "GPU delegate unavailable: ${e.message}")
+        }
+        // try NNAPI
+        if (itp == null) {
+            try {
+                val n = NnApiDelegate()
+                itp = Interpreter(model, Interpreter.Options().apply { addDelegate(n) })
+                nnApi = n
+                DLog.i("SignDetector", "interpreter: NNAPI delegate active (input $inputSize)")
+            } catch (e: Throwable) {
+                nnApi?.close(); nnApi = null
+                DLog.w("SignDetector", "NNAPI unavailable: ${e.message}")
+            }
+        }
+        // CPU fallback
+        interpreter = itp ?: run {
+            DLog.w("SignDetector", "using CPU 4-thread fallback (input $inputSize)")
             Interpreter(model, Interpreter.Options().apply { setNumThreads(4) })
         }
     }
@@ -129,7 +153,7 @@ class SignDetector(
         }
     }
 
-    fun close() { interpreter.close(); nnApi?.close() }
+    fun close() { interpreter.close(); nnApi?.close(); gpu?.close() }
 
     companion object {
         // Class order MUST match labels.txt (21-class Mapillary model).

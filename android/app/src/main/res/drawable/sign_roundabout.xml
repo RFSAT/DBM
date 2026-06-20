@@ -2,6 +2,10 @@
     android:width="120dp" android:height="120dp"
     android:viewportWidth="120" android:viewportHeight="120">
     <path android:fillColor="#1565C0" android:pathData="M60,4 a56,56 0 1,0 0.1,0 z"/>
-    <path android:strokeColor="#FFFFFF" android:strokeWidth="8" android:fillColor="#00000000" android:pathData="M60,40 a20,20 0 1,1 -18,12"/>
-    <path android:fillColor="#FFFFFF" android:pathData="M40,46 l8,10 l-14,2 z"/>
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="7" android:fillColor="#00000000" android:strokeLineCap="butt" android:pathData="M71.6,28.1 A34,34 0 0,1 93.7,64.7"/>
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="7" android:fillColor="#00000000" android:strokeLineCap="butt" android:pathData="M81.9,86.0 A34,34 0 0,1 39.1,86.8"/>
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="7" android:fillColor="#00000000" android:strokeLineCap="butt" android:pathData="M26.5,65.9 A34,34 0 0,1 47.3,28.5"/>
+    <path android:fillColor="#FFFFFF" android:pathData="M92.8,70.7 L88.6,58.0 L100.4,59.6 z"/>
+    <path android:fillColor="#FFFFFF" android:pathData="M34.3,83.1 L47.5,85.8 L40.1,95.2 z"/>
+    <path android:fillColor="#FFFFFF" android:pathData="M52.8,26.2 L43.9,36.3 L39.5,25.2 z"/>
 </vector>

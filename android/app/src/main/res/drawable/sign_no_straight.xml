@@ -1,10 +1,9 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="120dp" android:height="120dp"
     android:viewportWidth="120" android:viewportHeight="120">
-    <!-- white interior -->
     <path android:fillColor="#FFFFFF" android:pathData="M60,12 a48,48 0 1,0 0.1,0 z"/>
-    <!-- red ring -->
     <path android:fillColor="#D32F2F" android:pathData="M60,4 a56,56 0 1,0 0.1,0 z M60,20 a40,40 0 1,1 -0.1,0 z"/>
-    <path android:fillColor="#1A1A1A" android:pathData="M60,44 l-14,18 l9,0 l0,16 l10,0 l0,-16 l9,0 z"/>
-    <path android:strokeColor="#D32F2F" android:strokeWidth="9" android:pathData="M30,86 L90,34"/>
+    <!-- bigger, longer upward arrow -->
+    <path android:fillColor="#1A1A1A" android:pathData="M60,30 l-18,24 l11,0 l0,32 l14,0 l0,-32 l11,0 z"/>
+    <path android:strokeColor="#D32F2F" android:strokeWidth="10" android:pathData="M28,88 L92,32"/>
 </vector>

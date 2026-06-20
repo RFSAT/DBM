@@ -1,11 +1,14 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="120dp" android:height="120dp"
     android:viewportWidth="120" android:viewportHeight="120">
-    <!-- white interior -->
     <path android:fillColor="#FFFFFF" android:pathData="M60,12 a48,48 0 1,0 0.1,0 z"/>
-    <!-- red ring -->
     <path android:fillColor="#D32F2F" android:pathData="M60,4 a56,56 0 1,0 0.1,0 z M60,20 a40,40 0 1,1 -0.1,0 z"/>
-    <path android:strokeColor="#1A1A1A" android:strokeWidth="9" android:fillColor="#00000000" android:pathData="M44,78 L44,54 a16,16 0 0,1 32,0 L76,78"/>
-    <path android:fillColor="#1A1A1A" android:pathData="M68,78 l8,0 l0,-12 z"/>
-    <path android:strokeColor="#D32F2F" android:strokeWidth="9" android:pathData="M30,86 L90,34"/>
+    <!-- mirrored U: up the RIGHT side, arch over, down the LEFT side -->
+    <path android:strokeColor="#1A1A1A" android:strokeWidth="10" android:fillColor="#00000000"
+          android:strokeLineCap="butt"
+          android:pathData="M76,82 L76,55 Q76,37 60,37 Q44,37 44,55 L44,66"/>
+    <!-- arrowhead pointing DOWN at the end of the LEFT leg -->
+    <path android:fillColor="#1A1A1A" android:pathData="M33,64 L44,84 L55,64 Z"/>
+    <!-- red diagonal slash -->
+    <path android:strokeColor="#D32F2F" android:strokeWidth="10" android:pathData="M30,30 L90,90"/>
 </vector>

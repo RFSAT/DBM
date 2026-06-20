@@ -1,10 +1,11 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="120dp" android:height="120dp"
     android:viewportWidth="120" android:viewportHeight="120">
-    <!-- white interior -->
     <path android:fillColor="#FFFFFF" android:pathData="M60,12 a48,48 0 1,0 0.1,0 z"/>
-    <!-- red ring -->
     <path android:fillColor="#D32F2F" android:pathData="M60,4 a56,56 0 1,0 0.1,0 z M60,20 a40,40 0 1,1 -0.1,0 z"/>
-    <path android:fillColor="#1A1A1A" android:pathData="M70,42 l-22,18 l22,18 l0,-11 l-9,-7 l9,-7 z"/>
-    <path android:strokeColor="#D32F2F" android:strokeWidth="9" android:pathData="M28,88 L92,32"/>
+    <path android:strokeColor="#1A1A1A" android:strokeWidth="11" android:fillColor="#00000000"
+          android:strokeLineCap="butt"
+          android:pathData="M76,86 L76,60 Q76,44 56,44 L46,44"/>
+    <path android:fillColor="#1A1A1A" android:pathData="M48,32 L28,44 L48,56 Z"/>
+    <path android:strokeColor="#D32F2F" android:strokeWidth="10" android:pathData="M30,90 L90,30"/>
 </vector>

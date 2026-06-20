@@ -1,6 +1,8 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="120dp" android:height="120dp"
     android:viewportWidth="120" android:viewportHeight="120">
-    <path android:fillColor="#D32F2F" android:pathData="M8,18 L112,18 L60,110 Z"/>
-    <path android:fillColor="#FFFFFF" android:pathData="M28,30 L92,30 L60,86 Z"/>
+    <!-- red inverted triangle (border) -->
+    <path android:fillColor="#D32F2F" android:pathData="M6,16 L114,16 L60,112 Z"/>
+    <!-- yellow interior (Greece uses yellow, not white) -->
+    <path android:fillColor="#FFD600" android:pathData="M26,28 L94,28 L60,89 Z"/>
 </vector>

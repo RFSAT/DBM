@@ -3,6 +3,14 @@
     android:viewportWidth="120" android:viewportHeight="120">
     <path android:fillColor="#D32F2F" android:pathData="M60,6 L114,108 L6,108 Z"/>
     <path android:fillColor="#FFFFFF" android:pathData="M60,24 L98,98 L22,98 Z"/>
-    <path android:fillColor="#1A1A1A" android:pathData="M44,88 q8,-8 16,0 q8,8 16,0 l0,-6 q-8,8 -16,0 q-8,-8 -16,0 z"/>
-    <path android:fillColor="#1A1A1A" android:pathData="M50,58 a4,4 0 1,1 0.1,0 z M66,66 a4,4 0 1,1 0.1,0 z"/>
+    <!-- car lowered (body around y=64-72), wheels tucked under -->
+    <path android:fillColor="#1A1A1A" android:pathData="M46,64 h28 v8 h-28 z"/>
+    <path android:fillColor="#1A1A1A" android:pathData="M52,58 h15 l6,6 h-27 z"/>
+    <!-- wheels sitting directly under the body, inset from the ends -->
+    <path android:fillColor="#1A1A1A" android:pathData="M54,72 a3.5,3.5 0 1,0 0.1,0 z M66,72 a3.5,3.5 0 1,0 0.1,0 z"/>
+    <!-- two vertical wavy skid lines below -->
+    <path android:strokeColor="#1A1A1A" android:strokeWidth="3.5" android:fillColor="#00000000"
+          android:pathData="M53,80 q-6,5 0,10 q6,5 0,10"/>
+    <path android:strokeColor="#1A1A1A" android:strokeWidth="3.5" android:fillColor="#00000000"
+          android:pathData="M67,80 q-6,5 0,10 q6,5 0,10"/>
 </vector>
