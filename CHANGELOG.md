@@ -1,5 +1,23 @@
 # Changelog
 
+## v18.9 — fix About freeze (off-thread model load) and stream init (bind on attach)
+Two root causes identified from the 2026-06-22 00:26 log:
+
+- ABOUT FREEZE (6+ s): the service onCreate constructed the heavy analysers
+  (Driver/Road/Sign TFLite models + GPU delegate) SYNCHRONOUSLY on the main
+  thread, blocking the UI for ~6 s. Moved that model loading to a background
+  coroutine; submitFrame already null-guards the analysers, so frames are simply
+  skipped until they are ready. signs is now nullable to allow this.
+
+- STREAMS BLACK / ONLY ONE STARTS: the app now opens on About (v18.7), so when
+  the cameras bound at startup the Detector PreviewViews did not yet exist — the
+  Preview use cases bound to surfaces that were never created, and v18.8's
+  surface-only re-issue on attach does NOT start a stream bound to a non-existent
+  surface. FIX: the FIRST time the PreviewViews actually attach, do ONE debounced
+  rebind so CameraX connects to the real, laid-out surfaces; later tab switches
+  still only re-issue the surface (no rebind storm). One rebind total on first
+  attach, not per role, not repeated.
+
 ## v18.8 — fix camera rebind storm (regression) and thermal sign throttling
 Critical fixes after the 2026-06-21 evening drive log, which showed 188 full
 camera rebinds in one session and worse stream reliability than before.

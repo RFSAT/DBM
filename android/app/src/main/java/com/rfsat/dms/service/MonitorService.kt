@@ -91,7 +91,7 @@ class MonitorService : Service() {
     private var lastFusePos: Pair<Double, Double>? = null
     private var road: RoadAnalyzer? = null
     private lateinit var lanes: LaneAnalyzer
-    private lateinit var signs: SignAnalyzer
+    private var signs: SignAnalyzer? = null
     private val lights = TrafficLightAnalyzer(this)
     private val turns = TurnMonitor()
     private val visualSpeed = VisualSpeedEstimator()
@@ -169,18 +169,26 @@ class MonitorService : Service() {
         // within 5 s; a slow/failed analyzer init must not break that contract.
         startForegroundWithNotification()
         DLog.i(TAG, "foreground started; initialising analyzers")
-        driver = runCatching { DriverAnalyzer(this) }
-            .onFailure { DLog.e(TAG, "DriverAnalyzer init FAILED (face_landmarker.task in assets?)", it) }
-            .onSuccess { DLog.i(TAG, "DriverAnalyzer ready") }
-            .getOrNull()
-        road = runCatching { RoadAnalyzer(this, CameraRole.FRONT) }
-            .onFailure { DLog.e(TAG, "RoadAnalyzer init FAILED (efficientdet_lite0.tflite in assets?)", it) }
-            .onSuccess { DLog.i(TAG, "RoadAnalyzer ready") }
-            .getOrNull()
+        // The heavy analysers load TFLite models (and the GPU delegate), which
+        // took ~6 s and BLOCKED THE MAIN THREAD in onCreate — freezing the UI on
+        // startup. Load them on a background thread; submitFrame already
+        // null-guards them, so frames are simply skipped until they are ready.
         lanes = LaneAnalyzer()
-        signs = SignAnalyzer(this)
         evidence = EvidenceStore(this)
         alerter = Alerter(this)
+        kotlinx.coroutines.CoroutineScope(Dispatchers.Default).launch {
+            val d = runCatching { DriverAnalyzer(this@MonitorService) }
+                .onFailure { DLog.e(TAG, "DriverAnalyzer init FAILED", it) }
+                .onSuccess { DLog.i(TAG, "DriverAnalyzer ready") }.getOrNull()
+            val r = runCatching { RoadAnalyzer(this@MonitorService, CameraRole.FRONT) }
+                .onFailure { DLog.e(TAG, "RoadAnalyzer init FAILED", it) }
+                .onSuccess { DLog.i(TAG, "RoadAnalyzer ready") }.getOrNull()
+            val s = runCatching { SignAnalyzer(this@MonitorService) }
+                .onFailure { DLog.e(TAG, "SignAnalyzer init FAILED", it) }
+                .onSuccess { DLog.i(TAG, "SignAnalyzer ready") }.getOrNull()
+            driver = d; road = r; signs = s
+            DLog.i(TAG, "analyzers ready (driver=${d!=null} road=${r!=null} signs=${s!=null})")
+        }
         getSharedPreferences("dbm", MODE_PRIVATE).let { p ->
             alerter.audioEnabled = p.getBoolean("alerts_audio", true)
             alerter.ttsEnabled = p.getBoolean("alerts_tts", true)
@@ -656,20 +664,21 @@ class MonitorService : Service() {
             // colour/shape region proposals so all sign types are covered.
             val cand = (obj?.detections ?: emptyList())
                 .filter { it.labelText == "stop sign" }
-            val out = signs.analyze(frame, cand,
+            val out = signs?.analyze(frame, cand,
                 speedMs = (if (speed.healthy) speed.speedKmh.value else 0) / 3.6f,
                 approach = signApproach)
-            signDets = out.detections; limit = out.speedLimitSeen
-            recognisedSigns = out.signs
-            // If a speed-limit sign was detected at all this step, that is a genuine
-            // re-read opportunity — record it so the cache can count a miss when the
-            // read does not confirm the remembered value (sign-removed eviction).
-            if (out.signs.any { it.classId == com.rfsat.dms.detect.SignDetector.SPEED_LIMIT_ID })
-                pendingSawSignCandidate = true
-            // Drive turn-restriction logic only from EU-detector signs, whose
-            // class IDs match the SignDetector constants TurnMonitor uses. GTSRB
-            // fallback IDs differ and must not be fed here.
-            if (out.fromEuDetector) out.signs.forEach { turns.onSign(it.classId, tMs) }
+            if (out != null) {
+                signDets = out.detections; limit = out.speedLimitSeen
+                recognisedSigns = out.signs
+                // If a speed-limit sign was detected at all this step, that is a
+                // genuine re-read opportunity — record it so the cache can count a
+                // miss when the read does not confirm the remembered value.
+                if (out.signs.any { it.classId == com.rfsat.dms.detect.SignDetector.SPEED_LIMIT_ID })
+                    pendingSawSignCandidate = true
+                // Drive turn-restriction logic only from EU-detector signs, whose
+                // class IDs match the SignDetector constants TurnMonitor uses.
+                if (out.fromEuDetector) out.signs.forEach { turns.onSign(it.classId, tMs) }
+            }
             // Diagnostic logging of sign-shaped regions GTSRB could not
             // recognise (e.g. EU no-turn signs), rate-limited.
             if (out.unrecognised.isNotEmpty() &&
@@ -718,7 +727,7 @@ class MonitorService : Service() {
         scope.cancel()
         speed.stop(); yawRate.stop(); thermal?.stop()
         recDriver?.stop(); recRoad?.stop()
-        driver?.close(); road?.close(); signs.close(); lights.close(); alerter.release()
+        driver?.close(); road?.close(); signs?.close(); lights.close(); alerter.release()
         osmMap?.close()
         runCatching {
             stopForeground(STOP_FOREGROUND_REMOVE)

@@ -176,21 +176,36 @@ class PhoneCameraManager(
         }
     }
 
+    // Tracks whether each role's PreviewView has ever been attached+bound while
+    // present. The first time a view truly attaches we must (re)bind so CameraX
+    // connects to the real, laid-out surface; binding earlier (e.g. while the app
+    // opened on another tab and the view did not exist) connects to nothing.
+    private val everAttached = mutableSetOf<CameraRole>()
+
     private fun hookAttach(view: PreviewView, role: CameraRole) {
         view.addOnAttachStateChangeListener(object :
                 android.view.View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(v: android.view.View) {
-                // A PreviewView re-attaching (returning to the Detector tab) only
-                // needs its surface provider re-issued to the already-bound
-                // Preview use case. This is cheap and non-disruptive. We must NOT
-                // unbind/rebind the whole camera session here — doing that tore
-                // the live streams down on every tab switch and caused the
-                // black/frozen previews that needed many switches to settle.
-                // A short delay lets the TextureView surface exist first.
                 handler.postDelayed({
                     if (released) return@postDelayed
+                    // Always re-issue this view's surface provider (cheap).
                     previews[role]?.surfaceProvider = view.surfaceProvider
-                    DLog.i(TAG, "attach: surface re-issued for $role")
+                    // The FIRST real attach needs a genuine (re)bind so the
+                    // camera connects to the now-existing surfaces — a surface
+                    // re-issue alone does not start a stream that was bound while
+                    // the views did not yet exist (e.g. app opened on another
+                    // tab). bindConcurrent binds BOTH cameras, so one debounced
+                    // rebind covers both roles; the flag ensures it happens once,
+                    // not on every later tab switch (avoiding the old storm).
+                    if (everAttached.isEmpty()) {
+                        everAttached += role
+                        handler.removeCallbacks(rebindRunnable)
+                        handler.postDelayed(rebindRunnable, 150)
+                        DLog.i(TAG, "first attach ($role) -> one rebind to real surfaces")
+                    } else {
+                        everAttached += role
+                        DLog.i(TAG, "attach: surface re-issued for $role")
+                    }
                 }, 80)
             }
             override fun onViewDetachedFromWindow(v: android.view.View) = Unit
