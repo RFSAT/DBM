@@ -16,7 +16,7 @@ plugins {
 //   in-app About screen (via BuildConfig.VERSION_NAME).
 // ---------------------------------------------------------------------------
 val dmsVersionMajor = 18
-val dmsVersionMinor = 2
+val dmsVersionMinor = 3
 val dmsVersionName = "$dmsVersionMajor.$dmsVersionMinor"
 
 android {
@@ -126,6 +126,10 @@ dependencies {
     // Core interpreter + NNAPI delegate for the raw YOLO26 decode path
     implementation("org.tensorflow:tensorflow-lite:2.16.1")
     implementation("org.tensorflow:tensorflow-lite-gpu:2.16.1")
+    // GPU delegate factory/options classes (GpuDelegateFactory$Options) live in the
+    // -gpu-api artifact; without it the GPU delegate fails to resolve at runtime
+    // (NoClassDefFoundError) and the app silently falls back to NNAPI. Pin to match.
+    implementation("org.tensorflow:tensorflow-lite-gpu-api:2.16.1")
 
     // Speed-limit sign reading — ML Kit on-device text recognition
     implementation("com.google.mlkit:text-recognition:16.0.1")

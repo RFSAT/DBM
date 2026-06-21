@@ -1,5 +1,13 @@
 # Changelog
 
+## v18.3 — enable GPU delegate (add gpu-api artifact)
+On-device the GPU delegate failed to load (NoClassDefFoundError on
+GpuDelegateFactory$Options) and the detector fell back to NNAPI. The factory/
+options classes live in tensorflow-lite-gpu-api, which was not declared; added it
+(pinned to 2.16.1). The three-tier GPU -> NNAPI -> CPU selection can now actually
+try GPU. NNAPI (NPU) remains the proven working fallback. Confirmed from the
+2026-06-21 drive log that NNAPI was active and the app ran cleanly post-v18.2.
+
 ## v18.2 — fix startup crash from thermal monitor init
 ThermalMonitor was built as a field initializer (private val thermal =
 ThermalMonitor(this)) whose constructor immediately called getSystemService.
