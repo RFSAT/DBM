@@ -92,9 +92,7 @@ import java.util.Locale
 
 class MainActivity : ComponentActivity() {
 
-    companion object { private const val TAG = "MainActivity"
-        // polyline segments used to render the forward-tilt-warped lane overlay
-        private const val LANE_WARP_SEGMENTS = 12 }
+    companion object { private const val TAG = "MainActivity" }
 
     // Driver-view zoom-out factor (1.0 = normal, lower = more zoomed out). Held as
     // Compose state so the slider updates the live preview immediately. Seeded from
@@ -117,7 +115,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private var permissionsOk = false
-    private var privacyAccepted = false
+    // Consent dialog removed; startup no longer gates on it. Field retained
+    // (always true) so the existing maybeStart() guard logs remain meaningful.
+    private var privacyAccepted = true
     /** Map-database importer: opens the system file picker, copies the chosen
      *  .db into the app's private maps dir where it can always be read (robust
      *  under scoped storage on modern Android — manual placement in Download
@@ -202,20 +202,10 @@ class MainActivity : ComponentActivity() {
 
     // ------------------------------------------------------------------ UI
 
-    private val tabs = listOf("Detector", "Summary", "History", "Log", "Settings", "About")
+    private val tabs = listOf("About", "Detector", "Summary", "History", "Log", "Settings")
 
     @Composable
     private fun Root() {
-        var accepted by remember { mutableStateOf(privacyAccepted) }
-        if (!accepted) {
-            PrivacyNotice {
-                accepted = true
-                privacyAccepted = true
-                maybeStart()
-            }
-            return
-        }
-
         var tab by remember { mutableIntStateOf(0) }
         Column(Modifier.fillMaxSize().background(EnactDark).safeDrawingPadding()) {
             ScrollableTabRow(
@@ -236,17 +226,17 @@ class MainActivity : ComponentActivity() {
                 }
             }
             when (tab) {
-                0 -> DetectorScreen()
-                1 -> SummaryScreen(
+                0 -> AboutScreen()
+                1 -> DetectorScreen()
+                2 -> SummaryScreen(
                         dao = DmsDatabase.get(this@MainActivity).events(),
                         complianceState = (service?.scorer?.state
                             ?: MutableStateFlow(ComplianceState())).collectAsState().value,
                         onResetCounters = { service?.resetCounters() })
-                2 -> HistoryScreen(dao = DmsDatabase.get(this@MainActivity).events(),
-                        onBack = { tab = 0 })
-                3 -> LogScreen()
-                4 -> SettingsScreen()
-                5 -> AboutScreen()
+                3 -> HistoryScreen(dao = DmsDatabase.get(this@MainActivity).events(),
+                        onBack = { tab = 1 })
+                4 -> LogScreen()
+                5 -> SettingsScreen()
             }
         }
     }
@@ -452,43 +442,39 @@ class MainActivity : ComponentActivity() {
                         LaneLine.Kind.SOLID -> EnactWarning
                         LaneLine.Kind.DASHED -> EnactLime
                     }
-                    val pB = Offset(mx(l.xBottom), my(1f))
-                    val pT = Offset(mx(l.xTop), my(result.roiTopFrac))
-                    // Forward-tilt perspective warp. With tilt=0 this is the
-                    // straight segment pB->pT. With tilt>0 the intermediate
-                    // points are pulled toward the horizon (screen-y rises faster
-                    // near the top), so the overlaid line bows to match how a
-                    // forward/downward-tilted camera compresses distance. Both
-                    // endpoints are preserved exactly: the bottom (s=0) and the
-                    // horizon anchor (s=1) never move.
+                    // Lane overlay model: STRAIGHT lines (a straight road has
+                    // straight lines; only a real bend in the road bends them,
+                    // which the detector already encodes in xBottom vs xTop).
+                    // The line is drawn only in the LOWER HALF of the view: it
+                    // starts at the bottom edge and rises to mid-height. The
+                    // forward-tilt parameter sets how far the two lines CONVERGE
+                    // toward the vanishing point as they go up — i.e. it pulls
+                    // each line's top x toward the view centre (0.5). 0 = no
+                    // convergence (line keeps its detected direction); 1 = top
+                    // reaches the centre (full perspective convergence).
                     val tilt = result.laneForwardTilt
-                    fun warp(s: Float): Offset {
-                        // x interpolates linearly between the two endpoints.
-                        val x = pB.x + (pT.x - pB.x) * s
-                        // y: linear baseline, then bias toward the horizon by an
-                        // amount that is zero at both ends (s*(1-s) bump) scaled
-                        // by tilt. Pulls mid-line up toward pT without moving ends.
-                        val yLin = pB.y + (pT.y - pB.y) * s
-                        val bow = tilt * (s * (1f - s)) * (pT.y - pB.y)
-                        return Offset(x, yLin + bow)
-                    }
-                    val pts = if (tilt <= 0f) listOf(pB, pT)
-                              else (0..LANE_WARP_SEGMENTS).map { warp(it / LANE_WARP_SEGMENTS.toFloat()) }
-                    fun drawPolyline(off: Float, width: Float, dashed: Boolean) {
+                    val topY = 0.5f                       // mid-height: lower half only
+                    // detected top x at mid-height (interpolated along the
+                    // detected bottom->ROI-top direction, so road bends are kept)
+                    val span = (1f - result.roiTopFrac)
+                    val sMid = if (span > 0f) (1f - topY) / span else 0f
+                    val xTopDetected = l.xBottom + (l.xTop - l.xBottom) * sMid.coerceIn(0f, 1f)
+                    // apply convergence toward centre
+                    val xTopConverged = xTopDetected + (0.5f - xTopDetected) * tilt
+                    val pB = Offset(mx(l.xBottom), my(1f))
+                    val pT = Offset(mx(xTopConverged), my(topY))
+                    fun drawSeg(off: Float, width: Float, dashed: Boolean) {
                         val effect = if (dashed) androidx.compose.ui.graphics.PathEffect
                             .dashPathEffect(floatArrayOf(22f, 18f), 0f) else null
-                        for (i in 0 until pts.size - 1) {
-                            drawLine(col, Offset(pts[i].x + off, pts[i].y),
-                                Offset(pts[i + 1].x + off, pts[i + 1].y),
-                                strokeWidth = width, pathEffect = effect)
-                        }
+                        drawLine(col, Offset(pB.x + off, pB.y), Offset(pT.x + off, pT.y),
+                            strokeWidth = width, pathEffect = effect)
                     }
                     when (l.kind) {
-                        LaneLine.Kind.DASHED -> drawPolyline(0f, 7f, true)
-                        LaneLine.Kind.SOLID -> drawPolyline(0f, 9f, false)
+                        LaneLine.Kind.DASHED -> drawSeg(0f, 7f, true)
+                        LaneLine.Kind.SOLID -> drawSeg(0f, 9f, false)
                         LaneLine.Kind.DOUBLE_SOLID -> {
-                            drawPolyline(-7f, 7f, false)
-                            drawPolyline(7f, 7f, false)
+                            drawSeg(-7f, 7f, false)
+                            drawSeg(7f, 7f, false)
                         }
                     }
                 }
@@ -1061,8 +1047,8 @@ class MainActivity : ComponentActivity() {
             Text("Adjust if lane tracking is off due to how the phone is " +
                 "tilted/mounted. Horizon: move the road area up or down. " +
                 "Centre: shift left/right if the mount is not centred. " +
-                "Forward tilt: bend the overlaid lines to match the real lines " +
-                "in the distance (does not move where they meet at the horizon).",
+                "Forward tilt: how far the lane lines converge toward the top " +
+                "(they are drawn straight, in the lower half, from the bottom edge).",
                 color = EnactOnSurfaceDim, fontSize = 11.sp)
             Text("Horizon: ${"%+.2f".format(horizon)} (move road area up/down)",
                 color = EnactOnSurface, fontSize = 12.sp)
@@ -1079,7 +1065,7 @@ class MainActivity : ComponentActivity() {
                         ?: prefs.edit().putFloat("lane_center", center).apply()
                 },
                 valueRange = -0.2f..0.2f, steps = 15)
-            Text("Forward tilt: ${"%.2f".format(tilt)} (match lines at a distance)",
+            Text("Forward tilt: ${"%.2f".format(tilt)} (line convergence toward top)",
                 color = EnactOnSurface, fontSize = 12.sp)
             Slider(value = tilt, onValueChange = { tilt = it },
                 onValueChangeFinished = {

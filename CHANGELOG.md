@@ -1,5 +1,37 @@
 # Changelog
 
+## v18.7 — open on About; About moved to leftmost tab
+The app now opens on the About view, which is moved to the leftmost (default) tab
+position with Detector immediately to its right (order: About, Detector, Summary,
+History, Log, Settings). Starting on About gives the cameras time to initialise in
+the background before the Detector view is shown, reducing the chance of a blank/
+frozen road preview on first view. Camera startup is independent of the active tab
+(it runs on service-connect / permission-grant), so the head-start is real.
+History back-button updated to return to Detector.
+
+## v18.6 — remove consent dialog; harden road-view startup
+- Removed the initial consent/info dialog. The app now goes straight to the
+  Detector view; camera startup no longer waits on the dialog. (The PrivacyNotice
+  composable is retained in code but not shown.)
+- Road view occasionally froze or was blank on startup and only recovered after
+  switching tabs. On a cold start the road TextureView surface is sometimes not
+  ready when CameraX first binds, and only a single rebind was scheduled at that
+  point. Added staggered self-heal rebinds: the view-attach handler now does the
+  same double rebind (150 ms + 600 ms) that app-resume uses, and start() now
+  rebinds twice (700 ms + 1500 ms) to cover variable cold-boot surface timing.
+  This makes the blank/frozen road view self-heal without a manual tab switch.
+
+## v18.5 — lane overlay: straight converging lines, lower half only
+Reworked the forward-tilt model after feedback. The previous version bowed the
+lines, which is wrong: a straight road has straight lines. Now the overlay draws
+STRAIGHT lane lines in the LOWER HALF of the road view (bottom edge up to
+mid-height), and forward tilt controls how far the two lines CONVERGE toward the
+view centre as they rise (the vanishing-point / perspective effect). Real road
+bends are preserved (the detected line direction is carried through before
+convergence). 0 = no convergence; 1 = tops meet at centre. Validated: bottom
+anchored at the bottom edge, top fixed at mid-height, straight segments, lines
+narrow toward the top as tilt rises.
+
 ## v18.4 — lane forward-tilt calibration, driver-view zoom-out, AAB in CI
 - Lane mount calibration gains a Forward tilt parameter: warps the lane overlay
   with a perspective bow so the lines match the real road lines at a distance,

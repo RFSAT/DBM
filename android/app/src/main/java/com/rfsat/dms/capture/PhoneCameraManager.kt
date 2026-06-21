@@ -110,10 +110,16 @@ class PhoneCameraManager(
             } else bindMultiplexed(p)
             // Self-heal the "frozen image on first start" case: re-issue the
             // surface providers and rebind shortly after, once the preview
-            // TextureViews have had time to create their surfaces.
+            // TextureViews have had time to create their surfaces. Two staggered
+            // attempts, because surface creation time varies on a cold boot and a
+            // single attempt sometimes lands before the road TextureView is ready
+            // (the "blank road view until you switch tabs" symptom).
             handler.postDelayed({
                 if (!released) { refreshSurfaces(); rebind() }
             }, 700)
+            handler.postDelayed({
+                if (!released) { refreshSurfaces(); rebind() }
+            }, 1500)
         }, ContextCompat.getMainExecutor(context))
     }
 
@@ -182,9 +188,17 @@ class PhoneCameraManager(
             override fun onViewAttachedToWindow(v: android.view.View) {
                 // Re-attaching after a tab switch: a surface-provider refresh
                 // alone proved unreliable; do what minimise/restore does — a
-                // full (debounced) rebind of the use cases.
+                // full (debounced) rebind of the use cases. On a COLD START the
+                // TextureView surface is often not ready at the first attach, so
+                // a single rebind can still leave the preview blank/frozen until
+                // the user switches tabs. Schedule a SECOND, later rebind (with a
+                // surface refresh) — the same belt-and-braces recovery resume()
+                // uses — so the cold-start blank-road-view self-heals.
                 handler.removeCallbacks(rebindRunnable)
                 handler.postDelayed(rebindRunnable, 150)
+                handler.postDelayed({
+                    if (!released) { refreshSurfaces(); rebind() }
+                }, 600)
             }
             override fun onViewDetachedFromWindow(v: android.view.View) = Unit
         })

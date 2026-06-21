@@ -44,16 +44,16 @@ class LaneAnalyzer {
      *     negative moves it UP. Range about -0.2..+0.2 of frame height.
      *   - centerOffset: shifts the expected road centre left/right from 0.5,
      *     for a mount that is not centred. Range about -0.2..+0.2.
-     *   - forwardTilt: perspective correction for the camera's downward pitch.
-     *     The lane overlay is drawn from the bottom of the frame to the horizon
-     *     anchor. With no tilt it is a straight line, which assumes a flat,
-     *     affine mapping; a real forward/downward-tilted camera compresses
-     *     distance toward the horizon, so the true road lines bow inward in the
-     *     mid-field. forwardTilt warps the overlay's intermediate points toward
-     *     the horizon to match, WITHOUT moving the horizon anchor (xTop/roiTop)
-     *     or the bottom point. 0 = straight line (no correction); positive =
-     *     more perspective compression (use when overlaid lines sit too wide of
-     *     the real lines at a distance). Range about 0..1. */
+     *   - forwardTilt: perspective convergence for the lane overlay. The overlay
+     *     draws STRAIGHT lines (a straight road has straight lines; only a real
+     *     bend in the road bends them) in the lower half of the view, from the
+     *     bottom edge up to mid-height. forwardTilt sets how far the two lines
+     *     converge toward the centre as they rise — i.e. where they would meet
+     *     (the vanishing point). 0 = no convergence (each line keeps its detected
+     *     direction); higher = lines angle inward more, as a forward/downward
+     *     camera tilt makes a straight road appear to narrow with distance.
+     *     Range 0..1. This is an overlay-rendering aid and does not affect the
+     *     lane fitting itself. */
     @Volatile var horizonOffset = 0f
     @Volatile var centerOffset = 0f
     @Volatile var forwardTilt = 0f
