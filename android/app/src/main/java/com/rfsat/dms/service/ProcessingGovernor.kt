@@ -49,6 +49,11 @@ class ProcessingGovernor {
         const val IDLE_FOLLOWING = 4f  // no lead vehicle
         // thermal level beyond which even the driver path slows slightly
         const val SEVERE_THERMAL = 3f
+        // Cap on how much thermal back-off may stretch sign detection. With base
+        // interval 2, a cap of 1.5 means sign detection runs at worst ~every 3rd
+        // frame from thermal (before context), keeping it responsive enough to
+        // catch passing speed-limit signs even when the device is hot.
+        const val SIGN_THERMAL_CAP = 1.5f
     }
 
     /** Context multiplier for a role: 1.0 = full rate, higher = throttled. */
@@ -67,9 +72,17 @@ class ProcessingGovernor {
         // Driver monitoring is safety-critical (drowsiness onset is silent), so it
         // is exempt from context gating and resists thermal backoff: it only slows
         // under SEVERE thermal pressure, and even then less than other roles.
-        val thermal = if (role == Role.DRIVER) {
-            if (thermalMult >= SEVERE_THERMAL) 1.5f else 1f
-        } else thermalMult
+        val thermal = when (role) {
+            Role.DRIVER ->
+                if (thermalMult >= SEVERE_THERMAL) 1.5f else 1f
+            // Sign detection drives speed-limit compliance; if it is throttled too
+            // hard a sign is passed before any frame is analysed. Let it back off
+            // under heat, but cap the thermal stretch so it never runs slower than
+            // ~every 3rd frame from thermal alone (a real drive showed sign=5-6 at
+            // thermal 2.5, which missed signs).
+            Role.SIGN -> thermalMult.coerceAtMost(SIGN_THERMAL_CAP)
+            else -> thermalMult
+        }
         val eff = base * thermal * contextMult(role)
         return eff.toInt().coerceAtLeast(1)
     }

@@ -1,5 +1,26 @@
 # Changelog
 
+## v18.8 — fix camera rebind storm (regression) and thermal sign throttling
+Critical fixes after the 2026-06-21 evening drive log, which showed 188 full
+camera rebinds in one session and worse stream reliability than before.
+
+- ROOT CAUSE of black/frozen streams and the About-view freeze: the view-attach
+  handler and startup were calling rebind() (unbindAll + full re-bind of BOTH
+  cameras) repeatedly, on the MAIN THREAD. v18.6 amplified this (double rebind per
+  attach + two at startup). Every rebind briefly tore both streams down, and the
+  main-thread churn froze the UI (About) on start.
+  FIX: tab re-attach now only RE-ISSUES the preview surface provider (cheap, no
+  teardown); startup binds once then does two cheap surface refreshes (no
+  rebinds); resume() does one rebind (the OS really did unbind) + one surface
+  refresh. rebind() is now reserved for genuine app background/restore only.
+  This collapses ~188 rebinds/session down to roughly one bind + a few surface
+  refreshes, eliminating the stream teardown churn and the About freeze.
+- Sign recognition while hot: the drive heated the device (thermal up to x2.5),
+  and thermal back-off had stretched sign detection to every 5th-6th frame, so
+  signs were passed unread. Capped thermal back-off for SIGN at x1.5 (=> at worst
+  ~every 3rd frame), keeping speed-limit signs catchable when hot while other
+  roles still throttle fully.
+
 ## v18.7 — open on About; About moved to leftmost tab
 The app now opens on the About view, which is moved to the leftmost (default) tab
 position with Detector immediately to its right (order: About, Detector, Summary,

@@ -108,18 +108,13 @@ class PhoneCameraManager(
                         bindMultiplexed(p)
                     }
             } else bindMultiplexed(p)
-            // Self-heal the "frozen image on first start" case: re-issue the
-            // surface providers and rebind shortly after, once the preview
-            // TextureViews have had time to create their surfaces. Two staggered
-            // attempts, because surface creation time varies on a cold boot and a
-            // single attempt sometimes lands before the road TextureView is ready
-            // (the "blank road view until you switch tabs" symptom).
-            handler.postDelayed({
-                if (!released) { refreshSurfaces(); rebind() }
-            }, 700)
-            handler.postDelayed({
-                if (!released) { refreshSurfaces(); rebind() }
-            }, 1500)
+            // After the initial bind, the preview TextureViews may not have
+            // created their surfaces yet. Re-issue the surface providers once,
+            // shortly after, so the first frames render. This is a cheap surface
+            // refresh — NOT a full unbind/rebind — so it does not disturb the
+            // freshly-bound session.
+            handler.postDelayed({ if (!released) refreshSurfaces() }, 400)
+            handler.postDelayed({ if (!released) refreshSurfaces() }, 1200)
         }, ContextCompat.getMainExecutor(context))
     }
 
@@ -169,13 +164,12 @@ class PhoneCameraManager(
         if (released) return
         handler.removeCallbacks(rebindRunnable)
         if (provider != null) {
-            // First rebind soon, then refresh surfaces and rebind again a little
-            // later in case the TextureView surface was not ready yet.
+            // On return from background the OS unbound the session, so ONE rebind
+            // is warranted. Follow it with a cheap surface refresh (not a second
+            // rebind) in case a TextureView surface settled slightly later.
             handler.postDelayed(rebindRunnable, 150)
-            handler.postDelayed({
-                if (!released) { refreshSurfaces(); rebind() }
-            }, 600)
-            DLog.i(TAG, "resume: rebind scheduled (x2)")
+            handler.postDelayed({ if (!released) refreshSurfaces() }, 600)
+            DLog.i(TAG, "resume: rebind + surface refresh scheduled")
         } else {
             DLog.i(TAG, "resume: provider not ready, starting")
             start()
@@ -186,19 +180,18 @@ class PhoneCameraManager(
         view.addOnAttachStateChangeListener(object :
                 android.view.View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(v: android.view.View) {
-                // Re-attaching after a tab switch: a surface-provider refresh
-                // alone proved unreliable; do what minimise/restore does — a
-                // full (debounced) rebind of the use cases. On a COLD START the
-                // TextureView surface is often not ready at the first attach, so
-                // a single rebind can still leave the preview blank/frozen until
-                // the user switches tabs. Schedule a SECOND, later rebind (with a
-                // surface refresh) — the same belt-and-braces recovery resume()
-                // uses — so the cold-start blank-road-view self-heals.
-                handler.removeCallbacks(rebindRunnable)
-                handler.postDelayed(rebindRunnable, 150)
+                // A PreviewView re-attaching (returning to the Detector tab) only
+                // needs its surface provider re-issued to the already-bound
+                // Preview use case. This is cheap and non-disruptive. We must NOT
+                // unbind/rebind the whole camera session here — doing that tore
+                // the live streams down on every tab switch and caused the
+                // black/frozen previews that needed many switches to settle.
+                // A short delay lets the TextureView surface exist first.
                 handler.postDelayed({
-                    if (!released) { refreshSurfaces(); rebind() }
-                }, 600)
+                    if (released) return@postDelayed
+                    previews[role]?.surfaceProvider = view.surfaceProvider
+                    DLog.i(TAG, "attach: surface re-issued for $role")
+                }, 80)
             }
             override fun onViewDetachedFromWindow(v: android.view.View) = Unit
         })
