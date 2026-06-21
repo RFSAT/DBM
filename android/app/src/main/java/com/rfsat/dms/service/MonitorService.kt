@@ -73,7 +73,10 @@ class MonitorService : Service() {
     private val fuser = com.rfsat.dms.fusion.SpeedLimitFuser(signCache)
     private val governor = ProcessingGovernor()
     private val signApproach = com.rfsat.dms.detect.SignApproachPredictor()
-    private val thermal = ThermalMonitor(this)
+    // Constructed in onCreate, not as a field initializer: its constructor calls
+    // getSystemService, which is unsafe before the Service context is attached
+    // (it ran during construction and crashed the service at startup).
+    private var thermal: ThermalMonitor? = null
     /** Latest live speed-limit read from the camera, consumed by the fuser.
      *  -1 when none pending. Confidence proxied from detection. */
     @Volatile private var pendingSignLimit = -1
@@ -212,7 +215,8 @@ class MonitorService : Service() {
                 com.rfsat.dms.fusion.SignLimitCache.DEFAULT_EVICT_MISSES)
         }
         yawRate = YawRateMonitor(this)
-        thermal.start()
+        thermal = ThermalMonitor(this)
+        thermal?.start()
         DLog.i(TAG, "onCreate complete (driver=${driver != null}, road=${road != null})")
 
         // 1 Hz speed-compliance loop: GPS preferred, visual estimate as fallback
@@ -537,8 +541,8 @@ class MonitorService : Service() {
         // ---- feed context-gated throttling governor from cheap, always-on signals ----
         governor.speedMs = (if (speed.healthy) speed.speedKmh.value else 0) / 3.6f
         // Real thermal backoff: status listener + headroom forecast (logged).
-        thermal.pollHeadroom(tMs)
-        governor.thermalMult = thermal.multiplier
+        thermal?.pollHeadroom(tMs)
+        governor.thermalMult = thermal?.multiplier ?: 1f
         // signsExpectedAhead / nearJunction come from the map: if the current
         // segment is known (we are in a mapped area), treat signs as likely. This
         // uses the segment matched in the GPS fusion loop.
@@ -708,7 +712,7 @@ class MonitorService : Service() {
 
     override fun onDestroy() {
         scope.cancel()
-        speed.stop(); yawRate.stop(); thermal.stop()
+        speed.stop(); yawRate.stop(); thermal?.stop()
         recDriver?.stop(); recRoad?.stop()
         driver?.close(); road?.close(); signs.close(); lights.close(); alerter.release()
         osmMap?.close()

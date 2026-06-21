@@ -23,7 +23,11 @@ import com.rfsat.dms.util.DLog
  */
 class ThermalMonitor(private val ctx: Context) {
 
-    private val pm = ctx.getSystemService(Context.POWER_SERVICE) as? PowerManager
+    // Lazy + guarded: resolve PowerManager on first use (in start()), never during
+    // construction, so this is safe even if the instance is built early.
+    private val pm: PowerManager? by lazy {
+        runCatching { ctx.getSystemService(Context.POWER_SERVICE) as? PowerManager }.getOrNull()
+    }
     private var listener: PowerManager.OnThermalStatusChangedListener? = null
 
     /** Current multiplier (>=1). Read by the governor each frame. */
@@ -62,21 +66,27 @@ class ThermalMonitor(private val ctx: Context) {
 
     /** Begin listening. Safe to call on any API level; no-ops the parts that need newer APIs. */
     fun start() {
-        val p = pm ?: run { DLog.w(TAG, "no PowerManager; thermal backoff disabled"); return }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val initial = p.currentThermalStatus
-            lastStatus = initial
-            multiplier = statusMult(initial)
-            DLog.i(TAG, "thermal status at start: ${statusName(initial)} -> x%.1f".format(multiplier))
-            val l = PowerManager.OnThermalStatusChangedListener { status ->
-                lastStatus = status
-                recompute()
-                DLog.i(TAG, "thermal status changed: ${statusName(status)} -> x%.1f".format(multiplier))
+        try {
+            val p = pm ?: run { DLog.w(TAG, "no PowerManager; thermal backoff disabled"); return }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val initial = p.currentThermalStatus
+                lastStatus = initial
+                multiplier = statusMult(initial)
+                DLog.i(TAG, "thermal status at start: ${statusName(initial)} -> x%.1f".format(multiplier))
+                val l = PowerManager.OnThermalStatusChangedListener { status ->
+                    lastStatus = status
+                    recompute()
+                    DLog.i(TAG, "thermal status changed: ${statusName(status)} -> x%.1f".format(multiplier))
+                }
+                listener = l
+                p.addThermalStatusListener(l)
+            } else {
+                DLog.i(TAG, "thermal status API unavailable (API ${Build.VERSION.SDK_INT}); backoff off")
             }
-            listener = l
-            p.addThermalStatusListener(l)
-        } else {
-            DLog.i(TAG, "thermal status API unavailable (API ${Build.VERSION.SDK_INT}); backoff off")
+        } catch (e: Throwable) {
+            // Thermal backoff is an optimisation, never worth crashing for.
+            multiplier = 1f
+            DLog.w(TAG, "thermal monitor disabled (start failed): ${e.message}")
         }
     }
 

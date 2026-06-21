@@ -1,5 +1,16 @@
 # Changelog
 
+## v18.2 — fix startup crash from thermal monitor init
+ThermalMonitor was built as a field initializer (private val thermal =
+ThermalMonitor(this)) whose constructor immediately called getSystemService.
+Because the activity binds the service with BIND_AUTO_CREATE while the consent
+dialog is shown, onCreate/field-init ran before the Service context was fully
+attached, so getSystemService crashed the service at startup (right after the
+info window, before "I understand"). Fixed: the monitor is now constructed in
+onCreate (context ready); its PowerManager lookup is lazy and exception-guarded;
+and start() is wrapped so a thermal failure disables backoff rather than
+crashing. All thermal references are null-safe.
+
 ## v18.1 — real thermal backoff wired to the governor
 Added ThermalMonitor: reads the OS thermal STATUS (API 29+ listener) and HEADROOM
 forecast (API 30+), maps them to a backoff multiplier (NONE/LIGHT x1, MODERATE
