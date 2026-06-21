@@ -96,6 +96,7 @@ data class AnalysisResult(
      *  draws lane lines from the frame bottom up to this fraction, so they track
      *  the calibrated road region instead of a fixed height. */
     val roiTopFrac: Float = 0.55f,
+    val laneForwardTilt: Float = 0f,
 )
 
 /** A classified road sign for on-screen display. */

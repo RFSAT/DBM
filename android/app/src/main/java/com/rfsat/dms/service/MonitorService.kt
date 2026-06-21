@@ -209,6 +209,7 @@ class MonitorService : Service() {
         getSharedPreferences("dbm", MODE_PRIVATE).let { p ->
             lanes.horizonOffset = p.getFloat("lane_horizon", 0f)
             lanes.centerOffset = p.getFloat("lane_center", 0f)
+            lanes.forwardTilt = p.getFloat("lane_forward_tilt", 0f)
             driver?.rearviewIntervalMs = p.getInt("mirror_rearview_sec", 120) * 1000L
             driver?.sideMirrorIntervalMs = p.getInt("mirror_side_sec", 120) * 1000L
             signCache.evictMisses = p.getInt("cache_evict_misses",
@@ -295,11 +296,13 @@ class MonitorService : Service() {
 
     /** Mount calibration for lane detection (horizon/tilt and centring),
      *  values in roughly -0.2..+0.2 of frame dimension. */
-    fun setLaneCalibration(horizon: Float, center: Float) {
+    fun setLaneCalibration(horizon: Float, center: Float, forwardTilt: Float = 0f) {
         getSharedPreferences("dbm", MODE_PRIVATE).edit()
-            .putFloat("lane_horizon", horizon).putFloat("lane_center", center).apply()
+            .putFloat("lane_horizon", horizon).putFloat("lane_center", center)
+            .putFloat("lane_forward_tilt", forwardTilt).apply()
         lanes.horizonOffset = horizon
         lanes.centerOffset = center
+        lanes.forwardTilt = forwardTilt
     }
 
     /** Seconds without a mirror glance before a warning (0 = disabled). */
@@ -686,6 +689,7 @@ class MonitorService : Service() {
             speedLimitSeen = limit,
             signs = recognisedSigns,
             roiTopFrac = lanes.lastRoiFrac,
+            laneForwardTilt = lanes.forwardTilt,
         )
     }
 

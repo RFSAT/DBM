@@ -92,7 +92,14 @@ import java.util.Locale
 
 class MainActivity : ComponentActivity() {
 
-    companion object { private const val TAG = "MainActivity" }
+    companion object { private const val TAG = "MainActivity"
+        // polyline segments used to render the forward-tilt-warped lane overlay
+        private const val LANE_WARP_SEGMENTS = 12 }
+
+    // Driver-view zoom-out factor (1.0 = normal, lower = more zoomed out). Held as
+    // Compose state so the slider updates the live preview immediately. Seeded from
+    // prefs in onCreate.
+    private var driverViewZoom by mutableStateOf(1f)
 
     private var service: MonitorService? = null
     private var cameras: PhoneCameraManager? = null
@@ -152,6 +159,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         DLog.i(TAG, "MainActivity onCreate")
+        driverViewZoom = getSharedPreferences("dbm", MODE_PRIVATE)
+            .getFloat("driver_view_zoom", 1f)
         interiorView = PreviewView(this).apply {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE }
         roadView = PreviewView(this).apply {
@@ -359,7 +368,16 @@ class MainActivity : ComponentActivity() {
             ?: MutableStateFlow(AnalysisResult())).collectAsState()
         // When analysis is stopped/paused, show no overlays at all.
         val result = if (analysing) liveResult else AnalysisResult()
+        // Driver-view zoom-out: when the phone is mounted close to the driver's
+        // face the head fills the frame. This shrinks the rendered preview (and
+        // its overlay, by the same factor so they stay aligned) within the card,
+        // showing more of the scene and a smaller face. 1.0 = normal; lower =
+        // more zoomed out. Only applies to the driver camera. The camera sensor
+        // FOV is unchanged (you cannot optically zoom wider than the lens); this
+        // makes the existing frame smaller on screen so it is comfortable to view.
+        val driverZoom = if (role == CameraRole.DRIVER) driverViewZoom else 1f
         Box(modifier.clip(RoundedCornerShape(14.dp)).background(EnactSurface)) {
+          Box(Modifier.fillMaxSize().scale(driverZoom)) {
             AndroidView(
                 factory = {
                     (view.parent as? android.view.ViewGroup)?.removeView(view)
@@ -436,24 +454,46 @@ class MainActivity : ComponentActivity() {
                     }
                     val pB = Offset(mx(l.xBottom), my(1f))
                     val pT = Offset(mx(l.xTop), my(result.roiTopFrac))
+                    // Forward-tilt perspective warp. With tilt=0 this is the
+                    // straight segment pB->pT. With tilt>0 the intermediate
+                    // points are pulled toward the horizon (screen-y rises faster
+                    // near the top), so the overlaid line bows to match how a
+                    // forward/downward-tilted camera compresses distance. Both
+                    // endpoints are preserved exactly: the bottom (s=0) and the
+                    // horizon anchor (s=1) never move.
+                    val tilt = result.laneForwardTilt
+                    fun warp(s: Float): Offset {
+                        // x interpolates linearly between the two endpoints.
+                        val x = pB.x + (pT.x - pB.x) * s
+                        // y: linear baseline, then bias toward the horizon by an
+                        // amount that is zero at both ends (s*(1-s) bump) scaled
+                        // by tilt. Pulls mid-line up toward pT without moving ends.
+                        val yLin = pB.y + (pT.y - pB.y) * s
+                        val bow = tilt * (s * (1f - s)) * (pT.y - pB.y)
+                        return Offset(x, yLin + bow)
+                    }
+                    val pts = if (tilt <= 0f) listOf(pB, pT)
+                              else (0..LANE_WARP_SEGMENTS).map { warp(it / LANE_WARP_SEGMENTS.toFloat()) }
+                    fun drawPolyline(off: Float, width: Float, dashed: Boolean) {
+                        val effect = if (dashed) androidx.compose.ui.graphics.PathEffect
+                            .dashPathEffect(floatArrayOf(22f, 18f), 0f) else null
+                        for (i in 0 until pts.size - 1) {
+                            drawLine(col, Offset(pts[i].x + off, pts[i].y),
+                                Offset(pts[i + 1].x + off, pts[i + 1].y),
+                                strokeWidth = width, pathEffect = effect)
+                        }
+                    }
                     when (l.kind) {
-                        LaneLine.Kind.DASHED ->
-                            drawLine(col, pB, pT, strokeWidth = 7f,
-                                pathEffect = androidx.compose.ui.graphics.PathEffect
-                                    .dashPathEffect(floatArrayOf(22f, 18f), 0f))
-                        LaneLine.Kind.SOLID ->
-                            drawLine(col, pB, pT, strokeWidth = 9f)
+                        LaneLine.Kind.DASHED -> drawPolyline(0f, 7f, true)
+                        LaneLine.Kind.SOLID -> drawPolyline(0f, 9f, false)
                         LaneLine.Kind.DOUBLE_SOLID -> {
-                            // two parallel thick lines
-                            val dx = 7f
-                            drawLine(col, Offset(pB.x - dx, pB.y), Offset(pT.x - dx, pT.y),
-                                strokeWidth = 7f)
-                            drawLine(col, Offset(pB.x + dx, pB.y), Offset(pT.x + dx, pT.y),
-                                strokeWidth = 7f)
+                            drawPolyline(-7f, 7f, false)
+                            drawPolyline(7f, 7f, false)
                         }
                     }
                 }
             }
+          }  // end driver-zoom scaled Box (preview + overlay)
             // Large, driver-visible speed-limit sign in the lower-right of the
             // road view. Sized ~3-4x the small status-strip roundel so it is
             // readable at a glance while driving.
@@ -725,6 +765,7 @@ class MainActivity : ComponentActivity() {
             MirrorIntervalSliders()
             MapManagerSection()
             LaneCalibrationSliders()
+            DriverViewZoomSlider()
             Spacer(Modifier.height(14.dp))
             Text("Video recording", color = EnactGreen, fontSize = 15.sp,
                 fontWeight = FontWeight.Bold)
@@ -986,33 +1027,66 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
+    private fun DriverViewZoomSlider() {
+        val prefs = remember { getSharedPreferences("dbm", MODE_PRIVATE) }
+        Column(Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp)).background(EnactSurface)
+                .padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Text("Driver view — zoom out", color = EnactOnSurface, fontSize = 13.sp)
+            Text("If the phone is mounted close to your face and your head fills " +
+                "the driver view, zoom out to show more of the scene. This shrinks " +
+                "the on-screen view only; it does not change detection.",
+                color = EnactOnSurfaceDim, fontSize = 11.sp)
+            Text("Zoom: ${"%.0f".format(driverViewZoom * 100)}%",
+                color = EnactOnSurface, fontSize = 12.sp)
+            Slider(value = driverViewZoom, onValueChange = { driverViewZoom = it },
+                onValueChangeFinished = {
+                    prefs.edit().putFloat("driver_view_zoom", driverViewZoom).apply()
+                },
+                valueRange = 0.5f..1f, steps = 9)
+        }
+        Spacer(Modifier.height(8.dp))
+    }
+
+    @Composable
     private fun LaneCalibrationSliders() {
         val prefs = remember { getSharedPreferences("dbm", MODE_PRIVATE) }
         var horizon by remember { mutableStateOf(prefs.getFloat("lane_horizon", 0f)) }
         var center by remember { mutableStateOf(prefs.getFloat("lane_center", 0f)) }
+        var tilt by remember { mutableStateOf(prefs.getFloat("lane_forward_tilt", 0f)) }
         Column(Modifier.fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp)).background(EnactSurface)
                 .padding(horizontal = 12.dp, vertical = 8.dp)) {
             Text("Lane detection — mount calibration", color = EnactOnSurface, fontSize = 13.sp)
             Text("Adjust if lane tracking is off due to how the phone is " +
                 "tilted/mounted. Horizon: move the road area up or down. " +
-                "Centre: shift left/right if the mount is not centred.",
+                "Centre: shift left/right if the mount is not centred. " +
+                "Forward tilt: bend the overlaid lines to match the real lines " +
+                "in the distance (does not move where they meet at the horizon).",
                 color = EnactOnSurfaceDim, fontSize = 11.sp)
             Text("Horizon: ${"%+.2f".format(horizon)} (move road area up/down)",
                 color = EnactOnSurface, fontSize = 12.sp)
             Slider(value = horizon, onValueChange = { horizon = it },
                 onValueChangeFinished = {
-                    service?.setLaneCalibration(horizon, center)
+                    service?.setLaneCalibration(horizon, center, tilt)
                         ?: prefs.edit().putFloat("lane_horizon", horizon).apply()
                 },
                 valueRange = -0.4f..0.4f, steps = 31)
             Text("Centre: ${"%+.2f".format(center)}", color = EnactOnSurface, fontSize = 12.sp)
             Slider(value = center, onValueChange = { center = it },
                 onValueChangeFinished = {
-                    service?.setLaneCalibration(horizon, center)
+                    service?.setLaneCalibration(horizon, center, tilt)
                         ?: prefs.edit().putFloat("lane_center", center).apply()
                 },
                 valueRange = -0.2f..0.2f, steps = 15)
+            Text("Forward tilt: ${"%.2f".format(tilt)} (match lines at a distance)",
+                color = EnactOnSurface, fontSize = 12.sp)
+            Slider(value = tilt, onValueChange = { tilt = it },
+                onValueChangeFinished = {
+                    service?.setLaneCalibration(horizon, center, tilt)
+                        ?: prefs.edit().putFloat("lane_forward_tilt", tilt).apply()
+                },
+                valueRange = 0f..1f, steps = 19)
         }
         Spacer(Modifier.height(8.dp))
     }

@@ -38,7 +38,7 @@ jobs:
         run: |
           gradle wrapper --gradle-version 8.10.2
           if [ -n "$KEYSTORE_FILE" ]; then
-            ./gradlew lint assembleDebug assembleRelease
+            ./gradlew lint assembleDebug assembleRelease bundleRelease
           else
             echo "No signing secrets present — building debug only."
             ./gradlew lint assembleDebug
@@ -50,6 +50,12 @@ jobs:
         with:
           name: DBM-apk-release
           path: android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: DBM-aab-release
+          path: android/app/build/outputs/bundle/release/*.aab
           if-no-files-found: ignore
       - uses: actions/upload-artifact@v5
         if: always()

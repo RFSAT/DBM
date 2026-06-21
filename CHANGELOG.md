@@ -1,5 +1,19 @@
 # Changelog
 
+## v18.4 — lane forward-tilt calibration, driver-view zoom-out, AAB in CI
+- Lane mount calibration gains a Forward tilt parameter: warps the lane overlay
+  with a perspective bow so the lines match the real road lines at a distance,
+  pivoting on the horizon anchor so it does NOT move where the lines meet at the
+  horizon (validated: both endpoints fixed for all tilt values; only the mid-line
+  bends). Settings slider 0..1.
+- Driver view can be zoomed out (Settings slider, 50-100%): shrinks the rendered
+  preview and its overlay together for mounts where the camera sits close to the
+  driver's face and the head fills the frame. View-only; sensor FOV and detection
+  are unchanged (a lens cannot optically zoom wider than its native FOV).
+- CI: the signed build now also produces a Google Play Android App Bundle
+  (bundleRelease) and uploads it as DBM-aab-release. Same release signing config
+  as the APK; built only when signing secrets are present.
+
 ## v18.3 — enable GPU delegate (add gpu-api artifact)
 On-device the GPU delegate failed to load (NoClassDefFoundError on
 GpuDelegateFactory$Options) and the detector fell back to NNAPI. The factory/
