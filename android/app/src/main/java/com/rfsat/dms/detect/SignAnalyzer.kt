@@ -76,7 +76,28 @@ class SignAnalyzer(context: android.content.Context? = null) {
         val det = detector
         if (det != null) {
             val tDet0 = android.os.SystemClock.elapsedRealtime()
-            val hits = det.detect(frame)
+            val hits = det.detect(frame).toMutableList()
+            // Second pass for DISTANT signs: at 960x720 a far sign is only a few
+            // pixels and is missed once the frame is letterboxed to the 640 model
+            // input. Distant signs sit near the vanishing point (upper-centre), so
+            // we run the detector again on an upscaled centre crop, giving those
+            // small signs more effective resolution, and map the hits back to
+            // full-frame coordinates. Near/large signs are already caught by the
+            // full-frame pass above; overlaps are de-duplicated on merge.
+            val crop = centerCropForDistant(frame)
+            if (crop != null) {
+                val (cropBmp, cl, ct, cw, ch) = crop
+                for (h in det.detect(cropBmp)) {
+                    // remap crop-normalised coords -> full-frame-normalised
+                    val rl = cl + h.left * cw
+                    val rt = ct + h.top * ch
+                    val rr = cl + h.right * cw
+                    val rb = ct + h.bottom * ch
+                    val mapped = h.copy(left = rl, top = rt, right = rr, bottom = rb)
+                    if (hits.none { iou(it, mapped) > 0.3f }) hits += mapped
+                }
+                cropBmp.recycle()
+            }
             val detMs = android.os.SystemClock.elapsedRealtime() - tDet0
             if (hits.isNotEmpty())
                 DLog.i(TAG, "timing: detector %d ms (%d hits, frame %dx%d)".format(
@@ -363,6 +384,48 @@ class SignAnalyzer(context: android.content.Context? = null) {
                 ((pxc + half) / w).coerceIn(0f, 1f), ((pyc + half) / h).coerceIn(0f, 1f))
         }
         return out
+    }
+
+    /**
+     * Upscaled centre crop for the distant-sign detection pass. Returns the crop
+     * bitmap plus its origin/size as fractions of the full frame (so hits can be
+     * mapped back), or null if the frame is too small to bother. The crop covers
+     * the upper-centre region where approaching roadside signs appear before they
+     * grow large; it is scaled up so small signs gain effective resolution.
+     */
+    private fun centerCropForDistant(
+        frame: Bitmap
+    ): Quint? {
+        val w = frame.width; val h = frame.height
+        if (w < 640 || h < 480) return null
+        // Crop the central 50% width and the upper-centre 50% height band (signs
+        // approach through the vanishing-point region, slightly above centre).
+        val cwFrac = 0.5f; val chFrac = 0.5f
+        val clFrac = 0.25f; val ctFrac = 0.15f      // band from 15%..65% height
+        val cl = (w * clFrac).toInt(); val ct = (h * ctFrac).toInt()
+        val cw = (w * cwFrac).toInt(); val ch = (h * chFrac).toInt()
+        val sub = Bitmap.createBitmap(frame, cl, ct, cw, ch)
+        // Upscale 2x so the model input (letterboxed to 640) sees roughly double
+        // the linear resolution of a distant sign vs. the full-frame pass.
+        val scaled = Bitmap.createScaledBitmap(sub, cw * 2, ch * 2, true)
+        if (scaled != sub) sub.recycle()
+        return Quint(scaled, clFrac, ctFrac, cwFrac, chFrac)
+    }
+
+    private data class Quint(
+        val bmp: Bitmap, val lFrac: Float, val tFrac: Float,
+        val wFrac: Float, val hFrac: Float)
+
+    /** IoU of two SignHits in normalised coords (for de-duping merged passes). */
+    private fun iou(a: SignDetector.SignHit, b: SignDetector.SignHit): Float {
+        val l = maxOf(a.left, b.left); val t = maxOf(a.top, b.top)
+        val r = minOf(a.right, b.right); val bo = minOf(a.bottom, b.bottom)
+        val iw = (r - l).coerceAtLeast(0f); val ih = (bo - t).coerceAtLeast(0f)
+        val inter = iw * ih
+        val ua = (a.right - a.left) * (a.bottom - a.top)
+        val ub = (b.right - b.left) * (b.bottom - b.top)
+        val union = ua + ub - inter
+        return if (union <= 0f) 0f else inter / union
     }
 
     fun close() = classifier?.close()

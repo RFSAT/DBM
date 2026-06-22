@@ -222,8 +222,23 @@ class PhoneCameraManager(
      * no dimensions and never streams. We hook the view's layout and also keep a
      * timed fallback so a rebind always eventually happens.
      */
+    // Single shared "rebind once laid out" runnable so that the per-view layout
+    // callbacks (driver + road) coalesce into ONE rebind instead of each firing
+    // their own (which briefly restarted one stream before the other).
+    private val laidOutRebindRunnable = Runnable {
+        if (released) return@Runnable
+        DLog.i(TAG, "laid-out rebind: driver=${interiorPreview.width}x" +
+            "${interiorPreview.height} road=${roadPreview.width}x${roadPreview.height}")
+        handler.removeCallbacks(rebindRunnable)
+        handler.post(rebindRunnable)
+    }
+
+    private fun scheduleLaidOutRebind(delayMs: Long) {
+        handler.removeCallbacks(laidOutRebindRunnable)
+        handler.postDelayed(laidOutRebindRunnable, delayMs)
+    }
+
     private fun scheduleRebindWhenLaidOut(view: PreviewView, role: CameraRole) {
-        // Are all currently-attached preview views laid out (size > 0)?
         fun allAttachedLaidOut(): Boolean {
             val views = buildList {
                 if (CameraRole.DRIVER in attachedRoles) add(interiorPreview)
@@ -231,21 +246,13 @@ class PhoneCameraManager(
             }
             return views.isNotEmpty() && views.all { it.width > 0 && it.height > 0 }
         }
-        val doRebind = Runnable {
-            if (released) return@Runnable
-            DLog.i(TAG, "laid-out rebind: driver=${interiorPreview.width}x" +
-                "${interiorPreview.height} road=${roadPreview.width}x${roadPreview.height}")
-            handler.removeCallbacks(rebindRunnable)
-            handler.post(rebindRunnable)
-        }
         if (allAttachedLaidOut()) {
             // Already measured (typical on a tab switch back): debounce briefly to
-            // coalesce both views' attaches, then rebind.
-            handler.removeCallbacks(rebindRunnable)
-            handler.postDelayed(doRebind, 200)
+            // coalesce both views' attaches into a single rebind, then rebind.
+            scheduleLaidOutRebind(200)
             DLog.i(TAG, "attach $role: views already laid out -> rebind soon")
         } else {
-            // Cold start: wait for the next layout pass, then rebind.
+            // Cold start: wait for the next layout pass, then rebind (coalesced).
             view.addOnLayoutChangeListener(object : android.view.View.OnLayoutChangeListener {
                 override fun onLayoutChange(
                     v: android.view.View, l: Int, t: Int, r: Int, b: Int,
@@ -254,12 +261,12 @@ class PhoneCameraManager(
                     if (v.width > 0 && v.height > 0) {
                         v.removeOnLayoutChangeListener(this)
                         DLog.i(TAG, "attach $role: laid out ${v.width}x${v.height} -> rebind")
-                        handler.postDelayed(doRebind, 150)
+                        scheduleLaidOutRebind(150)
                     }
                 }
             })
             // Fallback in case no further layout pass arrives.
-            handler.postDelayed({ if (!released) doRebind.run() }, 700)
+            scheduleLaidOutRebind(700)
             DLog.i(TAG, "attach $role: awaiting layout before rebind")
         }
     }

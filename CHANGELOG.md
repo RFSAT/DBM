@@ -1,4 +1,36 @@
+# DBM Changelog
+
+## v19.0 — final EU sign artwork, distant-sign detection, full Geofabrik map catalogue
+- Item 10 COMPLETE: replaced the last three non-EU-standard sign drawables with the
+  supplied official artwork — no_overtaking (red/black car pair), pedestrians
+  (pedestrian on crossing; replaces the old yellow icon), slippery_road (skidding
+  car with tracks). All 21 supported signs now use proper EU artwork.
+- Item 11: distant signs are often too small at the concurrent-mode 960x720 road
+  resolution and were missed. Added a dual-pass sign detector: the full frame plus
+  a 2x-upscaled upper-centre crop (the vanishing-point region where approaching
+  signs appear), with crop hits remapped to full-frame coords and merged (IoU
+  de-dup). Doubles effective resolution for far signs without changing the camera.
+  (Per decision, both cameras stay always-on; road stays ~960x720.)
+- Client map download already wired (Settings → map manager, rfsat.com index.json);
+  confirmed functional. Ships alongside a ready-made index.json listing ALL ~526
+  Geofabrik regions for hosting on rfsat.com.
+
 # Changelog
+
+## v18.14 — coalesce the laid-out rebind (one rebind, not one per view)
+The 2026-06-22 17:07 log confirmed the v18.13 layout-wait works: both views bind
+at 1038x674/675 (laid out) and both cameras stream ~30 fps. One refinement: the
+per-view layout callbacks (driver + road) each scheduled their own rebind via a
+freshly-created Runnable, so removeCallbacks could not dedupe them and TWO rebinds
+fired ~0.5 s apart — briefly restarting one stream before the other (the rare
+"only one active for a moment" flash). Replaced with a single shared
+laidOutRebindRunnable so both views' triggers coalesce into ONE rebind. No change
+to the proven layout-wait logic.
+
+Note (not a bug): in concurrent camera mode CameraX caps each stream, so the road
+analysis frames are ~960x720 rather than the requested 1280x720 — an inherent
+limit of running both cameras at once; forcing higher risks failing the
+concurrent bind entirely.
 
 ## v18.13 — fix rear stream on cold start (rebind after layout, not just attach)
 Root cause of "driver streams on startup but rear does not, yet both work after a
