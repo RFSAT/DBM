@@ -1,5 +1,17 @@
 # Changelog
 
+## v18.13 — fix rear stream on cold start (rebind after layout, not just attach)
+Root cause of "driver streams on startup but rear does not, yet both work after a
+tab switch": on a cold start the Detector preview views are composed for the first
+time and are ATTACHED but not yet LAID OUT (width/height still 0). The rebind
+fired on a fixed delay after attach, so the larger rear-camera surface bound with
+no dimensions and never started; after a tab switch the views were already
+measured, so it worked. Fix: rebind only once the attached preview views actually
+have a layout (size > 0) — via an OnLayoutChangeListener on cold start, an
+immediate debounced path when the views are already measured (tab return), and a
+700 ms fallback so a rebind always eventually happens. Keeps the v18.12 diagnostic
+logging, which will now show non-zero view sizes at bind time.
+
 ## v18.12 — camera diagnostic logging (no behaviour change)
 Added detailed, targeted logging to find why the road stream fails while the
 driver stream works. No camera logic changed. New log lines:

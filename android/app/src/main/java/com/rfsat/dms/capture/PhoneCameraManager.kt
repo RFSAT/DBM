@@ -194,28 +194,74 @@ class PhoneCameraManager(
                 android.view.View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(v: android.view.View) {
                 attachedRoles += role
-                // Re-issue this view's surface provider immediately (cheap), then
-                // schedule ONE debounced rebind. We rebind on every (re)attach,
-                // not just the first, because returning to the Detector tab
-                // re-creates the views and the streams must be reconnected to the
-                // real, laid-out surfaces. The debounce (removeCallbacks +
-                // postDelayed) coalesces the two views' near-simultaneous attaches
-                // into a SINGLE rebind, and absorbs rapid tab flips — so this does
-                // NOT reproduce the old rebind storm (which came from multiple
-                // rebinds per attach plus startup rebinds, not from one per
-                // settle). The delay lets BOTH TextureView surfaces exist before
-                // the bind, fixing "only the driver stream shows".
+                // Re-issue this view's surface provider immediately (cheap).
                 handler.postDelayed({
                     if (!released) previews[role]?.surfaceProvider = view.surfaceProvider
                 }, 60)
-                handler.removeCallbacks(rebindRunnable)
-                handler.postDelayed(rebindRunnable, 250)
-                DLog.i(TAG, "attach $role (attached=${attachedRoles.size}) -> rebind scheduled")
+                // KEY: rebind only once the view is actually LAID OUT (width and
+                // height > 0), not merely attached. On a cold start the Detector
+                // views are composed for the first time and are attached but still
+                // 0x0 for a frame or two; binding the larger road (rear) surface
+                // before it has real dimensions silently fails to start its
+                // stream — which is exactly why the rear view did not appear on
+                // startup yet worked after a tab switch (by then the views were
+                // already measured). Waiting for layout fixes the asymmetry.
+                scheduleRebindWhenLaidOut(view, role)
             }
             override fun onViewDetachedFromWindow(v: android.view.View) {
                 attachedRoles -= role
             }
         })
+    }
+
+    /**
+     * Schedule a single debounced rebind that fires only once the attached
+     * Detector preview views have a real layout (width and height > 0). A plain
+     * fixed delay after attach is unreliable on a cold start, where the views are
+     * attached but not yet measured, so the larger rear-camera surface binds with
+     * no dimensions and never streams. We hook the view's layout and also keep a
+     * timed fallback so a rebind always eventually happens.
+     */
+    private fun scheduleRebindWhenLaidOut(view: PreviewView, role: CameraRole) {
+        // Are all currently-attached preview views laid out (size > 0)?
+        fun allAttachedLaidOut(): Boolean {
+            val views = buildList {
+                if (CameraRole.DRIVER in attachedRoles) add(interiorPreview)
+                if (CameraRole.FRONT in attachedRoles) add(roadPreview)
+            }
+            return views.isNotEmpty() && views.all { it.width > 0 && it.height > 0 }
+        }
+        val doRebind = Runnable {
+            if (released) return@Runnable
+            DLog.i(TAG, "laid-out rebind: driver=${interiorPreview.width}x" +
+                "${interiorPreview.height} road=${roadPreview.width}x${roadPreview.height}")
+            handler.removeCallbacks(rebindRunnable)
+            handler.post(rebindRunnable)
+        }
+        if (allAttachedLaidOut()) {
+            // Already measured (typical on a tab switch back): debounce briefly to
+            // coalesce both views' attaches, then rebind.
+            handler.removeCallbacks(rebindRunnable)
+            handler.postDelayed(doRebind, 200)
+            DLog.i(TAG, "attach $role: views already laid out -> rebind soon")
+        } else {
+            // Cold start: wait for the next layout pass, then rebind.
+            view.addOnLayoutChangeListener(object : android.view.View.OnLayoutChangeListener {
+                override fun onLayoutChange(
+                    v: android.view.View, l: Int, t: Int, r: Int, b: Int,
+                    ol: Int, ot: Int, or2: Int, ob: Int
+                ) {
+                    if (v.width > 0 && v.height > 0) {
+                        v.removeOnLayoutChangeListener(this)
+                        DLog.i(TAG, "attach $role: laid out ${v.width}x${v.height} -> rebind")
+                        handler.postDelayed(doRebind, 150)
+                    }
+                }
+            })
+            // Fallback in case no further layout pass arrives.
+            handler.postDelayed({ if (!released) doRebind.run() }, 700)
+            DLog.i(TAG, "attach $role: awaiting layout before rebind")
+        }
     }
 
     /** Manual refresh (kept for explicit recovery paths). */
