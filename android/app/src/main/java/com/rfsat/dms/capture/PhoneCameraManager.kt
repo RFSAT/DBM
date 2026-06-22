@@ -108,13 +108,13 @@ class PhoneCameraManager(
                         bindMultiplexed(p)
                     }
             } else bindMultiplexed(p)
-            // After the initial bind, the preview TextureViews may not have
-            // created their surfaces yet. Re-issue the surface providers once,
-            // shortly after, so the first frames render. This is a cheap surface
-            // refresh — NOT a full unbind/rebind — so it does not disturb the
-            // freshly-bound session.
-            handler.postDelayed({ if (!released) refreshSurfaces() }, 400)
-            handler.postDelayed({ if (!released) refreshSurfaces() }, 1200)
+            // NOTE: we do NOT eagerly refresh surfaces or rebind here. At startup
+            // the Detector PreviewViews may not be attached yet (the app can open
+            // on another tab), so there is nothing to connect to. The single
+            // source of truth for connecting a stream to its view is the
+            // attach-triggered debounced rebind in hookAttach(): it fires when the
+            // views actually exist (first show, and every return to the tab),
+            // binding both cameras to the real, laid-out surfaces.
         }, ContextCompat.getMainExecutor(context))
     }
 
@@ -127,7 +127,7 @@ class PhoneCameraManager(
             roadPreview, CameraRole.FRONT)
         p.bindToLifecycle(listOf(interior, road))
         mode = Mode.CONCURRENT
-        DLog.i(TAG, "bound CONCURRENT front+back")
+        DLog.i(TAG, "bound CONCURRENT front+back (both use cases bound)")
         onMode(mode)
     }
 
@@ -146,8 +146,12 @@ class PhoneCameraManager(
 
     /** Full use-case rebind — same recovery path as app minimise/restore. */
     fun rebind() {
-        val p = provider ?: return
-        DLog.i(TAG, "rebind requested (mode=$mode)")
+        val p = provider ?: run { DLog.w(TAG, "rebind: provider not ready"); return }
+        DLog.i(TAG, "rebind requested (mode=$mode) " +
+            "driverView[attached=${interiorPreview.isAttachedToWindow} " +
+            "${interiorPreview.width}x${interiorPreview.height}] " +
+            "roadView[attached=${roadPreview.isAttachedToWindow} " +
+            "${roadPreview.width}x${roadPreview.height}]")
         runCatching {
             if (mode == Mode.CONCURRENT) bindConcurrent(p) else muxBindCurrent(p)
         }.onFailure { DLog.e(TAG, "rebind failed", it) }
@@ -180,35 +184,37 @@ class PhoneCameraManager(
     // present. The first time a view truly attaches we must (re)bind so CameraX
     // connects to the real, laid-out surface; binding earlier (e.g. while the app
     // opened on another tab and the view did not exist) connects to nothing.
-    private val everAttached = mutableSetOf<CameraRole>()
+    // Roles whose PreviewView is currently attached to the window. A rebind is
+    // only useful once the views actually exist, and CameraX drops a preview when
+    // its view detaches (leaving a tab), so we rebind when they (re)attach.
+    private val attachedRoles = mutableSetOf<CameraRole>()
 
     private fun hookAttach(view: PreviewView, role: CameraRole) {
         view.addOnAttachStateChangeListener(object :
                 android.view.View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(v: android.view.View) {
+                attachedRoles += role
+                // Re-issue this view's surface provider immediately (cheap), then
+                // schedule ONE debounced rebind. We rebind on every (re)attach,
+                // not just the first, because returning to the Detector tab
+                // re-creates the views and the streams must be reconnected to the
+                // real, laid-out surfaces. The debounce (removeCallbacks +
+                // postDelayed) coalesces the two views' near-simultaneous attaches
+                // into a SINGLE rebind, and absorbs rapid tab flips — so this does
+                // NOT reproduce the old rebind storm (which came from multiple
+                // rebinds per attach plus startup rebinds, not from one per
+                // settle). The delay lets BOTH TextureView surfaces exist before
+                // the bind, fixing "only the driver stream shows".
                 handler.postDelayed({
-                    if (released) return@postDelayed
-                    // Always re-issue this view's surface provider (cheap).
-                    previews[role]?.surfaceProvider = view.surfaceProvider
-                    // The FIRST real attach needs a genuine (re)bind so the
-                    // camera connects to the now-existing surfaces — a surface
-                    // re-issue alone does not start a stream that was bound while
-                    // the views did not yet exist (e.g. app opened on another
-                    // tab). bindConcurrent binds BOTH cameras, so one debounced
-                    // rebind covers both roles; the flag ensures it happens once,
-                    // not on every later tab switch (avoiding the old storm).
-                    if (everAttached.isEmpty()) {
-                        everAttached += role
-                        handler.removeCallbacks(rebindRunnable)
-                        handler.postDelayed(rebindRunnable, 150)
-                        DLog.i(TAG, "first attach ($role) -> one rebind to real surfaces")
-                    } else {
-                        everAttached += role
-                        DLog.i(TAG, "attach: surface re-issued for $role")
-                    }
-                }, 80)
+                    if (!released) previews[role]?.surfaceProvider = view.surfaceProvider
+                }, 60)
+                handler.removeCallbacks(rebindRunnable)
+                handler.postDelayed(rebindRunnable, 250)
+                DLog.i(TAG, "attach $role (attached=${attachedRoles.size}) -> rebind scheduled")
             }
-            override fun onViewDetachedFromWindow(v: android.view.View) = Unit
+            override fun onViewDetachedFromWindow(v: android.view.View) {
+                attachedRoles -= role
+            }
         })
     }
 
@@ -222,6 +228,9 @@ class PhoneCameraManager(
     private fun singleConfig(
         selector: CameraSelector, view: PreviewView, role: CameraRole
     ): SingleCameraConfig {
+        val sp = view.surfaceProvider
+        DLog.i(TAG, "singleConfig[$role]: view attached=${view.isAttachedToWindow} " +
+            "size=${view.width}x${view.height} surfaceProvider=${sp != null}")
         val preview = Preview.Builder()
             // Match the analysis 16:9 aspect so overlay boxes align with video.
             .setResolutionSelector(
@@ -235,6 +244,7 @@ class PhoneCameraManager(
             .build().also {
             it.surfaceProvider = view.surfaceProvider
             previews[role] = it
+            DLog.i(TAG, "singleConfig[$role]: Preview built, surfaceProvider set")
         }
         val group = UseCaseGroup.Builder()
             .addUseCase(preview)
@@ -307,8 +317,20 @@ class PhoneCameraManager(
                     .build())
             .build().also { ua ->
                 var lastT = 0L
+                var frameCount = 0L
+                var lastFrameLogT = 0L
                 ua.setAnalyzer(analysisExecutor) { img: ImageProxy ->
                     val now = System.currentTimeMillis()
+                    // Frame-flow diagnostic: confirm frames actually arrive from
+                    // each camera (a bound-but-blank preview shows whether the
+                    // problem is the stream not flowing vs. not rendering). Logs
+                    // the arrival rate per role every ~3 s.
+                    frameCount++
+                    if (now - lastFrameLogT > 3000) {
+                        DLog.i(TAG, "frames[$role]: $frameCount received " +
+                            "(latest ${img.width}x${img.height})")
+                        lastFrameLogT = now
+                    }
                     // Driver pipeline always full-rate; road pipeline drops to
                     // ~2 fps when stationary, ~6 fps when moving. Under thermal
                     // stress all intervals are stretched to shed heat.

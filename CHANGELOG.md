@@ -1,5 +1,33 @@
 # Changelog
 
+## v18.12 — camera diagnostic logging (no behaviour change)
+Added detailed, targeted logging to find why the road stream fails while the
+driver stream works. No camera logic changed. New log lines:
+- singleConfig[ROLE]: logs, per camera at bind time, whether its PreviewView is
+  attached, its size, and whether the surface provider is set. (If the road view
+  is attached=false / 0x0 at bind, that is the root cause.)
+- rebind requested: now logs both views' attached state and size.
+- bound CONCURRENT ... (both use cases bound): confirms concurrent bind reached.
+- frames[ROLE]: N received: logs per-camera frame ARRIVAL rate every ~3 s. This
+  is the decisive signal — if frames[FRONT] (road) never appears, the road camera
+  is not producing frames (a binding/acquisition issue); if it appears but the
+  preview is blank, it is a surface/render issue.
+Push this, reproduce the blank-road problem (incl. a tab switch back), and send
+the log; the singleConfig and frames lines will pinpoint the cause.
+
+## v18.11 — fix stream connection (rebind on every Detector view attach)
+v18.9/10 left two stream bugs: only the driver video showed on startup, and after
+switching tabs and back NO stream showed. Cause: the attach handler rebound only
+ONCE (everAttached flag), and that single rebind raced (fired before the road
+view had attached, so only driver connected); and because it never fired again,
+returning to the Detector tab (which detaches/re-creates the views) had no rebind
+to reconnect, so both streams stayed dead. Fix: rebind on EVERY (re)attach of a
+Detector PreviewView, debounced (250 ms) so the two views' near-simultaneous
+attaches coalesce into ONE rebind and rapid tab flips are absorbed — connecting
+both cameras to the real surfaces on first show and on every return, without the
+old rebind storm. Removed the eager startup surface refreshes; the attach-driven
+rebind is now the single source of truth for connecting a stream to its view.
+
 ## v18.10 — fix compile error in v18.9 (nullable SignOutput access)
 v18.9 made the sign analyser nullable but left the unrecognised-sign diagnostic
 logging block outside the new null guard, so it accessed out.unrecognised on a
