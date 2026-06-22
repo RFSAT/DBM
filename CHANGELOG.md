@@ -1,5 +1,30 @@
 # DBM Changelog
 
+## v19.2 — speed-limit display: always-on, camera-overrides-map, hold-until-different
+The shown speed limit now follows a clear rule:
+- Always show a current limit (camera-recognised, else the map value for the
+  segment); the display never blanks on a momentary unknown.
+- A camera-recognised limit overrides the map (already the fuser's priority).
+- The shown limit is LATCHED: it changes only when a DIFFERENT valid limit
+  appears. Re-seeing the same value, or a map value equal to what is shown, does
+  not change it.
+- A camera limit is held until a NEW sign appears or the vehicle moves onto a
+  DIFFERENT road segment — it no longer times out after 90 s and reverts to the
+  map. (Fuser: removed the time-based sign expiry; sign confidence still eases
+  off for the confidence value but the limit is retained until sign/segment
+  change. Service: added a shownLimitKmh latch.)
+
+## v19.1 — sign hold timeout, map manager grouping/grey-out/delete
+- Non-speed-limit road signs now disappear from the overlay 3 s after the camera
+  last sees them, instead of lingering. Speed-limit signs are unaffected (they
+  follow the speed-limit fusion/cache lifecycle and their own display).
+- Map manager now groups regions by country under collapsible headers (needed for
+  the full ~526-region Geofabrik catalogue; countries start collapsed, tap to
+  expand). A country with any downloaded region is marked "downloaded".
+- Installed maps are greyed out to distinguish them from available ones.
+- Installed maps can be deleted to free phone space, now behind a confirmation
+  dialog (delete removes the .db file and the installed-registry entry).
+
 ## v19.0 — final EU sign artwork, distant-sign detection, full Geofabrik map catalogue
 - Item 10 COMPLETE: replaced the last three non-EU-standard sign drawables with the
   supplied official artwork — no_overtaking (red/black car pair), pedestrians

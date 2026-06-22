@@ -56,6 +56,9 @@ class MonitorService : Service() {
 
     companion object {
         private const val TAG = "MonitorService"
+        // How long a non-speed-limit sign stays on screen after the camera last
+        // saw it, before being dropped.
+        private const val SIGN_HOLD_MS = 3000L
         // Plate-read lead-identity thresholds (box continuity) and confidence.
         private const val PLATE_SAME_CX = 0.15f   // lead centre within this = same
         private const val PLATE_SAME_W = 0.35f    // lead width within 35% = same
@@ -89,6 +92,10 @@ class MonitorService : Service() {
     private var lastGovernorLogMs = 0L
     @Volatile private var roadworksInView = false
     private var lastFusePos: Pair<Double, Double>? = null
+    // The speed limit currently shown to the driver. Latched: it persists until a
+    // DIFFERENT valid limit (camera or map, camera taking priority via the fuser)
+    // replaces it, so the display never blanks on a momentary unknown.
+    @Volatile private var shownLimitKmh = -1
     private var road: RoadAnalyzer? = null
     private lateinit var lanes: LaneAnalyzer
     private var signs: SignAnalyzer? = null
@@ -151,6 +158,11 @@ class MonitorService : Service() {
     val recognisedSigns = MutableStateFlow<List<com.rfsat.dms.RecognisedSign>>(emptyList())
     private var lastLoggedSign: String? = null
     private var lastUnrecognisedLogMs = 0L
+    // Non-speed-limit signs are held on screen for up to SIGN_HOLD_MS after the
+    // camera last saw them, then dropped — so a sign does not linger once it is
+    // out of view. Keyed by sign name -> last-seen wall-clock ms. Speed-limit
+    // signs are NOT held here; they are governed by the speed-limit fusion/cache.
+    private val signLastSeen = mutableMapOf<String, Pair<com.rfsat.dms.RecognisedSign, Long>>()
 
     val results = mapOf(
         CameraRole.DRIVER to MutableStateFlow(AnalysisResult()),
@@ -263,10 +275,21 @@ class MonitorService : Service() {
                         roadworksInView, sawSignCandidate = pendingSawSignCandidate)
                     pendingSignLimit = -1; pendingSignConf = 0.0   // consume the read
                     pendingSawSignCandidate = false
-                    if (fused.limitKmh > 0) {
+                    // Display latch: always show a current limit and keep showing
+                    // it until a DIFFERENT valid restriction replaces it. The
+                    // fuser already prioritises a live camera sign over the cache
+                    // and the map (camera overrides map), so we simply latch its
+                    // output: update only when it yields a valid limit that
+                    // differs from what is currently shown. A momentary NONE (e.g.
+                    // an unmapped gap with no sign) does not clear the display.
+                    if (fused.limitKmh > 0 && fused.limitKmh != shownLimitKmh) {
+                        shownLimitKmh = fused.limitKmh
                         scorer.onSpeedLimitSeen(fused.limitKmh)
-                        if (fused.disagree) DLog.i(TAG,
-                            "limit ${fused.limitKmh} from ${fused.source} (disagrees with map)")
+                        DLog.i(TAG, "limit now ${fused.limitKmh} from ${fused.source}" +
+                            (if (fused.disagree) " (camera disagrees with map)" else ""))
+                    } else if (fused.limitKmh > 0) {
+                        // same value re-confirmed; keep scorer in sync, no log spam
+                        scorer.onSpeedLimitSeen(fused.limitKmh)
                     }
                 }
 
@@ -493,17 +516,31 @@ class MonitorService : Service() {
             // aligns boxes correctly regardless of the delivered resolution.
             val aspected = result.copy(frameAspect = frameAspect)
             results[role]!!.value = aspected
-            if (role != CameraRole.DRIVER && result.signs.isNotEmpty()) {
-                recognisedSigns.value = result.signs
-                // Log each newly-seen sign once (dedup within a short window) so
-                // recognised signs are traceable in the diagnostic log.
+            if (role != CameraRole.DRIVER) {
+                val nowMs = System.currentTimeMillis()
+                val SPEED = com.rfsat.dms.detect.SignDetector.SPEED_LIMIT_ID
+                // Refresh last-seen time for NON-speed-limit signs visible this
+                // frame (these get the 3 s hold). Log each newly-seen sign once.
                 result.signs.forEach { sg ->
+                    if (sg.classId != SPEED) signLastSeen[sg.name] = sg to nowMs
                     if (sg.name != lastLoggedSign) {
                         lastLoggedSign = sg.name
                         DLog.i(TAG, "sign recognised: ${sg.name} (${sg.category}, " +
                             "${(sg.score * 100).toInt()}%)")
                     }
                 }
+                // Drop held non-speed signs past the hold window.
+                val iter = signLastSeen.entries.iterator()
+                while (iter.hasNext()) {
+                    if (nowMs - iter.next().value.second > SIGN_HOLD_MS) iter.remove()
+                }
+                // Published list = speed-limit signs seen THIS frame (they follow
+                // their own lifecycle, shown only while actually visible) + the
+                // still-held non-speed signs.
+                val speedNow = result.signs.filter { it.classId == SPEED }
+                val held = signLastSeen.values.map { it.first }
+                val combined = speedNow + held
+                if (combined != recognisedSigns.value) recognisedSigns.value = combined
             }
             if (recordVideo) {
                 (if (role == CameraRole.DRIVER) recDriver else recRoad)

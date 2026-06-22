@@ -35,7 +35,11 @@ class SpeedLimitFuser(private val cache: SignLimitCache) {
     companion object {
         private const val TAG = "SpeedLimitFuser"
         const val SIGN_MIN_CONF = 0.55
-        const val SIGN_HOLD_MS = 90_000L
+        // A held camera sign is retained until a new sign or a new road segment,
+        // so it does not time out. Its confidence eases off over this window (for
+        // the fusion confidence value only), but never below a floor.
+        const val SIGN_CONF_DECAY_MS = 120_000.0
+        const val SIGN_HELD_MIN_CONF = 0.50
         const val DISAGREE_TOL = 6
         const val AGREE_BONUS = 0.15
         const val MAP_CONFIDENCE = 0.6
@@ -75,11 +79,17 @@ class SpeedLimitFuser(private val cache: SignLimitCache) {
         }
 
         // 1b. Held live sign still valid?
+        // 1b. Held live sign: a recognised sign governs until a NEW sign appears
+        // (handled by the LIVE path above, which always wins) or until the
+        // vehicle moves onto a DIFFERENT road segment. It does NOT time out — a
+        // sign you passed stays in force along that stretch of road.
         if (signActive) {
-            val age = nowMs - signTimeMs
             val movedSeg = segId >= 0 && signSegId >= 0 && segId != signSegId
-            if (age <= SIGN_HOLD_MS && !movedSeg) {
-                val conf = signConf * (1.0 - age.toDouble() / SIGN_HOLD_MS).coerceAtLeast(0.0)
+            if (!movedSeg) {
+                // Confidence eases off slowly with time but the limit is retained.
+                val age = nowMs - signTimeMs
+                val conf = (signConf * (1.0 - age.toDouble() / SIGN_CONF_DECAY_MS))
+                    .coerceIn(SIGN_HELD_MIN_CONF, 1.0)
                 return FusedLimit(signLimit, FusedLimit.Source.SIGN, conf, false)
             } else signActive = false
         }

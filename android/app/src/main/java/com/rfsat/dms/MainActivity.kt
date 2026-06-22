@@ -862,6 +862,9 @@ class MainActivity : ComponentActivity() {
         var busy by remember { mutableStateOf(false) }
         var pending by remember {
             mutableStateOf<com.rfsat.dms.maps.MapRegion?>(null) }
+        var toDelete by remember {
+            mutableStateOf<com.rfsat.dms.maps.MapRegion?>(null) }
+        var expandedCountries by remember { mutableStateOf(setOf<String>()) }
         val indexUrl = "https://www.rfsat.com/products/maps/index.json"
 
         fun refresh() {
@@ -918,6 +921,24 @@ class MainActivity : ComponentActivity() {
                 })
         }
 
+        // confirmation dialog for deleting an installed map (frees phone space)
+        toDelete?.let { r ->
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { toDelete = null },
+                title = { Text("Delete ${r.name} map?") },
+                text = { Text("This removes the downloaded ${r.name} map from the " +
+                    "phone to free space. You can download it again later.") },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        repo.delete(r); toDelete = null; refresh()
+                    }) { Text("Delete", color = Color(0xFFE57373)) }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        toDelete = null }) { Text("Cancel") }
+                })
+        }
+
         Column(Modifier.fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp)).background(EnactSurface)
                 .padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -943,35 +964,67 @@ class MainActivity : ComponentActivity() {
                 Text(note, color = EnactOnSurface, fontSize = 11.sp,
                     modifier = Modifier.padding(top = 2.dp))
 
-            for (st in statuses) {
-                val r = st.region
-                val label = when (st.state) {
-                    com.rfsat.dms.maps.MapState.INSTALLED -> "Installed v${r.version}"
-                    com.rfsat.dms.maps.MapState.UPDATE_AVAILABLE ->
-                        "Update available (v${r.version}, ${r.dataDate})"
-                    com.rfsat.dms.maps.MapState.NOT_INSTALLED ->
-                        "%.0f MB".format(r.sizeBytes / 1e6)
-                    com.rfsat.dms.maps.MapState.UNSUPPORTED_SCHEMA -> "Needs app update"
-                }
-                Row(Modifier.fillMaxWidth().padding(top = 6.dp),
+            // Group regions by country, with a collapsible header per country.
+            // With the full Geofabrik catalogue (~500 regions) the list must not
+            // render every row at once, so countries start collapsed; tap a
+            // country to expand its regions. Installed regions are greyed out;
+            // their only action is Delete to free space.
+            val byCountry = statuses.groupBy { it.region.country }
+                .toSortedMap()
+            for ((country, regionStatuses) in byCountry) {
+                val anyInstalled = regionStatuses.any {
+                    it.state == com.rfsat.dms.maps.MapState.INSTALLED }
+                val expanded = expandedCountries.contains(country)
+                Row(Modifier.fillMaxWidth()
+                        .clickable {
+                            expandedCountries = if (expanded)
+                                expandedCountries - country else expandedCountries + country
+                        }
+                        .padding(top = 10.dp, bottom = 2.dp),
                     verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("${r.country} • ${r.name}", color = EnactOnSurface, fontSize = 12.sp)
-                        Text(label, color = EnactOnSurfaceDim, fontSize = 10.sp)
-                    }
-                    when (st.state) {
-                        com.rfsat.dms.maps.MapState.NOT_INSTALLED,
+                    Text(if (expanded) "▾ $country" else "▸ $country",
+                        color = EnactLime, fontSize = 12.sp,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f))
+                    // A small marker if any region of this country is downloaded.
+                    if (anyInstalled)
+                        Text("downloaded", color = EnactOnSurfaceDim, fontSize = 10.sp)
+                }
+                if (!expanded) continue
+                for (st in regionStatuses) {
+                    val r = st.region
+                    val installed = st.state == com.rfsat.dms.maps.MapState.INSTALLED
+                    val label = when (st.state) {
+                        com.rfsat.dms.maps.MapState.INSTALLED -> "Installed v${r.version}"
                         com.rfsat.dms.maps.MapState.UPDATE_AVAILABLE ->
-                            androidx.compose.material3.TextButton(
-                                enabled = !busy,
-                                onClick = { pending = r }) {
-                                Text(if (st.state == com.rfsat.dms.maps.MapState.UPDATE_AVAILABLE)
-                                    "Update" else "Download")
-                            }
-                        com.rfsat.dms.maps.MapState.INSTALLED ->
-                            androidx.compose.material3.TextButton(
-                                onClick = { repo.delete(r); refresh() }) { Text("Delete") }
-                        else -> {}
+                            "Update available (v${r.version}, ${r.dataDate})"
+                        com.rfsat.dms.maps.MapState.NOT_INSTALLED ->
+                            if (r.sizeBytes > 0) "%.0f MB".format(r.sizeBytes / 1e6) else "Available"
+                        com.rfsat.dms.maps.MapState.UNSUPPORTED_SCHEMA -> "Needs app update"
+                    }
+                    val nameColor = if (installed) EnactOnSurfaceDim else EnactOnSurface
+                    Row(Modifier.fillMaxWidth().padding(top = 6.dp, start = 10.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(r.name, color = nameColor, fontSize = 12.sp)
+                            Text(label, color = EnactOnSurfaceDim, fontSize = 10.sp)
+                        }
+                        when (st.state) {
+                            com.rfsat.dms.maps.MapState.NOT_INSTALLED,
+                            com.rfsat.dms.maps.MapState.UPDATE_AVAILABLE ->
+                                androidx.compose.material3.TextButton(
+                                    enabled = !busy,
+                                    onClick = { pending = r }) {
+                                    Text(if (st.state == com.rfsat.dms.maps.MapState.UPDATE_AVAILABLE)
+                                        "Update" else "Download")
+                                }
+                            com.rfsat.dms.maps.MapState.INSTALLED ->
+                                androidx.compose.material3.TextButton(
+                                    onClick = { toDelete = r }) {
+                                    Text("Delete", color = Color(0xFFE57373))
+                                }
+                            else -> {}
+                        }
                     }
                 }
             }
