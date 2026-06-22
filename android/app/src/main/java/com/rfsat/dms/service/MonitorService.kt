@@ -678,14 +678,14 @@ class MonitorService : Service() {
                 // Drive turn-restriction logic only from EU-detector signs, whose
                 // class IDs match the SignDetector constants TurnMonitor uses.
                 if (out.fromEuDetector) out.signs.forEach { turns.onSign(it.classId, tMs) }
-            }
-            // Diagnostic logging of sign-shaped regions GTSRB could not
-            // recognise (e.g. EU no-turn signs), rate-limited.
-            if (out.unrecognised.isNotEmpty() &&
-                tMs - lastUnrecognisedLogMs > 4000) {
-                lastUnrecognisedLogMs = tMs
-                out.unrecognised.take(2).forEach {
-                    DLog.i(TAG, "unrecognised sign region: $it")
+                // Diagnostic logging of sign-shaped regions GTSRB could not
+                // recognise (e.g. EU no-turn signs), rate-limited.
+                if (out.unrecognised.isNotEmpty() &&
+                    tMs - lastUnrecognisedLogMs > 4000) {
+                    lastUnrecognisedLogMs = tMs
+                    out.unrecognised.take(2).forEach {
+                        DLog.i(TAG, "unrecognised sign region: $it")
+                    }
                 }
             }
         }

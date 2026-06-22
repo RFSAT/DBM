@@ -1,5 +1,12 @@
 # Changelog
 
+## v18.10 — fix compile error in v18.9 (nullable SignOutput access)
+v18.9 made the sign analyser nullable but left the unrecognised-sign diagnostic
+logging block outside the new null guard, so it accessed out.unrecognised on a
+nullable SignOutput? and CI failed to compile (MonitorService.kt:684/687). Moved
+that block inside the if (out != null) guard. No behavioural change from the
+intent of v18.9; this only fixes the compile.
+
 ## v18.9 — fix About freeze (off-thread model load) and stream init (bind on attach)
 Two root causes identified from the 2026-06-22 00:26 log:
 
