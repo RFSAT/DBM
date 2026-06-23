@@ -1,16 +1,5 @@
 # DBM Changelog
 
-## v19.5 — on-screen thermal pause/resume notice for the driver
-- When thermal management pauses the road pipeline (sign & vehicle detection) or
-  resumes it after the phone cools, a brief centred banner now appears so a paused
-  pipeline reads as the app managing heat, not a fault. Light-red with a ⚠ when
-  paused ("Phone hot — road sign & vehicle detection paused to cool down"),
-  light-green with a ✓ when resumed ("Cooled down — ... resumed"). Large bold
-  text, auto-dismisses after ~3 s, centred for an at-a-glance read while driving.
-- Implemented via a ThermalNotice flow on PhoneCameraManager (emitted once per real
-  suspend/resume transition through a single setRoadSuspended() path) collected by a
-  ThermalNoticeToast overlay in the Detector screen.
-
 ## v19.4 — thermal recovery, rear-view first-bind, keep-direction gate (from drive log)
 Diagnosed from the 10:33 drive log:
 - DETECTION-DEATH ROOT CAUSE was THERMAL, not the v19.3 deadlock. The phone hit

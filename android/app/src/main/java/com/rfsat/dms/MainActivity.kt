@@ -247,7 +247,6 @@ class MainActivity : ComponentActivity() {
     private fun DetectorScreen() {
         val portrait = androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
                 android.content.res.Configuration.ORIENTATION_PORTRAIT
-        Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().padding(8.dp)) {
             StatusStrip()
             SignStrip()
@@ -272,46 +271,6 @@ class MainActivity : ComponentActivity() {
             ControlBar()
             Spacer(Modifier.height(6.dp))
             DetectionPanel(Modifier.weight(0.7f))
-        }
-            ThermalNoticeToast(Modifier.align(Alignment.Center))
-        }
-    }
-
-    /**
-     * Brief, glanceable banner shown in the centre of the screen when thermal
-     * management pauses or resumes pipelines, so a paused pipeline reads as the
-     * app managing heat — not as a fault. Light-red when paused, light-green when
-     * resumed; large bold text, auto-dismisses after ~3 s. Designed to be read at
-     * a glance while driving.
-     */
-    @Composable
-    private fun ThermalNoticeToast(modifier: Modifier = Modifier) {
-        val notice by (cameras?.thermalNotice
-            ?: MutableStateFlow<com.rfsat.dms.capture.PhoneCameraManager.ThermalNotice?>(null))
-            .collectAsState()
-        var shown by remember {
-            mutableStateOf<com.rfsat.dms.capture.PhoneCameraManager.ThermalNotice?>(null) }
-        LaunchedEffect(notice?.id) {
-            val n = notice ?: return@LaunchedEffect
-            shown = n
-            kotlinx.coroutines.delay(3000)
-            if (shown?.id == n.id) shown = null
-        }
-        val n = shown ?: return
-        val bg = if (n.suspended) Color(0xFFFFCDD2) else Color(0xFFC8E6C9) // light red / green
-        val fg = if (n.suspended) Color(0xFFB71C1C) else Color(0xFF1B5E20) // deep red / green
-        Row(modifier
-                .padding(20.dp)
-                .clip(RoundedCornerShape(14.dp))
-                .background(bg)
-                .padding(horizontal = 20.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            Text(if (n.suspended) "⚠" else "✓", color = fg, fontSize = 26.sp,
-                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                modifier = Modifier.padding(end = 12.dp))
-            Text(n.text, color = fg, fontSize = 18.sp,
-                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                lineHeight = 22.sp)
         }
     }
 

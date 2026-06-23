@@ -61,31 +61,6 @@ class PhoneCameraManager(
      *  drive where the phone hit CRITICAL thermal and was force-stopped. */
     @Volatile var thermalSuspendRoad = false
         private set
-
-    /** A brief, glanceable notice for the driver when thermal management
-     *  suspends or resumes pipelines. The Activity collects this and shows a
-     *  centered auto-dismissing toast (red = suspended, green = resumed). Null
-     *  between events. Each emission carries a fresh id so re-emitting the same
-     *  text still re-triggers the toast. */
-    data class ThermalNotice(val id: Long, val suspended: Boolean, val text: String)
-    private val _thermalNotice =
-        kotlinx.coroutines.flow.MutableStateFlow<ThermalNotice?>(null)
-    val thermalNotice: kotlinx.coroutines.flow.StateFlow<ThermalNotice?> = _thermalNotice
-
-    /** Single place to change road suspension so the driver notice fires exactly
-     *  once per real transition (both the change-listener and the active
-     *  re-evaluation route through here). */
-    private fun setRoadSuspended(suspended: Boolean) {
-        if (suspended == thermalSuspendRoad) return
-        thermalSuspendRoad = suspended
-        val notice = if (suspended)
-            ThermalNotice(System.currentTimeMillis(), true,
-                "Phone hot — road sign & vehicle detection paused to cool down")
-        else
-            ThermalNotice(System.currentTimeMillis(), false,
-                "Cooled down — road sign & vehicle detection resumed")
-        _thermalNotice.value = notice
-    }
     @get:androidx.annotation.RequiresApi(Build.VERSION_CODES.Q)
     private val thermalListener by lazy {
         android.os.PowerManager.OnThermalStatusChangedListener { status ->
@@ -105,9 +80,9 @@ class PhoneCameraManager(
             // the phone has cooled to MODERATE or below (not merely back to
             // SEVERE), so it does not flap right at the threshold.
             if (status >= android.os.PowerManager.THERMAL_STATUS_CRITICAL)
-                setRoadSuspended(true)
+                thermalSuspendRoad = true
             else if (status <= android.os.PowerManager.THERMAL_STATUS_MODERATE)
-                setRoadSuspended(false)
+                thermalSuspendRoad = false
             DLog.i(TAG, "thermal status $status -> factor $thermalFactor" +
                 if (thermalSuspendRoad) " (road analysis suspended)" else "")
         }
@@ -126,12 +101,12 @@ class PhoneCameraManager(
         val status = try { powerManager.currentThermalStatus } catch (_: Throwable) { return }
         if (status >= android.os.PowerManager.THERMAL_STATUS_CRITICAL) {
             if (!thermalSuspendRoad) {
-                setRoadSuspended(true)
+                thermalSuspendRoad = true
                 DLog.i(TAG, "thermal re-eval: status $status -> road analysis suspended")
             }
         } else if (status <= android.os.PowerManager.THERMAL_STATUS_MODERATE) {
             if (thermalSuspendRoad) {
-                setRoadSuspended(false)
+                thermalSuspendRoad = false
                 DLog.i(TAG, "thermal re-eval: status $status -> road analysis resumed")
             }
         }
