@@ -89,6 +89,12 @@ class SignDetector(
             var c = 1
             while (c < numClasses) { val s = o[4 + c][a]; if (s > bestS) { bestS = s; bestC = c }; c++ }
             if (bestS < scoreThresh) continue
+            // keep_right (11) and keep_left (12) are frequently confused by the
+            // model at low confidence (observed: wrong calls cluster at 45-60%,
+            // correct ones at 80%+). Require a higher confidence for these two
+            // classes specifically, to suppress the mirror-image misreads. This
+            // is an app-side mitigation; a proper fix is model retraining.
+            if ((bestC == 11 || bestC == 12) && bestS < KEEP_DIR_MIN_CONF) continue
             val cx = o[0][a] * inputSize; val cy = o[1][a] * inputSize
             val bw = o[2][a] * inputSize; val bh = o[3][a] * inputSize
             val l = (((cx - bw / 2f) - padX) / sx) / frame.width
@@ -175,6 +181,9 @@ class SignDetector(
         // SPEED_LIMIT_ID marks the class that triggers OCR + tracking.
         const val SPEED_LIMIT_ID = 9
         const val END_LIMIT_ID = 10
+        // Minimum confidence to accept keep_right(11)/keep_left(12); the model
+        // confuses the two below this, so we gate them harder than other signs.
+        const val KEEP_DIR_MIN_CONF = 0.65f
 
         // Category for colour-coding (warnings are the last six classes).
         fun category(id: Int): String = if (id in 15..20) "Warning" else "Regulatory"

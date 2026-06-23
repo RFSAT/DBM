@@ -61,6 +61,31 @@ class PhoneCameraManager(
      *  drive where the phone hit CRITICAL thermal and was force-stopped. */
     @Volatile var thermalSuspendRoad = false
         private set
+
+    /** A brief, glanceable notice for the driver when thermal management
+     *  suspends or resumes pipelines. The Activity collects this and shows a
+     *  centered auto-dismissing toast (red = suspended, green = resumed). Null
+     *  between events. Each emission carries a fresh id so re-emitting the same
+     *  text still re-triggers the toast. */
+    data class ThermalNotice(val id: Long, val suspended: Boolean, val text: String)
+    private val _thermalNotice =
+        kotlinx.coroutines.flow.MutableStateFlow<ThermalNotice?>(null)
+    val thermalNotice: kotlinx.coroutines.flow.StateFlow<ThermalNotice?> = _thermalNotice
+
+    /** Single place to change road suspension so the driver notice fires exactly
+     *  once per real transition (both the change-listener and the active
+     *  re-evaluation route through here). */
+    private fun setRoadSuspended(suspended: Boolean) {
+        if (suspended == thermalSuspendRoad) return
+        thermalSuspendRoad = suspended
+        val notice = if (suspended)
+            ThermalNotice(System.currentTimeMillis(), true,
+                "Phone hot — road sign & vehicle detection paused to cool down")
+        else
+            ThermalNotice(System.currentTimeMillis(), false,
+                "Cooled down — road sign & vehicle detection resumed")
+        _thermalNotice.value = notice
+    }
     @get:androidx.annotation.RequiresApi(Build.VERSION_CODES.Q)
     private val thermalListener by lazy {
         android.os.PowerManager.OnThermalStatusChangedListener { status ->
@@ -76,11 +101,42 @@ class PhoneCameraManager(
             // rate-limited (factor 3.0) — this preserves sign/hazard detection,
             // which full suspension was silently killing for long stretches of a
             // hot drive, while still shedding most of the load.
-            thermalSuspendRoad = status >= android.os.PowerManager.THERMAL_STATUS_CRITICAL
+            // HYSTERESIS: suspend at CRITICAL, but only lift the suspension once
+            // the phone has cooled to MODERATE or below (not merely back to
+            // SEVERE), so it does not flap right at the threshold.
+            if (status >= android.os.PowerManager.THERMAL_STATUS_CRITICAL)
+                setRoadSuspended(true)
+            else if (status <= android.os.PowerManager.THERMAL_STATUS_MODERATE)
+                setRoadSuspended(false)
             DLog.i(TAG, "thermal status $status -> factor $thermalFactor" +
                 if (thermalSuspendRoad) " (road analysis suspended)" else "")
         }
     }
+
+    /**
+     * Actively re-evaluate thermal suspension from the CURRENT status. The
+     * Android thermal listener only fires on CHANGES, and in practice it may not
+     * fire promptly as the device cools — which left the road pipeline suspended
+     * for the rest of a drive (and even across an in-app restart that began while
+     * still hot). The frame loop calls this periodically so recovery does not
+     * depend on the OS delivering a change event. Same hysteresis as above.
+     */
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.Q)
+    fun reevaluateThermal() {
+        val status = try { powerManager.currentThermalStatus } catch (_: Throwable) { return }
+        if (status >= android.os.PowerManager.THERMAL_STATUS_CRITICAL) {
+            if (!thermalSuspendRoad) {
+                setRoadSuspended(true)
+                DLog.i(TAG, "thermal re-eval: status $status -> road analysis suspended")
+            }
+        } else if (status <= android.os.PowerManager.THERMAL_STATUS_MODERATE) {
+            if (thermalSuspendRoad) {
+                setRoadSuspended(false)
+                DLog.i(TAG, "thermal re-eval: status $status -> road analysis resumed")
+            }
+        }
+    }
+
     private val handler = Handler(Looper.getMainLooper())
     private var provider: ProcessCameraProvider? = null
     private var mode = Mode.MULTIPLEXED
@@ -231,6 +287,13 @@ class PhoneCameraManager(
             "${interiorPreview.height} road=${roadPreview.width}x${roadPreview.height}")
         handler.removeCallbacks(rebindRunnable)
         handler.post(rebindRunnable)
+        // On a cold-start bind the rear (FRONT-role) camera often does not begin
+        // streaming until a later rebind — the user had to switch tabs to make the
+        // road view appear. Re-issuing both surface providers shortly after the
+        // bind reliably kicks the rear surface into delivering frames (this is the
+        // same refresh the tab-switch and resume paths perform), so the road view
+        // now comes up on first start without a manual tab switch.
+        handler.postDelayed({ if (!released) refreshSurfaces() }, 600)
     }
 
     private fun scheduleLaidOutRebind(delayMs: Long) {
@@ -388,6 +451,12 @@ class PhoneCameraManager(
                         DLog.i(TAG, "frames[$role]: $frameCount received " +
                             "(latest ${img.width}x${img.height})")
                         lastFrameLogT = now
+                        // Re-evaluate thermal suspension from the live status so
+                        // the road pipeline reliably RESUMES as the phone cools,
+                        // instead of waiting for an OS change-event that may not
+                        // come (this stranded detection for whole drives before).
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+                            reevaluateThermal()
                     }
                     val baseInterval = when {
                         role == CameraRole.DRIVER -> 100L

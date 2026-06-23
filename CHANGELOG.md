@@ -1,5 +1,40 @@
 # DBM Changelog
 
+## v19.5 — on-screen thermal pause/resume notice for the driver
+- When thermal management pauses the road pipeline (sign & vehicle detection) or
+  resumes it after the phone cools, a brief centred banner now appears so a paused
+  pipeline reads as the app managing heat, not a fault. Light-red with a ⚠ when
+  paused ("Phone hot — road sign & vehicle detection paused to cool down"),
+  light-green with a ✓ when resumed ("Cooled down — ... resumed"). Large bold
+  text, auto-dismisses after ~3 s, centred for an at-a-glance read while driving.
+- Implemented via a ThermalNotice flow on PhoneCameraManager (emitted once per real
+  suspend/resume transition through a single setRoadSuspended() path) collected by a
+  ThermalNoticeToast overlay in the Detector screen.
+
+## v19.4 — thermal recovery, rear-view first-bind, keep-direction gate (from drive log)
+Diagnosed from the 10:33 drive log:
+- DETECTION-DEATH ROOT CAUSE was THERMAL, not the v19.3 deadlock. The phone hit
+  CRITICAL thermal and the road pipeline was suspended (factor 5.0); it never
+  resumed because Android's thermal listener only fires on CHANGES and did not
+  deliver a cool-down event — and an in-app restart began while still CRITICAL,
+  so it started suspended. Map limits kept working throughout (GPS path). Fix:
+  added reevaluateThermal(), called ~every 3 s from the frame loop, which reads
+  the live thermal status and RESUMES the road pipeline once the phone cools to
+  MODERATE or below (hysteresis: suspend at CRITICAL, resume at <=MODERATE). No
+  longer depends on the OS delivering a change event.
+- REAR-VIEW FIRST-SWITCH: the log shows that on the first cold-start bind the rear
+  (FRONT-role) camera does not stream until a later rebind — the user had to switch
+  tabs. Fix: re-issue both surface providers ~600 ms after the cold-start bind (the
+  same refresh the tab-switch/resume paths use), so the road view comes up on first
+  start without a manual tab switch.
+- KEEP_LEFT/KEEP_RIGHT: confirmed a model confusion (wrong calls cluster at 45-60%
+  confidence, correct ones at 80%+). Added an app-side gate requiring >=0.65
+  confidence for those two classes specifically, suppressing the low-confidence
+  mirror-image misreads. A proper fix still needs model retraining.
+
+The v19.3 ImageProxy try/finally close remains in place (correct defensive fix),
+but was not the cause of this drive's detection stoppage.
+
 ## v19.3 — critical pipeline-deadlock fix, recents restore, Greek yellow warnings
 - CRITICAL: object/sign detection could stop permanently mid-drive and not recover
   even after an in-app restart (map-based limits kept working). Cause: the camera
