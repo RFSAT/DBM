@@ -1,5 +1,28 @@
 # DBM Changelog
 
+## v19.3 — critical pipeline-deadlock fix, recents restore, Greek yellow warnings
+- CRITICAL: object/sign detection could stop permanently mid-drive and not recover
+  even after an in-app restart (map-based limits kept working). Cause: the camera
+  ImageProxy was only closed on the normal path; if any frame work threw (an OOM
+  in bitmap rotation, or anything inside the detector), the proxy was left open,
+  and with STRATEGY_KEEP_ONLY_LATEST + a small thread pool the camera stopped
+  delivering frames for good. Wrapped the analyzer body in try/finally so the
+  proxy is ALWAYS closed, and catch so one bad frame never kills the stream.
+- App could not be restored from the Android recents/background list. Cause:
+  launchMode=singleTask. Changed to singleTop.
+- Greek warning signs: the triangle (warning) drawables now have a YELLOW interior
+  per Greek convention (children, curve_left, curve_right, pedestrians, roadworks,
+  slippery_road). Round restriction signs stay white inside; yield unchanged.
+- Sign overlay: de-dupe held/shown signs by name so the same sign cannot appear
+  multiple times (the dual-pass detector could report one sign twice). NOTE: the
+  "stuck >3 s" sign was most likely the pipeline deadlock above stalling the road
+  frames so expiry never ran; the close fix should resolve it.
+
+Known/with the model, not fixed in app: keep_left vs keep_right are occasionally
+swapped by the sign model itself (our class->name->drawable mapping is correct and
+consistent). This needs model retraining / a higher confidence gate, not an app
+change.
+
 ## v19.2 — speed-limit display: always-on, camera-overrides-map, hold-until-different
 The shown speed limit now follows a clear rule:
 - Always show a current limit (camera-recognised, else the map value for the

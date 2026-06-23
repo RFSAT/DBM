@@ -534,12 +534,14 @@ class MonitorService : Service() {
                 while (iter.hasNext()) {
                     if (nowMs - iter.next().value.second > SIGN_HOLD_MS) iter.remove()
                 }
-                // Published list = speed-limit signs seen THIS frame (they follow
-                // their own lifecycle, shown only while actually visible) + the
-                // still-held non-speed signs.
+                // Published list = speed-limit signs seen THIS frame (shown only
+                // while actually visible) + still-held non-speed signs, de-duped
+                // by name so the same sign cannot appear multiple times (e.g. when
+                // both the full-frame and centre-crop passes report it).
                 val speedNow = result.signs.filter { it.classId == SPEED }
-                val held = signLastSeen.values.map { it.first }
-                val combined = speedNow + held
+                    .distinctBy { it.name }
+                val held = signLastSeen.values.map { it.first }.distinctBy { it.name }
+                val combined = (speedNow + held).distinctBy { it.name }
                 if (combined != recognisedSigns.value) recognisedSigns.value = combined
             }
             if (recordVideo) {

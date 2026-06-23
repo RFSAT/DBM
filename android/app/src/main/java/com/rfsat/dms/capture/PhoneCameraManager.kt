@@ -373,30 +373,30 @@ class PhoneCameraManager(
                 var frameCount = 0L
                 var lastFrameLogT = 0L
                 ua.setAnalyzer(analysisExecutor) { img: ImageProxy ->
+                  // CRITICAL: an ImageProxy MUST be closed on every path. With
+                  // STRATEGY_KEEP_ONLY_LATEST and a small thread pool, if any code
+                  // below throws (an OOM in createBitmap, or anything inside the
+                  // detector via onFrame) and the proxy is left open, the camera
+                  // stops delivering frames permanently — object/sign detection
+                  // dies and even an in-app restart does not recover it (the
+                  // buffers stay held until the process is killed). try/finally
+                  // guarantees the close.
+                  try {
                     val now = System.currentTimeMillis()
-                    // Frame-flow diagnostic: confirm frames actually arrive from
-                    // each camera (a bound-but-blank preview shows whether the
-                    // problem is the stream not flowing vs. not rendering). Logs
-                    // the arrival rate per role every ~3 s.
                     frameCount++
                     if (now - lastFrameLogT > 3000) {
                         DLog.i(TAG, "frames[$role]: $frameCount received " +
                             "(latest ${img.width}x${img.height})")
                         lastFrameLogT = now
                     }
-                    // Driver pipeline always full-rate; road pipeline drops to
-                    // ~2 fps when stationary, ~6 fps when moving. Under thermal
-                    // stress all intervals are stretched to shed heat.
                     val baseInterval = when {
                         role == CameraRole.DRIVER -> 100L
                         vehicleMoving -> 160L
                         else -> 500L
                     }
                     val minIntervalMs = (baseInterval * thermalFactor).toLong()
-                    // Under high thermal load, skip the heavy road pipeline
-                    // entirely (driver analysis continues at reduced rate).
                     if (role == CameraRole.FRONT && thermalSuspendRoad) {
-                        img.close(); return@setAnalyzer
+                        return@setAnalyzer
                     }
                     if (now - lastT >= minIntervalMs) {
                         lastT = now
@@ -409,7 +409,12 @@ class PhoneCameraManager(
                         }
                         onFrame(role, bmp, now)
                     }
+                  } catch (e: Throwable) {
+                    // Never let one bad frame kill the stream. Log and move on.
+                    DLog.e(TAG, "analyzer[$role] frame failed (continuing)", e)
+                  } finally {
                     img.close()
+                  }
                 }
             }
 
