@@ -1,5 +1,31 @@
 # DBM Changelog
 
+## v19.6 — revert the v19.4 surface re-issue that broke camera streams
+- REGRESSION FIX: v19.4 added a refreshSurfaces() call ~600 ms after EVERY
+  laid-out rebind, intending to auto-start the rear view on cold start. But that
+  runnable fires on every tab switch too, so each switch re-issued BOTH surface
+  providers shortly after the bind — racing the freshly-bound surfaces and
+  detaching one or both streams. This made driver and/or road previews fail to
+  show, on cold start and on tab switches. Removed that call entirely; the camera
+  binding path is now back to the v19.3 behaviour that drive logs confirmed
+  working (both streams binding at full rate via the layout-wait rebind).
+- The rear-view-on-first-switch issue this was meant to fix is therefore NOT
+  addressed here — reverting to a known-good streaming path takes priority. It
+  needs a safer approach than a blanket surface re-issue.
+- Thermal auto-recovery (v19.4) and the on-screen thermal pause/resume notice
+  (v19.5) are retained — neither touches camera binding.
+
+## v19.5 — on-screen thermal pause/resume notice for the driver
+- When thermal management pauses the road pipeline (sign & vehicle detection) or
+  resumes it after the phone cools, a brief centred banner now appears so a paused
+  pipeline reads as the app managing heat, not a fault. Light-red with a ⚠ when
+  paused ("Phone hot — road sign & vehicle detection paused to cool down"),
+  light-green with a ✓ when resumed ("Cooled down — ... resumed"). Large bold
+  text, auto-dismisses after ~3 s, centred for an at-a-glance read while driving.
+- Implemented via a ThermalNotice flow on PhoneCameraManager (emitted once per real
+  suspend/resume transition through a single setRoadSuspended() path) collected by a
+  ThermalNoticeToast overlay in the Detector screen.
+
 ## v19.4 — thermal recovery, rear-view first-bind, keep-direction gate (from drive log)
 Diagnosed from the 10:33 drive log:
 - DETECTION-DEATH ROOT CAUSE was THERMAL, not the v19.3 deadlock. The phone hit
