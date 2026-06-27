@@ -211,7 +211,14 @@ class PhoneCameraManager(
         runCatching {
             if (mode == Mode.CONCURRENT) bindConcurrent(p) else muxBindCurrent(p)
         }.onFailure { DLog.e(TAG, "rebind failed", it) }
+        // After binding, give surfaces time to start; then re-issue ONLY any that
+        // are not streaming (rear-blank-on-cold-start / black-on-resume). Healthy
+        // streams are left untouched. Single shot, debounced.
+        handler.removeCallbacks(nudgeRunnable)
+        handler.postDelayed(nudgeRunnable, 1200)
     }
+
+    private val nudgeRunnable = Runnable { nudgeNonStreamingSurfaces() }
 
     /** Call when the activity returns to the foreground. Switching to another
      *  app stops the activity; CameraX unbinds, and because the PreviewView may
@@ -225,11 +232,12 @@ class PhoneCameraManager(
         handler.removeCallbacks(rebindRunnable)
         if (provider != null) {
             // On return from background the OS unbound the session, so ONE rebind
-            // is warranted. Follow it with a cheap surface refresh (not a second
-            // rebind) in case a TextureView surface settled slightly later.
+            // is warranted. The rebind() itself schedules a guarded nudge that
+            // re-issues only surfaces that have not started streaming, which
+            // covers the "black previews until you switch tabs" case on resume
+            // without disturbing any view that comes back cleanly.
             handler.postDelayed(rebindRunnable, 150)
-            handler.postDelayed({ if (!released) refreshSurfaces() }, 600)
-            DLog.i(TAG, "resume: rebind + surface refresh scheduled")
+            DLog.i(TAG, "resume: rebind scheduled")
         } else {
             DLog.i(TAG, "resume: provider not ready, starting")
             start()
@@ -332,6 +340,29 @@ class PhoneCameraManager(
         previews[CameraRole.DRIVER]?.surfaceProvider = interiorPreview.surfaceProvider
         previews[CameraRole.FRONT]?.surfaceProvider = roadPreview.surfaceProvider
         DLog.i(TAG, "surface providers refreshed (manual)")
+    }
+
+    /**
+     * Targeted, SAFE recovery for the "one view blank after bind" symptom (rear
+     * view on cold start; either view black on return from background). Unlike a
+     * blanket surface refresh, this re-issues a surface provider ONLY for a view
+     * whose preview is not actually streaming yet — a view that is already
+     * STREAMING is never touched, so this cannot disturb a working stream. Backed
+     * by PreviewView.previewStreamState, the real signal for "frames flowing",
+     * which is more reliable than layout/size or fixed timers.
+     */
+    private fun nudgeNonStreamingSurfaces() {
+        if (released) return
+        fun nudge(role: CameraRole, view: PreviewView) {
+            val streaming = view.previewStreamState.value ==
+                PreviewView.StreamState.STREAMING
+            if (!streaming) {
+                previews[role]?.surfaceProvider = view.surfaceProvider
+                DLog.i(TAG, "nudge[$role]: not streaming -> surface re-issued")
+            }
+        }
+        nudge(CameraRole.DRIVER, interiorPreview)
+        nudge(CameraRole.FRONT, roadPreview)
     }
 
     private fun singleConfig(

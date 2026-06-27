@@ -661,7 +661,7 @@ class MonitorService : Service() {
                 v * FollowingDistanceMonitor.REACTION_S +
                     v * v / (2f * FollowingDistanceMonitor.DECEL_MS2)
             } else null
-            val (hazEvents, hazLead) = following.checkLeadHazards(lead, distM, stopM, tMs)
+            val (hazEvents, hazLead) = following.checkLeadHazards(lead, distM, stopM, tMs, frame)
             // Plate reading runs whenever a lead is closer than safe distance —
             // independent of hazard events — reading once per vehicle.
             if (lead != null) maybeReadLeadPlate(frame, lead, distM, stopM)

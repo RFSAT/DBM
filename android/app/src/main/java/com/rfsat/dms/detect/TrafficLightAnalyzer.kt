@@ -49,6 +49,50 @@ class TrafficLightAnalyzer(context: android.content.Context? = null) {
     private var lastBlobSize = 0f
     private var lastEventMs = 0L
 
+    // --- Temporal smoothing -------------------------------------------------
+    // Raw per-frame colour is noisy: a glint can read RED for one frame, a
+    // bloomed green can read NONE. Acting on a single frame causes flickering
+    // overlays and, worse, false RED_LIGHT_CROSSING events. We therefore confirm
+    // a state only after it has been seen on several consecutive frames, and we
+    // HOLD the last confirmed state across a brief dropout so a momentary miss
+    // does not look like the signal vanished. The crossing state machine runs on
+    // the CONFIRMED state, not the raw one.
+    private var rawCandidate = State.NONE     // the state currently accumulating
+    private var rawStreak = 0                 // consecutive frames of rawCandidate
+    private var confirmedState = State.NONE    // smoothed state the rest of the code uses
+    private var confirmedAtMs = 0L            // when confirmedState last refreshed
+    private var lastSeenMs = 0L               // last frame the confirmed state was actually observed
+
+    /**
+     * Fold a raw per-frame observation into the confirmed state.
+     *  - A new colour must persist for CONFIRM_FRAMES consecutive frames before
+     *    it replaces the confirmed state (debounce).
+     *  - When raw == NONE we do NOT immediately clear: the confirmed state is
+     *    held for HOLD_MS so a one- or two-frame dropout is ignored. Only after
+     *    the hold elapses with no re-observation does it fall to NONE.
+     * Returns the confirmed state to drive overlays and crossing logic.
+     */
+    private fun smooth(raw: State, tMs: Long): State {
+        if (raw != State.NONE) lastSeenMs = tMs
+        // Accumulate a streak for whatever raw colour we are seeing.
+        if (raw == rawCandidate) rawStreak++ else { rawCandidate = raw; rawStreak = 1 }
+
+        if (raw != State.NONE && raw != confirmedState && rawStreak >= CONFIRM_FRAMES) {
+            // A different colour has persisted long enough — accept it.
+            confirmedState = raw
+            confirmedAtMs = tMs
+        } else if (raw == confirmedState && raw != State.NONE) {
+            // Re-confirmed same colour; refresh timestamp.
+            confirmedAtMs = tMs
+        } else if (raw == State.NONE && confirmedState != State.NONE) {
+            // Possible dropout: hold the confirmed state until HOLD_MS passes
+            // with no re-observation, then release to NONE.
+            if (tMs - lastSeenMs > HOLD_MS) confirmedState = State.NONE
+        }
+        return confirmedState
+    }
+
+
     /** @return (overlay detection of the light if any, crossing event or null) */
     fun analyze(frame: Bitmap, speedKmh: Int, tMs: Long,
                 vehicleBoxes: List<Detection> = emptyList()):
@@ -85,20 +129,22 @@ class TrafficLightAnalyzer(context: android.content.Context? = null) {
         }
 
         val minBlob = (w * roiH) / 4000          // scale threshold to frame size
-        val state: State; var cx = 0f; var cy = 0f; var blobN = 0
+        val rawState: State; var cx = 0f; var cy = 0f; var blobN = 0
         when {
-            rN >= minBlob && rN >= aN -> { state = State.RED; cx = rX / rN; cy = rY / rN; blobN = rN }
-            aN >= minBlob -> { state = State.AMBER; cx = aX / aN; cy = aY / aN; blobN = aN }
-            gN >= minBlob -> { state = State.GREEN }
-            else -> { state = State.NONE }
+            rN >= minBlob && rN >= aN -> { rawState = State.RED; cx = rX / rN; cy = rY / rN; blobN = rN }
+            aN >= minBlob -> { rawState = State.AMBER; cx = aX / aN; cy = aY / aN; blobN = aN }
+            gN >= minBlob -> { rawState = State.GREEN }
+            else -> { rawState = State.NONE }
         }
+        // Smooth across frames before the crossing logic acts on it.
+        val state = smooth(rawState, tMs)
 
         var det: Detection? = null
-        if (state == State.RED || state == State.AMBER) {
+        if (rawState == State.RED || rawState == State.AMBER) {
             val sz = kotlin.math.sqrt(blobN.toFloat()) / w
             val nx = cx / w; val ny = cy / h
             det = Detection(
-                if (state == State.RED) "RED" else "AMBER", 0.6f,
+                if (rawState == State.RED) "RED" else "AMBER", 0.6f,
                 (nx - sz).coerceIn(0f, 1f), (ny - sz).coerceIn(0f, 1f),
                 (nx + sz).coerceIn(0f, 1f), (ny + sz).coerceIn(0f, 1f),
                 risky = true)
@@ -137,16 +183,18 @@ class TrafficLightAnalyzer(context: android.content.Context? = null) {
         val signal = lights.filter { it.colour == TrafficLightDetector.Colour.RED ||
                                      it.colour == TrafficLightDetector.Colour.YELLOW }
             .maxByOrNull { it.score * (1f - it.cy()) }
-        val state = when (signal?.colour) {
+        val rawState = when (signal?.colour) {
             TrafficLightDetector.Colour.RED -> State.RED
             TrafficLightDetector.Colour.YELLOW -> State.AMBER
             else -> if (lights.any { it.colour == TrafficLightDetector.Colour.GREEN })
                 State.GREEN else State.NONE
         }
+        // Smooth across frames before the crossing logic acts on it.
+        val state = smooth(rawState, tMs)
 
         var det: Detection? = null
-        if (signal != null && state != State.GREEN) {
-            det = Detection(if (state == State.RED) "RED" else "AMBER", signal.score,
+        if (signal != null && rawState != State.GREEN && rawState != State.NONE) {
+            det = Detection(if (rawState == State.RED) "RED" else "AMBER", signal.score,
                 signal.left, signal.top, signal.right, signal.bottom, risky = true)
             lastStrongState = state
             lastBlobY = signal.cy()
@@ -178,5 +226,9 @@ class TrafficLightAnalyzer(context: android.content.Context? = null) {
         const val EXIT_Y = 0.25f          // blob near top before disappearing
         const val MIN_SPEED_KMH = 10
         const val EVENT_INTERVAL_MS = 8000L
+        // Temporal smoothing: a new colour must hold this many consecutive frames
+        // to be confirmed; a confirmed colour survives dropouts for HOLD_MS.
+        const val CONFIRM_FRAMES = 3
+        const val HOLD_MS = 600L
     }
 }

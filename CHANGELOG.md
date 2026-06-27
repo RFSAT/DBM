@@ -1,5 +1,51 @@
 # DBM Changelog
 
+## v19.9 — brake-light corroboration for lead hard-braking
+- The lead-vehicle hard-braking detector now uses the lead's BRAKE LIGHTS as a
+  direct cue, not just bounding-box growth (closing speed). brakeLightStrength()
+  samples the lower band of the lead's box and requires bright, saturated red on
+  BOTH the left and right halves (the two lamps), rejecting a single red blob,
+  body paint, and dim running tail-lights.
+- Decision now combines the two signals:
+  * brake lights lit + growth -> CRITICAL, high confidence (0.85),
+    "lead vehicle braking hard (brake lights on)"; a smaller growth suffices, so
+    the alert is earlier.
+  * growth with no frame available -> unchanged CRITICAL 0.7 (geometry only).
+  * strong growth but NO visible brake lights -> demoted to WARNING 0.55
+    ("closing on lead vehicle fast") — likely own-speed closing, not the lead
+    braking, which cuts false hard-braking alerts.
+- frame is now passed into checkLeadHazards(); Python-validated the lamp detector
+  (two-lamp ON=1.0, single blob/paint/dim=0.0).
+
+## v19.8 — traffic-light temporal smoothing
+- TrafficLightAnalyzer now smooths the per-frame colour before the crossing logic
+  acts on it, removing single-frame flicker that caused false RED_LIGHT_CROSSING
+  events. A new colour must persist for CONFIRM_FRAMES (3) consecutive frames to be
+  confirmed; a confirmed colour is HELD for HOLD_MS (600 ms) across brief dropouts,
+  so a one/two-frame miss is not treated as the signal vanishing. Applied to BOTH
+  the learned-model path and the colour-blob fallback (shared smooth()).
+- Overlay box still tracks the raw per-frame detection; only the crossing decision
+  uses the smoothed state. Python-validated across glitch/transition/dropout cases.
+
+## v19.7 — targeted, guarded fix for blank/black preview after bind
+Addresses the long-standing camera symptoms WITHOUT the v19.4 regression:
+  (1) rear view blank on cold start, (2) one/both black on return from another app.
+- Added nudgeNonStreamingSurfaces(): after each bind it waits ~1.2 s, then checks
+  each PreviewView's previewStreamState and re-issues the surface provider ONLY for
+  a view that is NOT already STREAMING. A view that is streaming is never touched —
+  this is the exact guard the v19.4 blanket refresh lacked, so it cannot detach a
+  working stream. previewStreamState is the real "frames flowing" signal, more
+  reliable than layout size or fixed timers.
+- rebind() now schedules this guarded nudge; resume() routes through rebind() so the
+  return-from-background (black-until-tab-switch) case gets the same safe treatment.
+- The old blanket refreshSurfaces() is no longer auto-called from any path (kept as a
+  manual function only). The unconditional re-issue that caused the v19.4/19.5
+  degradation can no longer fire on its own.
+
+NOTE: best-effort and unverifiable in this environment; needs a device check. If a
+view still fails to stream, the new "nudge[ROLE]: not streaming -> surface re-issued"
+log line will show whether the nudge fired and for which camera.
+
 ## v19.6 — revert the v19.4 surface re-issue that broke camera streams
 - REGRESSION FIX: v19.4 added a refreshSurfaces() call ~600 ms after EVERY
   laid-out rebind, intending to auto-start the rear view on cold start. But that

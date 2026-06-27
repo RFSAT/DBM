@@ -4,6 +4,7 @@ import com.rfsat.dms.Detection
 import com.rfsat.dms.RiskEventCandidate
 import com.rfsat.dms.RiskType
 import com.rfsat.dms.Severity
+import android.graphics.Bitmap
 import kotlin.math.abs
 
 /**
@@ -67,19 +68,76 @@ class FollowingDistanceMonitor {
     private var lastBrakeEventMs = 0L
 
     /**
-     * Detect hazards of the LEAD vehicle, evaluated ONLY when it is closer than
-     * the safe following distance (per the brief: reliable and cheap because it
-     * is gated on proximity). Returns any events plus the lead's bounding box so
-     * the caller can capture an evidence image / attempt plate OCR.
+     * Estimate whether the lead vehicle's brake lights are illuminated, by
+     * sampling the lower band of its bounding box (where tail-lights sit) for
+     * bright, highly-saturated red. Genuine brake lights appear as TWO bright-red
+     * clusters (left + right), often with a central high mount, so we split the
+     * band into left/right halves and require strong red on BOTH sides — this
+     * rejects a single red object (a sticker, a reflection) and the diffuse red
+     * of the body paint. Returns a 0..1 strength (0 = off, ~1 = clearly lit).
      *
-     *  - Sway: lead box centre crosses a large lateral span (>50% of a lane
-     *    width) repeatedly without a sustained one-way move (a lane change).
-     *  - Hard braking: lead box grows rapidly (closing fast), i.e. the lead
-     *    decelerated sharply.
+     * This is a corroborating cue for hard braking: box-growth says "closing",
+     * brake lights say "they are actively braking", and the two together are a
+     * much stronger and earlier signal than growth alone. It is intentionally
+     * conservative — when unsure it returns a low value and the geometry still
+     * governs.
+     */
+    private fun brakeLightStrength(frame: Bitmap, lead: Detection): Float {
+        val W = frame.width; val H = frame.height
+        // Lower ~45% of the box, full width, clamped to the frame.
+        val bl = (lead.left * W).toInt().coerceIn(0, W - 1)
+        val br = (lead.right * W).toInt().coerceIn(0, W - 1)
+        val boxTop = lead.top * H; val boxBot = lead.bottom * H
+        val bandTop = (boxBot - (boxBot - boxTop) * 0.45f).toInt().coerceIn(0, H - 1)
+        val bandBot = boxBot.toInt().coerceIn(0, H - 1)
+        val bw = br - bl; val bh = bandBot - bandTop
+        if (bw < 8 || bh < 4) return 0f
+        val px = IntArray(bw * bh)
+        frame.getPixels(px, 0, bw, bl, bandTop, bw, bh)
+
+        val mid = bw / 2
+        var leftRed = 0; var rightRed = 0; var total = 0
+        var i = 0
+        while (i < px.size) {
+            val c = px[i]
+            val r = c shr 16 and 0xFF; val g = c shr 8 and 0xFF; val b = c and 0xFF
+            val mx = maxOf(r, g, b); val mn = minOf(r, g, b)
+            val sat = if (mx == 0) 0 else (mx - mn) * 255 / mx
+            // Bright + saturated + clearly red-dominant = an illuminated lamp.
+            if (mx > 170 && sat > 100 && r > 150 && r > g + 60 && r > b + 60) {
+                if ((i % bw) < mid) leftRed++ else rightRed++
+            }
+            total++
+            i += 2   // subsample for speed
+        }
+        if (total == 0) return 0f
+        // Need meaningful red on BOTH sides (the two lamps). Strength scales with
+        // the weaker side so a single bright blob does not score high.
+        val leftFrac = leftRed.toFloat() / (total / 2f)
+        val rightFrac = rightRed.toFloat() / (total / 2f)
+        val weaker = minOf(leftFrac, rightFrac)
+        // ~1.5% of a half-band lit is a confident pair of lamps; scale to 0..1.
+        return (weaker / 0.015f).coerceIn(0f, 1f)
+    }
+
+    /**
+     * Detect hazards of the LEAD vehicle, evaluated ONLY when it is closer than
+     * the safe following distance. Returns any events plus the lead's bounding
+     * box so the caller can capture an evidence image / attempt plate OCR.
+     *
+     *  - Sway: lead box centre crosses a large lateral span repeatedly without a
+     *    sustained one-way move (a lane change).
+     *  - Hard braking: lead box grows rapidly (closing fast). When a camera frame
+     *    is supplied, illuminated brake lights corroborate the geometry: lit
+     *    brake lights make a smaller growth sufficient and raise confidence;
+     *    growth with NO visible brake lights is demoted (it may just be own-speed
+     *    closing), reducing false hard-braking alerts.
      */
     fun checkLeadHazards(
         lead: Detection?, distM: Float?, stopM: Float?, tMs: Long,
+        frame: Bitmap? = null,
     ): Pair<List<RiskEventCandidate>, Detection?> {
+
         // Gate: only when a lead exists and is closer than the safe distance.
         if (lead == null || distM == null || stopM == null || distM >= stopM) {
             leadCentreHist.clear(); leadWidthHist.clear()
@@ -120,12 +178,29 @@ class FollowingDistanceMonitor {
             val dt = (tMs - t0) / 1000f
             if (dt > 0.15f && w0 > 0.02f) {
                 val growthPerSec = (wNorm - w0) / w0 / dt    // fractional growth/s
-                if (growthPerSec > BRAKE_GROWTH_PER_SEC &&
+                // Brake-light corroboration (only when a frame is supplied).
+                //  - Lit brake lights: accept a smaller growth (they ARE braking)
+                //    and report with high confidence + an explicit message.
+                //  - No/weak brake lights: require the full growth threshold and
+                //    report with lower confidence — this may be own-speed closing
+                //    rather than the lead braking.
+                val brakeStrength = frame?.let { brakeLightStrength(it, lead) } ?: -1f
+                val lit = brakeStrength >= BRAKE_LIGHT_MIN
+                val effThreshold =
+                    if (lit) BRAKE_GROWTH_PER_SEC * BRAKE_LIT_GROWTH_FACTOR
+                    else BRAKE_GROWTH_PER_SEC
+                if (growthPerSec > effThreshold &&
                     tMs - lastBrakeEventMs > EVENT_INTERVAL_MS) {
                     lastBrakeEventMs = tMs
-                    out += RiskEventCandidate(RiskType.LEAD_HARD_BRAKING,
-                        Severity.CRITICAL, 0.7f,
-                        "lead vehicle braking hard / closing fast")
+                    val (sev, conf, msg) = when {
+                        lit -> Triple(Severity.CRITICAL, 0.85f,
+                            "lead vehicle braking hard (brake lights on)")
+                        brakeStrength < 0f -> Triple(Severity.CRITICAL, 0.7f,
+                            "lead vehicle braking hard / closing fast")
+                        else -> Triple(Severity.WARNING, 0.55f,
+                            "closing on lead vehicle fast")
+                    }
+                    out += RiskEventCandidate(RiskType.LEAD_HARD_BRAKING, sev, conf, msg)
                 }
             }
         }
@@ -189,5 +264,8 @@ class FollowingDistanceMonitor {
         const val SWAY_SPAN = 0.10f          // ~50% of a side lane in image terms
         const val BRAKE_WINDOW_MS = 700L
         const val BRAKE_GROWTH_PER_SEC = 0.9f // box widening ~90%/s = rapid closing
+        // Brake-light corroboration thresholds.
+        const val BRAKE_LIGHT_MIN = 0.5f      // strength >= this counts as "lit"
+        const val BRAKE_LIT_GROWTH_FACTOR = 0.55f // lit lights accept 55% of the growth bar
     }
 }
