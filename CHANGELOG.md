@@ -1,5 +1,22 @@
 # DBM Changelog
 
+## v20.0 — retrained traffic-light model (DTLD, EU lights)
+- Replaced app/src/main/assets/traffic_light.tflite with a model retrained on the
+  DriveU Traffic Light Dataset (DTLD v2.0, German/EU lights). Same architecture
+  and 4-class scheme (red/green/off/yellow), so it is a pure asset swap — no
+  Kotlin change; the TrafficLightDetector decoder and Colour enum are unchanged.
+- Held-out validation (whole-sequence split, frames from drives absent in
+  training): mAP50 0.800 overall, precision 0.95-0.97 on every class
+  (red 0.799 / green 0.771 / off 0.928 / yellow 0.703 mAP50). High precision
+  biases the app toward few false state calls. Yellow has the lowest recall
+  (~0.66), expected for the scarcest, hardest class.
+- Verified the exported TFLite matches the app's tensor contract: input
+  [1,640,640,3], output [1,8,8400] channels-first, finite forward pass.
+- Works alongside the existing temporal smoothing (v19.8) and brake-light
+  corroboration (v19.9); the smoothing absorbs occasional single-frame misses.
+- NOTE: trained on German lights; first Greek/EU road drives are the real test,
+  especially false-positive rate and amber behaviour.
+
 ## v19.9 — brake-light corroboration for lead hard-braking
 - The lead-vehicle hard-braking detector now uses the lead's BRAKE LIGHTS as a
   direct cue, not just bounding-box growth (closing speed). brakeLightStrength()
