@@ -1,5 +1,18 @@
 # DBM Changelog
 
+## v1.20.8 — version display scheme (epoch prefix)
+- Display version now uses a leading epoch: 1.MAJOR.MINOR (this build = 1.20.8).
+  Keeps version numbers readable instead of climbing toward 21, 22, ... The Play
+  versionCode folds the epoch in (epoch*1_000_000 + major*1000 + minor) so it
+  stays strictly increasing and updates install cleanly. About screen and APK
+  filename pick this up automatically.
+
+## Versioning note (from v1.20.7)
+Display version now carries a leading epoch: **1.MAJOR.MINOR** (e.g. 1.20.7),
+so versions read 1.20.8, 1.20.9, … for minor changes. The Play versionCode is
+`epoch*1_000_000 + major*1000 + minor` (1.20.7 -> 1020007), which stays strictly
+above the previous scheme's codes (20007) so updates install cleanly.
+
 ## v20.7 — build fix (OBD compile errors)
 - Fixed two compile errors from the OBD UI work:
   * MainActivity: added the missing `androidx.compose.foundation.layout.width`

@@ -15,9 +15,10 @@ plugins {
 //   The version number appears in every produced package filename and in the
 //   in-app About screen (via BuildConfig.VERSION_NAME).
 // ---------------------------------------------------------------------------
+val dmsVersionEpoch = 1
 val dmsVersionMajor = 20
-val dmsVersionMinor = 7
-val dmsVersionName = "$dmsVersionMajor.$dmsVersionMinor"
+val dmsVersionMinor = 8
+val dmsVersionName = "$dmsVersionEpoch.$dmsVersionMajor.$dmsVersionMinor"
 
 android {
     namespace = "com.rfsat.dms"
@@ -29,7 +30,7 @@ android {
         applicationId = "com.DBM"
         minSdk = 26
         targetSdk = 35
-        versionCode = dmsVersionMajor * 1000 + dmsVersionMinor
+        versionCode = dmsVersionEpoch * 1_000_000 + dmsVersionMajor * 1000 + dmsVersionMinor
         versionName = dmsVersionName
     }
     buildFeatures { compose = true; buildConfig = true }
