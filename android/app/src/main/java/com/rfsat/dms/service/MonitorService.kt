@@ -125,6 +125,18 @@ class MonitorService : Service() {
     private lateinit var evidence: EvidenceStore
     private lateinit var alerter: Alerter
     lateinit var speed: SpeedMonitor; private set
+    lateinit var obd: com.rfsat.dms.obd.ObdManager; private set
+
+    /** Best available own-vehicle speed (km/h), OBD > GPS > visual > 0. Single
+     *  source of truth so every consumer gets the same priority. Returns null
+     *  only via [bestSpeedOrNull] when no source is fresh. */
+    private fun bestSpeedKmh(): Int = bestSpeedOrNull() ?: 0
+    private fun bestSpeedOrNull(): Int? = when {
+        obd.speedHealthy -> obd.speedKmh
+        speed.healthy -> speed.speedKmh.value
+        visualSpeedKmh != null -> visualSpeedKmh
+        else -> null
+    }
     val scorer = ComplianceScorer()
     val following = FollowingDistanceMonitor()
     val crossChecker = CrossChecker()
@@ -235,6 +247,12 @@ class MonitorService : Service() {
         speed = SpeedMonitor(this)
         speed.logTrace = getSharedPreferences("dbm", MODE_PRIVATE)
             .getBoolean("log_gps", false)
+        // OBD-II adapter (optional). When enabled and a remembered adapter is
+        // reachable, it provides wheel-sensor speed (more accurate/faster than
+        // GPS) and, where the vehicle supports them, RPM/throttle/load. It runs
+        // on its own coroutine and falls back silently to GPS/visual if absent.
+        obd = ObdManager(this)
+        obd.start()
         // Open the on-device speed-limit database (SQLite + R-tree) off the
         // main thread. Looks in the app files dir (where the downloader places
         // it) then /sdcard/Download (manual adb-push during dev). Until present,
@@ -263,6 +281,7 @@ class MonitorService : Service() {
                 delay(1000)
                 val t = System.currentTimeMillis()
                 val (v, src) = when {
+                    obd.speedHealthy -> obd.speedKmh!! to SpeedSource.OBD
                     speed.healthy -> speed.speedKmh.value to SpeedSource.GPS
                     visualSpeedKmh != null -> visualSpeedKmh!! to SpeedSource.VISUAL
                     else -> 0 to SpeedSource.NONE
@@ -311,7 +330,7 @@ class MonitorService : Service() {
                 }
 
                 scorer.onSpeed(v, src, t)?.let { raw ->
-                    crossChecker.gpsSpeed = if (speed.healthy) speed.speedKmh.value else null
+                    crossChecker.gpsSpeed = bestSpeedOrNull()
                     crossChecker.visualSpeed = visualSpeedKmh
                     crossChecker.adjudicate(raw, CrossChecker.Ctx())?.let { ev ->
                         alerter.alert(ev); scorer.onEvent(ev, t)
@@ -575,7 +594,7 @@ class MonitorService : Service() {
             roadworksInView = result.signs.any { s -> s.classId == 17 }  // warn_roadworks
             // Cross-detector consensus: corroborate or suppress using
             // independent signals before an event fires.
-            crossChecker.gpsSpeed = if (speed.healthy) speed.speedKmh.value else null
+            crossChecker.gpsSpeed = bestSpeedOrNull()
             crossChecker.visualSpeed = visualSpeedKmh
             crossChecker.yawRateDps = yawRate.yawRateDps
             // Illegal-turn detection: integrate yaw, fire if a prohibited turn
@@ -583,7 +602,7 @@ class MonitorService : Service() {
             // and the road context live there).
             val turnEvent = if (role != CameraRole.DRIVER)
                 turns.update(yawRate.yawRateDps,
-                    if (speed.healthy) speed.speedKmh.value else (visualSpeedKmh ?: 0), tMs)
+                    bestSpeedKmh(), tMs)
             else null
             val ctx = CrossChecker.Ctx(
                 leadAreaGrowthPerSec = lastLeadGrowth,
@@ -656,7 +675,7 @@ class MonitorService : Service() {
         latestRoadFrame = frame.copy(Bitmap.Config.ARGB_8888, false)
 
         // ---- feed context-gated throttling governor from cheap, always-on signals ----
-        governor.speedMs = (if (speed.healthy) speed.speedKmh.value else 0) / 3.6f
+        governor.speedMs = bestSpeedKmh() / 3.6f
         // Real thermal backoff: status listener + headroom forecast (logged).
         thermal?.pollHeadroom(tMs)
         governor.thermalMult = thermal?.multiplier ?: 1f
@@ -677,7 +696,7 @@ class MonitorService : Service() {
             frame, tMs,
             gpsSpeedKmh = if (speed.healthy) speed.speedKmh.value else null,
             gpsHealthy = speed.healthy)
-        val spd = if (speed.healthy) speed.speedKmh.value else (visualSpeedKmh ?: 0)
+        val spd = bestSpeedKmh()
 
         // Object detection (toggleable).
         val obj = if (detectRoadObjects) road?.analyze(frame, tMs) else null
@@ -772,7 +791,7 @@ class MonitorService : Service() {
             val cand = (obj?.detections ?: emptyList())
                 .filter { it.labelText == "stop sign" }
             val out = signs?.analyze(frame, cand,
-                speedMs = (if (speed.healthy) speed.speedKmh.value else 0) / 3.6f,
+                speedMs = bestSpeedKmh() / 3.6f,
                 approach = signApproach)
             // Record that signs have been scanned at this location, so if we are
             // stopped we won't re-scan the same static scene until we move.
@@ -836,6 +855,7 @@ class MonitorService : Service() {
     override fun onDestroy() {
         scope.cancel()
         speed.stop(); yawRate.stop(); thermal?.stop()
+        if (::obd.isInitialized) obd.stop()
         recDriver?.stop(); recRoad?.stop()
         driver?.close(); road?.close(); signs?.close(); lights.close(); alerter.release()
         osmMap?.close()

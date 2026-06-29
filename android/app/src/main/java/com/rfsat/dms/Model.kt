@@ -114,7 +114,7 @@ data class RiskEventCandidate(
     val detail: String = "",
 )
 
-enum class SpeedSource { GPS, VISUAL, NONE }
+enum class SpeedSource { OBD, GPS, VISUAL, NONE }
 
 /** Live driver-compliance scoring state, 0..100. */
 data class ComplianceState(

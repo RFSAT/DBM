@@ -1,5 +1,30 @@
 # DBM Changelog
 
+## v20.4 — OBD-II framework (Bluetooth ELM327), speed integration
+- Added a self-contained OBD module (com.rfsat.dms.obd) for Bluetooth ELM327
+  adapters, mirroring the SpeedMonitor sensor pattern (StateFlow outputs,
+  start/stop, freshness-gated health). Runs on its own coroutine; never touches
+  the frame loop.
+- Stage 1 (speed): polls vehicle speed (PID 0x0D) and feeds it into the speed
+  fusion as the new highest-priority source (SpeedSource.OBD > GPS > VISUAL),
+  via a single bestSpeedKmh()/bestSpeedOrNull() helper so every speed consumer
+  adapts consistently. More accurate and faster than GPS, and works where GPS
+  drops.
+- Stage 2 (discovery): walks the OBD-II support-bitmask chain (0x00->0x20->0x40)
+  to discover which PIDs the specific vehicle supports, then polls only those
+  (speed/RPM/throttle/load/coolant/intake as available).
+- Stage 3 (adaptivity): features can gate on the discovered ObdCapabilitySet;
+  speed fusion already adapts (OBD enters the chain only when fresh).
+- Connection model: one-time manual setup (scan+validate+remember MAC), then
+  automatic reconnect to that adapter each drive with bounded retries and silent
+  fallback to GPS/visual. Added Bluetooth permissions (CONNECT/SCAN + legacy).
+- Parser, support-bitmask bit ordering, and the discovery walk are unit-
+  validated. NOT yet included: the setup/status UI, and consumers for
+  RPM/throttle (behaviour scoring). On-device testing against a real adapter is
+  pending — ELM327 clones vary. See OBD-INTEGRATION-PLAN.md.
+- NOTE: this is framework + speed integration; it is not user-facing until the
+  OBD settings UI is added (a later version), at which point a MAJOR bump fits.
+
 ## v20.3 — bundle native debug symbols for Play Console crash reports
 - Added `ndk { debugSymbolLevel = "FULL" }` to the release build so the app
   bundle ships native debug symbols. Crashes/ANRs occurring inside the TFLite
