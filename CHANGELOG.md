@@ -1,5 +1,14 @@
 # DBM Changelog
 
+## v20.6 — OBD UI refinements
+- Removed the redundant "Vehicle supports:" line from the OBD tab — the Live Data
+  list already shows each parameter (with "-" for unsupported), so the capability
+  summary duplicated it.
+- The road-view overlay now shows the VEHICLE SPEED itself with a colour-coded
+  source qualifier ("47 km/h · OBD"), rather than just the source. Always visible
+  while monitoring; source labels: OBD (green), GPS (lime), Camera (amber),
+  no source (red). "VISUAL" relabelled "Camera" for driver clarity.
+
 ## v20.5 — OBD UI: tab, Settings section, speed-source badge
 - New OBD tab: enable toggle, one-time adapter setup (lists bonded Bluetooth
   devices, OBD-looking ones first; validates the chosen one via the ELM327

@@ -547,21 +547,26 @@ class MainActivity : ComponentActivity() {
                 // lower-left for a few seconds after they leave the frame, for
                 // the driver's information (e.g. turn restrictions at lights).
                 if (analysing) RecentSignsOverlay()
-                // Active speed-source badge, bottom-centre of the road view, so
-                // the driver can see at a glance whether speed is coming from the
-                // OBD adapter (most accurate), GPS, or the visual estimator.
+                // Speed readout with source qualifier, bottom-centre of the road
+                // view: always shows the current speed and where it's coming from
+                // (OBD adapter / GPS / camera visual estimate), colour-coded so
+                // the driver knows the provenance at a glance.
                 if (analysing) {
                     val (srcLabel, srcColor) = when (scState.speedSource) {
                         SpeedSource.OBD -> "OBD" to EnactGreen
                         SpeedSource.GPS -> "GPS" to EnactLime
-                        SpeedSource.VISUAL -> "VISUAL" to EnactWarning
-                        SpeedSource.NONE -> "NO SPEED" to Color(0xFFE57373)
+                        SpeedSource.VISUAL -> "Camera" to EnactWarning
+                        SpeedSource.NONE -> "no source" to Color(0xFFE57373)
                     }
-                    Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp)
+                    Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp)
                             .clip(RoundedCornerShape(8.dp))
                             .background(Color(0x99000000))
-                            .padding(horizontal = 10.dp, vertical = 4.dp)) {
-                        Text("SPEED: $srcLabel", color = srcColor, fontSize = 12.sp,
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text("${scState.currentSpeedKmh} km/h",
+                            color = EnactOnSurface, fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold)
+                        Text("  ·  $srcLabel", color = srcColor, fontSize = 12.sp,
                             fontWeight = FontWeight.Bold)
                     }
                 }
@@ -698,7 +703,6 @@ class MainActivity : ComponentActivity() {
             return
         }
         val state by obd.state.collectAsState()
-        val caps by obd.capabilities.collectAsState()
         val data by obd.data.collectAsState()
         var enabled by remember { mutableStateOf(obd.enabled) }
         var candidates by remember {
@@ -769,13 +773,6 @@ class MainActivity : ComponentActivity() {
         if (note.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
             Text(note, color = EnactOnSurfaceDim, fontSize = 12.sp)
-        }
-
-        // Discovered capabilities.
-        if (state == com.rfsat.dms.obd.ObdConnectionState.CONNECTED) {
-            Spacer(Modifier.height(10.dp))
-            Text("Vehicle supports: ${caps.summary()}",
-                color = EnactOnSurfaceDim, fontSize = 12.sp)
         }
 
         // Live readings (OBD tab only).
