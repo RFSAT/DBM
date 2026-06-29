@@ -16,7 +16,7 @@ plugins {
 //   in-app About screen (via BuildConfig.VERSION_NAME).
 // ---------------------------------------------------------------------------
 val dmsVersionMajor = 20
-val dmsVersionMinor = 2
+val dmsVersionMinor = 3
 val dmsVersionName = "$dmsVersionMajor.$dmsVersionMinor"
 
 android {
@@ -64,6 +64,11 @@ android {
             // and testing the shrunk APK thoroughly.
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // Include native debug symbols (FULL) in the bundle so crashes/ANRs
+            // inside the TFLite .so libraries show readable function names in the
+            // Play Console instead of raw addresses. FULL gives the most detail;
+            // use SYMBOL_TABLE if bundle size becomes a concern.
+            ndk { debugSymbolLevel = "FULL" }
             // Apply the release signing config only when the keystore is present
             // (CI with secrets). Otherwise the build stays unsigned rather than
             // failing — useful for local/debug CI without secrets.

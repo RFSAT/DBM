@@ -1,5 +1,14 @@
 # DBM Changelog
 
+## v20.3 — bundle native debug symbols for Play Console crash reports
+- Added `ndk { debugSymbolLevel = "FULL" }` to the release build so the app
+  bundle ships native debug symbols. Crashes/ANRs occurring inside the TFLite
+  native (.so) libraries will now show readable function names in the Play
+  Console instead of raw memory addresses. Resolves the Play "no debug symbols
+  for native code" warning. (The companion "no deobfuscation file" warning does
+  not apply while isMinifyEnabled = false — no obfuscation, so no mapping file
+  is needed; stack traces are already readable.)
+
 ## v20.2 — Exit on About tab; automatic camera-stream recovery
 - Added an Exit button to the About tab (same full-shutdown action as the
   Detector tab's Exit). Exit logic extracted to a shared exitApp() so both stay
