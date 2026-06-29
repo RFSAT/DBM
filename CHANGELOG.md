@@ -1,5 +1,18 @@
 # DBM Changelog
 
+## v20.1 — skip redundant sign scanning while stopped (thermal saving)
+- When the vehicle is stationary (<=2 km/h) and the road-sign pipeline has
+  ALREADY run at that spot during the current stop, sign processing is now
+  skipped until the vehicle moves away (>8 m) or speeds up. Signs are static, so
+  re-scanning an unchanging stopped scene only generated heat — this directly
+  reduces load during the long, hot idle periods (e.g. at red lights) that drove
+  the thermal throttling.
+- Traffic-light recognition AND lead-vehicle brake-light/hard-braking detection
+  are explicitly NOT gated by this — they can change while stationary, so they
+  continue to run every frame. The skip applies to signs only.
+- Location uses the existing GPS fusion position; an 8 m radius absorbs GPS
+  jitter while parked without missing a real move-off. State resets on movement.
+
 ## v20.0 — retrained traffic-light model (DTLD, EU lights)
 - Replaced app/src/main/assets/traffic_light.tflite with a model retrained on the
   DriveU Traffic Light Dataset (DTLD v2.0, German/EU lights). Same architecture

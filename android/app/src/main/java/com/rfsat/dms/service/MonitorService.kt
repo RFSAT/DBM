@@ -56,6 +56,11 @@ class MonitorService : Service() {
 
     companion object {
         private const val TAG = "MonitorService"
+        // Stationary sign-scan skip: at/below this speed (km/h) the vehicle is
+        // treated as stopped; within this radius (m) of where signs were last
+        // scanned at a stop, sign processing is skipped until movement resumes.
+        private const val STATIONARY_KMH = 2
+        private const val STOP_RADIUS_M = 8.0
         // How long a non-speed-limit sign stays on screen after the camera last
         // saw it, before being dropped.
         private const val SIGN_HOLD_MS = 3000L
@@ -92,6 +97,18 @@ class MonitorService : Service() {
     private var lastGovernorLogMs = 0L
     @Volatile private var roadworksInView = false
     private var lastFusePos: Pair<Double, Double>? = null
+
+    // --- Stationary sign-scan skip ------------------------------------------
+    // When the vehicle is stopped (e.g. at a junction) and signs have ALREADY
+    // been scanned at this spot during the current stop, re-running the sign
+    // pipeline every frame just produces heat for an unchanging scene. We record
+    // the location of the stop once a sign scan has run there, and skip further
+    // SIGN processing until the vehicle moves away from that spot or speeds up.
+    // Traffic lights and lead-vehicle brake lights are NEVER gated this way —
+    // they can change while stationary, so they keep running every frame.
+    @Volatile private var signScanStopLat = 0.0
+    @Volatile private var signScanStopLon = 0.0
+    @Volatile private var signScanDoneAtStop = false
     // The speed limit currently shown to the driver. Latched: it persists until a
     // DIFFERENT valid limit (camera or map, camera taking priority via the fuser)
     // replaces it, so the display never blanks on a momentary unknown.
@@ -583,6 +600,56 @@ class MonitorService : Service() {
         }
     }
 
+    /**
+     * True when SIGN processing should be skipped because the vehicle is
+     * stationary and signs were already scanned at this exact stop. Signs are
+     * static, so re-scanning a stopped scene only generates heat. Returns false
+     * (i.e. keep scanning) the first time we stop somewhere, so at least one scan
+     * happens; thereafter returns true until the vehicle moves away or speeds up.
+     *
+     * NOTE: this gates ONLY signs. Traffic lights and lead brake lights are never
+     * skipped — they change while stopped.
+     */
+    private fun shouldSkipStationarySigns(spd: Int, tMs: Long): Boolean {
+        // Only consider skipping when essentially stopped.
+        if (spd > STATIONARY_KMH) {
+            // Moving — clear any stop marker so the next stop re-scans.
+            signScanDoneAtStop = false
+            return false
+        }
+        val pos = lastFusePos ?: return false   // no position -> don't skip (scan)
+        val (lat, lon) = pos
+        if (signScanDoneAtStop) {
+            // Already scanned at a stop. Skip only while still at that same spot.
+            val movedM = haversineM(signScanStopLat, signScanStopLon, lat, lon)
+            if (movedM <= STOP_RADIUS_M) {
+                return true                       // same spot, already scanned -> skip
+            }
+            // Drifted away (or GPS wandered past the radius) -> allow scanning again.
+            signScanDoneAtStop = false
+            return false
+        }
+        return false   // stopped but not yet scanned here -> let the scan run
+    }
+
+    /** Record that a sign scan has now run at the current stop location. */
+    private fun markSignScanAtStop() {
+        val pos = lastFusePos ?: return
+        signScanStopLat = pos.first
+        signScanStopLon = pos.second
+        signScanDoneAtStop = true
+    }
+
+    private fun haversineM(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val r = 6371000.0
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLon = Math.toRadians(lon2 - lon1)
+        val a = kotlin.math.sin(dLat / 2) * kotlin.math.sin(dLat / 2) +
+            kotlin.math.cos(Math.toRadians(lat1)) * kotlin.math.cos(Math.toRadians(lat2)) *
+            kotlin.math.sin(dLon / 2) * kotlin.math.sin(dLon / 2)
+        return r * 2 * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1 - a))
+    }
+
     private suspend fun analyzeRoad(frame: Bitmap, tMs: Long): AnalysisResult {
         // Retain a copy of the newest road frame for speed-violation evidence.
         latestRoadFrame?.recycle()
@@ -698,7 +765,8 @@ class MonitorService : Service() {
         // window (42 of 51 sign sightings were "too small" by the time a frame
         // was sampled). Every-2nd is a modest cost rise for materially more
         // chances to catch the readable moment.
-        if (detectSigns && governor.shouldRun(ProcessingGovernor.Role.SIGN)) {
+        if (detectSigns && governor.shouldRun(ProcessingGovernor.Role.SIGN) &&
+            !shouldSkipStationarySigns(spd, tMs)) {
             // Upstream sign hints (YOLO "stop sign"); SignAnalyzer adds its own
             // colour/shape region proposals so all sign types are covered.
             val cand = (obj?.detections ?: emptyList())
@@ -706,6 +774,9 @@ class MonitorService : Service() {
             val out = signs?.analyze(frame, cand,
                 speedMs = (if (speed.healthy) speed.speedKmh.value else 0) / 3.6f,
                 approach = signApproach)
+            // Record that signs have been scanned at this location, so if we are
+            // stopped we won't re-scan the same static scene until we move.
+            markSignScanAtStop()
             if (out != null) {
                 signDets = out.detections; limit = out.speedLimitSeen
                 recognisedSigns = out.signs
