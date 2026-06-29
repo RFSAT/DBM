@@ -202,7 +202,7 @@ class MainActivity : ComponentActivity() {
 
     // ------------------------------------------------------------------ UI
 
-    private val tabs = listOf("About", "Detector", "Summary", "History", "Log", "Settings")
+    private val tabs = listOf("About", "Detector", "Summary", "History", "OBD", "Log", "Settings")
 
     @Composable
     private fun Root() {
@@ -235,8 +235,9 @@ class MainActivity : ComponentActivity() {
                         onResetCounters = { service?.resetCounters() })
                 3 -> HistoryScreen(dao = DmsDatabase.get(this@MainActivity).events(),
                         onBack = { tab = 1 })
-                4 -> LogScreen()
-                5 -> SettingsScreen()
+                4 -> ObdScreen()
+                5 -> LogScreen()
+                6 -> SettingsScreen()
             }
         }
     }
@@ -546,6 +547,24 @@ class MainActivity : ComponentActivity() {
                 // lower-left for a few seconds after they leave the frame, for
                 // the driver's information (e.g. turn restrictions at lights).
                 if (analysing) RecentSignsOverlay()
+                // Active speed-source badge, bottom-centre of the road view, so
+                // the driver can see at a glance whether speed is coming from the
+                // OBD adapter (most accurate), GPS, or the visual estimator.
+                if (analysing) {
+                    val (srcLabel, srcColor) = when (scState.speedSource) {
+                        SpeedSource.OBD -> "OBD" to EnactGreen
+                        SpeedSource.GPS -> "GPS" to EnactLime
+                        SpeedSource.VISUAL -> "VISUAL" to EnactWarning
+                        SpeedSource.NONE -> "NO SPEED" to Color(0xFFE57373)
+                    }
+                    Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0x99000000))
+                            .padding(horizontal = 10.dp, vertical = 4.dp)) {
+                        Text("SPEED: $srcLabel", color = srcColor, fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold)
+                    }
+                }
             }
             Text(role.label, color = EnactOnSurface, fontSize = 11.sp,
                 modifier = Modifier.padding(8.dp)
@@ -644,6 +663,167 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    // ---- OBD tab ----
+
+    @Composable
+    private fun ObdScreen() {
+        Column(Modifier.fillMaxSize().padding(14.dp)
+                .verticalScroll(rememberScrollState())) {
+            Text("OBD-II Adapter", color = EnactGreen, fontSize = 18.sp,
+                fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(4.dp))
+            Text("Connect a Bluetooth OBD-II adapter to read accurate vehicle " +
+                "speed (and, where supported, engine data) directly from the car.",
+                color = EnactOnSurfaceDim, fontSize = 12.sp)
+            Spacer(Modifier.height(12.dp))
+            ObdSection(showLiveData = true)
+        }
+    }
+
+    /**
+     * Shared OBD UI used by both the OBD tab (with live data) and the Settings
+     * section (controls only). Handles enable toggle, one-time adapter setup
+     * (list bonded devices -> validate via handshake -> remember), forget, a live
+     * connection-status line, the discovered-capabilities summary, and (on the
+     * tab) live readings.
+     */
+    @Composable
+    private fun ObdSection(showLiveData: Boolean) {
+        val obd = service?.obd
+        val scope = rememberCoroutineScope()
+        if (obd == null) {
+            Text("Start monitoring to configure OBD.",
+                color = EnactOnSurfaceDim, fontSize = 13.sp)
+            return
+        }
+        val state by obd.state.collectAsState()
+        val caps by obd.capabilities.collectAsState()
+        val data by obd.data.collectAsState()
+        var enabled by remember { mutableStateOf(obd.enabled) }
+        var candidates by remember {
+            mutableStateOf<List<com.rfsat.dms.obd.ObdManager.Candidate>>(emptyList()) }
+        var picking by remember { mutableStateOf(false) }
+        var note by remember { mutableStateOf("") }
+        var busy by remember { mutableStateOf(false) }
+
+        SettingRow("Use OBD-II adapter", enabled) {
+            enabled = it; obd.setEnabled(it)
+            note = if (it) "OBD enabled." else "OBD disabled."
+        }
+
+        // Remembered adapter + status.
+        val remembered = obd.rememberedName
+        Spacer(Modifier.height(6.dp))
+        Text("Adapter: ${remembered ?: "none set up"}",
+            color = EnactOnSurface, fontSize = 13.sp)
+        Text("Status: ${obdStatusText(state)}",
+            color = obdStatusColor(state), fontSize = 13.sp,
+            fontWeight = FontWeight.Bold)
+
+        if (enabled) {
+            Spacer(Modifier.height(10.dp))
+            Row {
+                androidx.compose.material3.OutlinedButton(
+                    onClick = {
+                        candidates = obd.bondedCandidates(); picking = true
+                        note = if (candidates.isEmpty())
+                            "No paired Bluetooth devices. Pair your OBD adapter in " +
+                            "Android Bluetooth settings first." else ""
+                    },
+                    enabled = !busy) { Text("Set up adapter", fontSize = 13.sp) }
+                if (remembered != null) {
+                    Spacer(Modifier.width(8.dp))
+                    androidx.compose.material3.OutlinedButton(
+                        onClick = { obd.forgetAdapter(); note = "Adapter forgotten." },
+                        enabled = !busy) {
+                        Text("Forget", fontSize = 13.sp, color = Color(0xFFE57373))
+                    }
+                }
+            }
+
+            // Device picker (bonded devices, OBD-looking ones first).
+            if (picking && candidates.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Text("Pick your adapter:", color = EnactOnSurfaceDim, fontSize = 12.sp)
+                candidates.forEach { c ->
+                    androidx.compose.material3.OutlinedButton(
+                        onClick = {
+                            picking = false; busy = true
+                            note = "Validating ${c.name}…"
+                            scope.launch {
+                                val ok = obd.setUpAdapter(c)
+                                busy = false
+                                note = if (ok) "Connected to ${c.name}."
+                                       else "${c.name} did not respond as an OBD " +
+                                            "adapter. Pick another or check it's plugged in."
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                        Text("${c.name}  (${c.mac})", fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+
+        if (note.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            Text(note, color = EnactOnSurfaceDim, fontSize = 12.sp)
+        }
+
+        // Discovered capabilities.
+        if (state == com.rfsat.dms.obd.ObdConnectionState.CONNECTED) {
+            Spacer(Modifier.height(10.dp))
+            Text("Vehicle supports: ${caps.summary()}",
+                color = EnactOnSurfaceDim, fontSize = 12.sp)
+        }
+
+        // Live readings (OBD tab only).
+        if (showLiveData && state == com.rfsat.dms.obd.ObdConnectionState.CONNECTED) {
+            Spacer(Modifier.height(12.dp))
+            Text("Live data", color = EnactGreen, fontSize = 15.sp,
+                fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(6.dp))
+            ObdReadingRow("Speed", data.speedKmh, "km/h")
+            ObdReadingRow("Engine RPM", data.rpm, "rpm")
+            ObdReadingRow("Throttle", data.throttlePct, "%")
+            ObdReadingRow("Engine load", data.enginePct, "%")
+            ObdReadingRow("Coolant", data.coolantC, "\u00B0C")
+            ObdReadingRow("Intake air", data.intakeC, "\u00B0C")
+        }
+    }
+
+    @Composable
+    private fun ObdReadingRow(label: String, value: Int?, unit: String) {
+        Row(Modifier.fillMaxWidth().padding(vertical = 2.dp),
+            horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(label, color = EnactOnSurface, fontSize = 13.sp)
+            Text(if (value != null) "$value $unit" else "—",
+                color = if (value != null) EnactOnSurface else EnactOnSurfaceDim,
+                fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+
+    private fun obdStatusText(s: com.rfsat.dms.obd.ObdConnectionState): String =
+        when (s) {
+            com.rfsat.dms.obd.ObdConnectionState.DISABLED -> "disabled"
+            com.rfsat.dms.obd.ObdConnectionState.NOT_CONFIGURED -> "not set up"
+            com.rfsat.dms.obd.ObdConnectionState.CONNECTING -> "connecting…"
+            com.rfsat.dms.obd.ObdConnectionState.HANDSHAKING -> "handshaking…"
+            com.rfsat.dms.obd.ObdConnectionState.CONNECTED -> "connected"
+            com.rfsat.dms.obd.ObdConnectionState.NOT_FOUND -> "adapter not found (using GPS)"
+            com.rfsat.dms.obd.ObdConnectionState.ERROR -> "error (using GPS)"
+        }
+
+    private fun obdStatusColor(s: com.rfsat.dms.obd.ObdConnectionState): Color =
+        when (s) {
+            com.rfsat.dms.obd.ObdConnectionState.CONNECTED -> EnactGreen
+            com.rfsat.dms.obd.ObdConnectionState.CONNECTING,
+            com.rfsat.dms.obd.ObdConnectionState.HANDSHAKING -> Color(0xFFFFB74D)
+            com.rfsat.dms.obd.ObdConnectionState.NOT_FOUND,
+            com.rfsat.dms.obd.ObdConnectionState.ERROR -> Color(0xFFE57373)
+            else -> EnactOnSurfaceDim
+        }
 
     // ---- Log tab ----
 
@@ -796,6 +976,11 @@ class MainActivity : ComponentActivity() {
             MapManagerSection()
             LaneCalibrationSliders()
             DriverViewZoomSlider()
+            Spacer(Modifier.height(14.dp))
+            Text("OBD-II adapter", color = EnactGreen, fontSize = 15.sp,
+                fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(6.dp))
+            ObdSection(showLiveData = false)
             Spacer(Modifier.height(14.dp))
             Text("Video recording", color = EnactGreen, fontSize = 15.sp,
                 fontWeight = FontWeight.Bold)

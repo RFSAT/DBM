@@ -86,6 +86,64 @@ class ObdManager(
         _data.value = ObdData()
     }
 
+    /** A discoverable adapter candidate for the setup UI. */
+    data class Candidate(val name: String, val mac: String)
+
+    /**
+     * List already-bonded Bluetooth devices (the usual place a paired OBD adapter
+     * appears). We prefer bonded devices over a fresh scan because OBD adapters
+     * are typically paired once in Android settings, and listing bonded devices
+     * needs only BLUETOOTH_CONNECT — no scan permission or location. Names that
+     * look OBD-ish are sorted first to help the user.
+     */
+    @android.annotation.SuppressLint("MissingPermission")
+    fun bondedCandidates(): List<Candidate> {
+        val adapter = BluetoothAdapter.getDefaultAdapter() ?: return emptyList()
+        val hints = listOf("OBD", "ELM", "VIECAR", "VLINK", "V-LINK", "VGATE", "ICAR", "KONNWEI")
+        return runCatching {
+            adapter.bondedDevices.orEmpty().map { Candidate(it.name ?: it.address, it.address) }
+                .sortedByDescending { c -> hints.any { c.name.uppercase().contains(it) } }
+        }.getOrDefault(emptyList())
+    }
+
+    /**
+     * Validate a chosen adapter by connecting and running the ELM327 handshake.
+     * On success, REMEMBER its MAC/name and (re)start the live connection.
+     * Returns true if it really behaved like an ELM327. For the setup UI.
+     */
+    suspend fun setUpAdapter(candidate: Candidate): Boolean {
+        val adapter = BluetoothAdapter.getDefaultAdapter() ?: return false
+        if (!adapter.isEnabled) return false
+        stop()
+        _state.value = ObdConnectionState.CONNECTING
+        if (!transport.connect(adapter, candidate.mac)) {
+            _state.value = ObdConnectionState.NOT_FOUND
+            return false
+        }
+        _state.value = ObdConnectionState.HANDSHAKING
+        val ok = transport.initElm()
+        transport.close()
+        if (ok) {
+            prefs.adapterMac = candidate.mac
+            prefs.adapterName = candidate.name
+            prefs.enabled = true
+            enabled = true
+            start()   // begin the live connect→discover→poll lifecycle
+        } else {
+            _state.value = ObdConnectionState.ERROR
+        }
+        return ok
+    }
+
+    /** Forget the remembered adapter and stop. */
+    fun forgetAdapter() {
+        stop()
+        prefs.forget()
+        _state.value = ObdConnectionState.NOT_CONFIGURED
+    }
+
+    val rememberedName: String? get() = prefs.adapterName
+
     private suspend fun connectAndRun(mac: String) {
         val adapter = BluetoothAdapter.getDefaultAdapter()
         if (adapter == null || !adapter.isEnabled) {

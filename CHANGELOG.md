@@ -1,5 +1,23 @@
 # DBM Changelog
 
+## v20.5 — OBD UI: tab, Settings section, speed-source badge
+- New OBD tab: enable toggle, one-time adapter setup (lists bonded Bluetooth
+  devices, OBD-looking ones first; validates the chosen one via the ELM327
+  handshake before remembering its MAC), Forget, a live connection-status line,
+  the discovered-capabilities summary, and live readings (supported PIDs only;
+  unsupported show "-").
+- Same controls added as an "OBD-II adapter" section in Settings (without the
+  live-data block), via a shared ObdSection composable.
+- Active speed-source badge overlaid at the bottom-centre of the road (front)
+  view on the Detector screen: OBD (green) / GPS (lime) / VISUAL (amber) /
+  NO SPEED (red), so the driver sees at a glance which source is in use. Placed
+  clear of the lower-right speed-limit roundel.
+- ObdManager gained setup APIs: bondedCandidates(), setUpAdapter() (validate +
+  remember + start), forgetAdapter(). Tab order is now About, Detector, Summary,
+  History, OBD, Log, Settings.
+- This makes OBD user-facing for the first time. On-device testing against a
+  real ELM327 adapter is the next step (clones vary).
+
 ## v20.4 — OBD-II framework (Bluetooth ELM327), speed integration
 - Added a self-contained OBD module (com.rfsat.dms.obd) for Bluetooth ELM327
   adapters, mirroring the SpeedMonitor sensor pattern (StateFlow outputs,
