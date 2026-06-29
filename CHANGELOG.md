@@ -1,5 +1,13 @@
 # DBM Changelog
 
+## v20.7 — build fix (OBD compile errors)
+- Fixed two compile errors from the OBD UI work:
+  * MainActivity: added the missing `androidx.compose.foundation.layout.width`
+    import (used by the Set-up/Forget button row).
+  * MonitorService: construct ObdManager via its fully-qualified name to match
+    the field type (the short name was unresolved without an import).
+- No behavioural change; v20.6 functionality intact.
+
 ## v20.6 — OBD UI refinements
 - Removed the redundant "Vehicle supports:" line from the OBD tab — the Live Data
   list already shows each parameter (with "-" for unsupported), so the capability

@@ -251,7 +251,7 @@ class MonitorService : Service() {
         // reachable, it provides wheel-sensor speed (more accurate/faster than
         // GPS) and, where the vehicle supports them, RPM/throttle/load. It runs
         // on its own coroutine and falls back silently to GPS/visual if absent.
-        obd = ObdManager(this)
+        obd = com.rfsat.dms.obd.ObdManager(this)
         obd.start()
         // Open the on-device speed-limit database (SQLite + R-tree) off the
         // main thread. Looks in the app files dir (where the downloader places
