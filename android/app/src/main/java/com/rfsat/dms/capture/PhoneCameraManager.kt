@@ -43,7 +43,11 @@ class PhoneCameraManager(
 ) {
     enum class Mode { CONCURRENT, MULTIPLEXED }
 
-    companion object { private const val TAG = "PhoneCameras" }
+    companion object {
+        private const val TAG = "PhoneCameras"
+        const val STREAM_RETRY_MAX = 4              // stream-recovery attempts before giving up
+        const val STREAM_RETRY_DELAY_MS = 1600L     // > the 1200ms post-rebind nudge
+    }
 
     private val analysisExecutor = Executors.newFixedThreadPool(2)
     /** When false (vehicle ~stationary), road analysis runs at a reduced rate
@@ -138,6 +142,11 @@ class PhoneCameraManager(
     }
 
     private val handler = Handler(Looper.getMainLooper())
+
+    // Bounded stream-liveness recovery (simulated tab switch). See
+    // nudgeNonStreamingSurfaces() / runStreamRetry().
+    private var streamRetryActive = false
+    private var streamRetryCount = 0
     private var provider: ProcessCameraProvider? = null
     private var mode = Mode.MULTIPLEXED
     private var muxShowingInterior = true
@@ -363,6 +372,59 @@ class PhoneCameraManager(
         }
         nudge(CameraRole.DRIVER, interiorPreview)
         nudge(CameraRole.FRONT, roadPreview)
+        // Begin a bounded liveness watch ONLY if one isn't already running. The
+        // retry loop below also triggers rebind()->nudge; we must not let that
+        // reset the counter, or it could retry forever. The watch self-clears
+        // when both views stream or the retry budget is exhausted.
+        if (!streamRetryActive) {
+            streamRetryActive = true
+            streamRetryCount = 0
+            handler.removeCallbacks(streamRetryRunnable)
+            handler.postDelayed(streamRetryRunnable, STREAM_RETRY_DELAY_MS)
+        }
+    }
+
+    /** True if either preview is attached but not actually streaming frames. */
+    private fun anyViewNotStreaming(): Boolean {
+        fun live(v: PreviewView) =
+            v.previewStreamState.value == PreviewView.StreamState.STREAMING
+        return !live(interiorPreview) || !live(roadPreview)
+    }
+
+    /**
+     * Bounded recovery loop for a preview that fails to start streaming. Each
+     * attempt does a full rebind() — the SAME path a tab switch triggers, which
+     * the user found reliably brings a blank stream to life — then re-checks
+     * after a delay. Stops as soon as both views stream, or after
+     * STREAM_RETRY_MAX attempts (so it can never loop forever or thrash a working
+     * stream: rebind() itself only re-issues, and the guarded nudge never touches
+     * an already-STREAMING view).
+     */
+    private val streamRetryRunnable = Runnable { runStreamRetry() }
+    private fun runStreamRetry() {
+        if (released) { streamRetryActive = false; return }
+        if (!anyViewNotStreaming()) {
+            if (streamRetryCount > 0)
+                DLog.i(TAG, "stream recovery: both views streaming after " +
+                    "$streamRetryCount retr${if (streamRetryCount == 1) "y" else "ies"}")
+            streamRetryActive = false
+            return   // success — nothing more to do
+        }
+        if (streamRetryCount >= STREAM_RETRY_MAX) {
+            DLog.w(TAG, "stream recovery: gave up after $STREAM_RETRY_MAX retries; " +
+                "driver streaming=${interiorPreview.previewStreamState.value}, " +
+                "road streaming=${roadPreview.previewStreamState.value}")
+            streamRetryActive = false
+            return
+        }
+        streamRetryCount++
+        DLog.i(TAG, "stream recovery attempt $streamRetryCount/$STREAM_RETRY_MAX: " +
+            "simulating tab switch (rebind) for non-streaming view(s)")
+        // Full rebind = the tab-switch-equivalent reset. The post-rebind guarded
+        // nudge re-issues only the still-dark surface; already-live views are safe.
+        handler.post(rebindRunnable)
+        // Re-check after the rebind has had time to bring frames up.
+        handler.postDelayed(streamRetryRunnable, STREAM_RETRY_DELAY_MS)
     }
 
     private fun singleConfig(

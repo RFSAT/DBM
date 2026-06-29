@@ -584,21 +584,24 @@ class MainActivity : ComponentActivity() {
             }
             // Exit the application.
             androidx.compose.material3.OutlinedButton(
-                onClick = {
-                    // Fully exit: stop analysis, unbind and stop the foreground
-                    // service (otherwise it keeps the app alive), then remove the
-                    // task. Without stopping the service, Exit only closes the UI.
-                    service?.pauseAnalysis()
-                    cameras?.release()
-                    runCatching { unbindService(conn) }
-                    stopService(Intent(this@MainActivity, MonitorService::class.java))
-                    finishAndRemoveTask()
-                },
+                onClick = { exitApp() },
                 modifier = Modifier.weight(1f).height(btnHeight),
                 contentPadding = tightPad) {
                 Text("Exit", fontSize = 13.sp, color = Color(0xFFE57373))
             }
         }
+    }
+
+    /** Fully exit: stop analysis, release cameras, unbind and stop the foreground
+     *  service (otherwise it keeps the app alive), then remove the task. Without
+     *  stopping the service, Exit only closes the UI. Shared by the Detector and
+     *  About screens. */
+    private fun exitApp() {
+        service?.pauseAnalysis()
+        cameras?.release()
+        runCatching { unbindService(conn) }
+        stopService(Intent(this@MainActivity, MonitorService::class.java))
+        finishAndRemoveTask()
     }
 
     @Composable
@@ -1327,6 +1330,12 @@ class MainActivity : ComponentActivity() {
             Spacer(Modifier.height(8.dp))
             Text("Copyright (c) RFSAT Limited, 2026",
                 color = EnactOnSurfaceDim, fontSize = 12.sp)
+            Spacer(Modifier.height(16.dp))
+            androidx.compose.material3.OutlinedButton(
+                onClick = { exitApp() },
+                modifier = Modifier.fillMaxWidth()) {
+                Text("Exit", fontSize = 14.sp, color = Color(0xFFE57373))
+            }
         }
     }
 

@@ -1,5 +1,20 @@
 # DBM Changelog
 
+## v20.2 — Exit on About tab; automatic camera-stream recovery
+- Added an Exit button to the About tab (same full-shutdown action as the
+  Detector tab's Exit). Exit logic extracted to a shared exitApp() so both stay
+  in sync.
+- Camera streams that fail to start are now recovered automatically instead of
+  needing a manual tab switch. The app already knows when a preview is not live
+  (PreviewView.previewStreamState); now, if a view is still not STREAMING shortly
+  after binding, it escalates to a bounded retry loop that performs a full
+  rebind() each attempt — the SAME reset a tab switch triggers, which is what
+  reliably fixed it manually ("simulated tab switch"). Up to STREAM_RETRY_MAX (4)
+  attempts, then it stops. Already-streaming views are never touched, so a
+  working stream can't be disturbed; the loop is guarded against re-entry so it
+  can't run forever. New logs: "stream recovery attempt N/4", "...both views
+  streaming after N retries", or "...gave up after 4 retries".
+
 ## v20.1 — skip redundant sign scanning while stopped (thermal saving)
 - When the vehicle is stationary (<=2 km/h) and the road-sign pipeline has
   ALREADY run at that spot during the current stop, sign processing is now
