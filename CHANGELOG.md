@@ -1,5 +1,18 @@
 # DBM Changelog
 
+## v1.20.9 — screen-dim mode (thermal/power saving)
+- The display now dims to near-black (~2% brightness) after a configurable idle
+  period while monitoring on the Detector tab, removing the screen as a heat/
+  power source on long drives. Cameras, detection and the foreground service are
+  unaffected; audio/voice alerts continue. A faint "tap to wake" hint shows it's
+  still monitoring; ANY touch restores full brightness and restarts the timer
+  (via onUserInteraction, so taps anywhere wake it).
+- New Settings control under "Display & power": dim delay Off / 10 / 20 / 30 /
+  45 / 60 / 90 / 120 s (default 30 s). Auto-dim only engages on the Detector tab
+  while actively monitoring; never in menus.
+- First step of the thermal-reduction plan; an Android Auto data-relay surface
+  (status template, no video) is planned next to move alerts to the head unit.
+
 ## v1.20.8 — version display scheme (epoch prefix)
 - Display version now uses a leading epoch: 1.MAJOR.MINOR (this build = 1.20.8).
   Keeps version numbers readable instead of climbing toward 21, 22, ... The Play

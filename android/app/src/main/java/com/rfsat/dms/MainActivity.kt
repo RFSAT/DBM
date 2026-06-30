@@ -182,6 +182,53 @@ class MainActivity : ComponentActivity() {
         setContent { DbmTheme { Surface(Modifier.fillMaxSize()) { Root() } } }
     }
 
+    // ---- Screen-dim (thermal/power saving) ---------------------------------
+    // After a configurable idle period on the Detector screen, the display is
+    // dimmed to near-black while the cameras and detection keep running (the
+    // service is unaffected). A tap restores full brightness and restarts the
+    // timer. This removes the display — a significant heat source — during long
+    // drives without stopping monitoring. Audio/TTS alerts still reach the
+    // driver while dimmed.
+    private val dimHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val dimmedState = androidx.compose.runtime.mutableStateOf(false)
+    private var dimmed: Boolean
+        get() = dimmedState.value
+        set(v) { dimmedState.value = v }
+    private val dimRunnable = Runnable { applyDim(true) }
+
+    /** Dim delay in seconds; 0 = never dim. Read from prefs. */
+    private fun dimDelaySec(): Int =
+        getSharedPreferences("dbm", MODE_PRIVATE).getInt("screen_dim_sec", 30)
+
+    /** Near-black but not fully off, so the screen stays on (camera/preview
+     *  surfaces and the foreground service are unaffected). */
+    private val dimLevel = 0.02f
+
+    private fun applyDim(on: Boolean) {
+        dimmed = on
+        val lp = window.attributes
+        lp.screenBrightness = if (on) dimLevel else
+            android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+        window.attributes = lp
+    }
+
+    /** Restart the idle timer (called on any interaction). Wakes if dimmed. */
+    fun resetDimTimer() {
+        dimHandler.removeCallbacks(dimRunnable)
+        if (dimmed) applyDim(false)
+        val sec = dimDelaySec()
+        if (sec > 0 && dimAllowed) dimHandler.postDelayed(dimRunnable, sec * 1000L)
+    }
+
+    /** Only auto-dim while actively monitoring on the Detector tab. */
+    @Volatile var dimAllowed = false
+        set(value) { field = value; resetDimTimer() }
+
+    override fun onUserInteraction() {
+        super.onUserInteraction()
+        resetDimTimer()
+    }
+
     /** Start and bind the monitoring service. Called only after the CAMERA
      *  permission is granted, so the camera-typed FGS start is legal. */
     private fun startMonitorService() {
@@ -208,6 +255,7 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun Root() {
         var tab by remember { mutableIntStateOf(0) }
+        Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().background(EnactDark).safeDrawingPadding()) {
             ScrollableTabRow(
                 selectedTabIndex = tab,
@@ -240,6 +288,28 @@ class MainActivity : ComponentActivity() {
                 5 -> LogScreen()
                 6 -> SettingsScreen()
             }
+            // Auto-dim only while on the Detector tab and actively monitoring.
+            val monitoring by (service?.analysing
+                ?: MutableStateFlow(false)).collectAsState()
+            LaunchedEffect(tab, monitoring) {
+                dimAllowed = (tab == 1 && monitoring)
+            }
+        }
+        // Faint indicator while the screen is dimmed for thermal saving, so the
+        // driver can see DBM is still monitoring (not off) and knows a tap wakes
+        // it. Drawn over everything; very low alpha to add minimal light/heat.
+        if (dimmed) {
+            Box(Modifier.fillMaxSize()
+                    .clickable(
+                        interactionSource = remember {
+                            androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        indication = null) { resetDimTimer() },
+                contentAlignment = Alignment.BottomCenter) {
+                Text("DBM monitoring — tap to wake",
+                    color = Color(0x33FFFFFF), fontSize = 12.sp,
+                    modifier = Modifier.padding(bottom = 40.dp))
+            }
+        }
         }
     }
 
@@ -975,6 +1045,11 @@ class MainActivity : ComponentActivity() {
             LaneCalibrationSliders()
             DriverViewZoomSlider()
             Spacer(Modifier.height(14.dp))
+            Text("Display & power", color = EnactGreen, fontSize = 15.sp,
+                fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(6.dp))
+            ScreenDimSlider()
+            Spacer(Modifier.height(14.dp))
             Text("OBD-II adapter", color = EnactGreen, fontSize = 15.sp,
                 fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
@@ -1355,6 +1430,36 @@ class MainActivity : ComponentActivity() {
                 valueRange = 0f..1f, steps = 19)
         }
         Spacer(Modifier.height(8.dp))
+    }
+
+    @Composable
+    private fun ScreenDimSlider() {
+        val prefs = remember { getSharedPreferences("dbm", MODE_PRIVATE) }
+        // Discrete options in seconds; 0 = never dim.
+        val options = listOf(0, 10, 20, 30, 45, 60, 90, 120)
+        var idx by remember {
+            val cur = prefs.getInt("screen_dim_sec", 30)
+            mutableStateOf(options.indexOf(cur).let { if (it < 0) 3 else it }.toFloat())
+        }
+        val sec = options[idx.toInt().coerceIn(0, options.size - 1)]
+        Column(Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp)).background(EnactSurface)
+                .padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Text(if (sec == 0) "Dim screen while monitoring: Off"
+                 else "Dim screen after: $sec s of no touch",
+                color = EnactOnSurface, fontSize = 13.sp)
+            Text("Dims the display to near-black during monitoring to reduce heat " +
+                "and battery use. Cameras and detection keep running; audio/voice " +
+                "alerts continue. Tap the screen to restore full brightness.",
+                color = EnactOnSurfaceDim, fontSize = 11.sp)
+            Slider(value = idx, onValueChange = { idx = it },
+                onValueChangeFinished = {
+                    prefs.edit().putInt("screen_dim_sec", sec).apply()
+                    resetDimTimer()
+                },
+                valueRange = 0f..(options.size - 1).toFloat(),
+                steps = options.size - 2)
+        }
     }
 
     @Composable
