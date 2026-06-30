@@ -1,5 +1,22 @@
 # DBM Changelog
 
+## v1.20.10 — OBD: Bluetooth LE support (broad adapter compatibility)
+- Added Bluetooth LE (GATT) transport so DBM works with modern BLE OBD adapters
+  (Veepeak and similar), not just Bluetooth Classic / SPP clones. Refactored the
+  OBD transport into an ObdTransport interface with a shared ElmProtocol base
+  (the ELM327 handshake + command framing is identical across transports); the
+  two implementations (ObdClassicTransport, ObdBleTransport) supply only the raw
+  byte pipe.
+- The manager auto-selects transport: tries Classic then BLE on first connect and
+  remembers whichever works (persisted), so reconnection goes straight to the
+  right one. BLE characteristic discovery prefers common BLE-OBD service UUIDs and
+  otherwise auto-detects a service exposing both a writable and a notifiable
+  characteristic, covering most ELM327-style BLE adapters.
+- NOTE: the setup picker still lists BONDED Bluetooth devices. Classic adapters
+  and bonded BLE adapters appear; un-bonded BLE adapters (some connect without
+  pairing) would need an in-app BLE scan, which is a later addition. On-device
+  testing against real adapters (Classic and BLE) is the next validation step.
+
 ## v1.20.9 — screen-dim mode (thermal/power saving)
 - The display now dims to near-black (~2% brightness) after a configurable idle
   period while monitoring on the Detector tab, removing the screen as a heat/

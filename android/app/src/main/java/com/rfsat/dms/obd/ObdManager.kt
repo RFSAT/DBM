@@ -34,7 +34,33 @@ class ObdManager(
     private val context: Context,
     private val prefs: ObdPrefs = ObdPrefs(context),
 ) {
-    private val transport = ObdBluetoothTransport()
+    private var transport: ObdTransport = ObdClassicTransport()
+
+    /** Connect using the remembered transport kind if known; otherwise try
+     *  Classic then BLE and remember whichever works. Sets [transport] to the
+     *  live one. Returns true on success. */
+    private suspend fun openTransport(mac: String): Boolean {
+        val remembered = prefs.transportKind
+        val order = when (remembered) {
+            ObdTransportKind.BLE -> listOf(ObdTransportKind.BLE, ObdTransportKind.CLASSIC)
+            ObdTransportKind.CLASSIC -> listOf(ObdTransportKind.CLASSIC, ObdTransportKind.BLE)
+            else -> listOf(ObdTransportKind.CLASSIC, ObdTransportKind.BLE)
+        }
+        for (kind in order) {
+            val t: ObdTransport = when (kind) {
+                ObdTransportKind.CLASSIC -> ObdClassicTransport()
+                ObdTransportKind.BLE -> ObdBleTransport(context)
+            }
+            if (t.connect(mac)) {
+                transport = t
+                prefs.transportKind = kind
+                com.rfsat.dms.util.DLog.i("ObdManager", "connected via $kind")
+                return true
+            }
+            t.close()
+        }
+        return false
+    }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var pollJob: Job? = null
 
@@ -116,7 +142,7 @@ class ObdManager(
         if (!adapter.isEnabled) return false
         stop()
         _state.value = ObdConnectionState.CONNECTING
-        if (!transport.connect(adapter, candidate.mac)) {
+        if (!openTransport(candidate.mac)) {
             _state.value = ObdConnectionState.NOT_FOUND
             return false
         }
@@ -155,7 +181,7 @@ class ObdManager(
         while (scope.isActive && enabled && attempt < CONNECT_RETRIES) {
             attempt++
             _state.value = ObdConnectionState.CONNECTING
-            if (!transport.connect(adapter, mac)) {
+            if (!openTransport(mac)) {
                 _state.value = ObdConnectionState.NOT_FOUND
                 delay(RECONNECT_DELAY_MS)
                 continue
