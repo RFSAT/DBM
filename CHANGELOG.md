@@ -1,5 +1,21 @@
 # DBM Changelog
 
+## v1.20.11 — OBD: in-app BLE scan for un-bonded adapters
+- Added a "Scan" action in OBD setup that discovers nearby BLE OBD adapters which
+  are NOT bonded (many BLE adapters connect without classic pairing, so they never
+  appeared in the paired list). Runs a ~6s BLE scan, merges results with paired
+  devices, de-duplicates by MAC, and lists OBD-looking names first; scanned (un-
+  bonded) devices are marked "· nearby". The setup buttons are now "Paired" and
+  "Scan".
+- ELM327-compatible adapters are the default target; the transport layer already
+  auto-detects Classic vs BLE, so a standard ELM327 adapter (Classic or BLE) is
+  the recommended first-test device. Proprietary adapters (e.g. Carly) may still
+  not speak standard ELM327 and are not relied upon.
+- Bluetooth runtime permissions (BLUETOOTH_CONNECT + BLUETOOTH_SCAN, API 31+) are
+  now requested with the initial camera/location permission flow, so OBD setup and
+  scanning work without a separate prompt.
+- On-device testing against a real ELM327 adapter is the next step.
+
 ## v1.20.10 — OBD: Bluetooth LE support (broad adapter compatibility)
 - Added Bluetooth LE (GATT) transport so DBM works with modern BLE OBD adapters
   (Veepeak and similar), not just Bluetooth Classic / SPP clones. Refactored the
