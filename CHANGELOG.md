@@ -1,38 +1,5 @@
 # DBM Changelog
 
-## v1.20.11 — OBD: in-app BLE scan for un-bonded adapters
-- Added a "Scan" action in OBD setup that discovers nearby BLE OBD adapters which
-  are NOT bonded (many BLE adapters connect without classic pairing, so they never
-  appeared in the paired list). Runs a ~6s BLE scan, merges results with paired
-  devices, de-duplicates by MAC, and lists OBD-looking names first; scanned (un-
-  bonded) devices are marked "· nearby". The setup buttons are now "Paired" and
-  "Scan".
-- ELM327-compatible adapters are the default target; the transport layer already
-  auto-detects Classic vs BLE, so a standard ELM327 adapter (Classic or BLE) is
-  the recommended first-test device. Proprietary adapters (e.g. Carly) may still
-  not speak standard ELM327 and are not relied upon.
-- Bluetooth runtime permissions (BLUETOOTH_CONNECT + BLUETOOTH_SCAN, API 31+) are
-  now requested with the initial camera/location permission flow, so OBD setup and
-  scanning work without a separate prompt.
-- On-device testing against a real ELM327 adapter is the next step.
-
-## v1.20.10 — OBD: Bluetooth LE support (broad adapter compatibility)
-- Added Bluetooth LE (GATT) transport so DBM works with modern BLE OBD adapters
-  (Veepeak and similar), not just Bluetooth Classic / SPP clones. Refactored the
-  OBD transport into an ObdTransport interface with a shared ElmProtocol base
-  (the ELM327 handshake + command framing is identical across transports); the
-  two implementations (ObdClassicTransport, ObdBleTransport) supply only the raw
-  byte pipe.
-- The manager auto-selects transport: tries Classic then BLE on first connect and
-  remembers whichever works (persisted), so reconnection goes straight to the
-  right one. BLE characteristic discovery prefers common BLE-OBD service UUIDs and
-  otherwise auto-detects a service exposing both a writable and a notifiable
-  characteristic, covering most ELM327-style BLE adapters.
-- NOTE: the setup picker still lists BONDED Bluetooth devices. Classic adapters
-  and bonded BLE adapters appear; un-bonded BLE adapters (some connect without
-  pairing) would need an in-app BLE scan, which is a later addition. On-device
-  testing against real adapters (Classic and BLE) is the next validation step.
-
 ## v1.20.9 — screen-dim mode (thermal/power saving)
 - The display now dims to near-black (~2% brightness) after a configurable idle
   period while monitoring on the Detector tab, removing the screen as a heat/

@@ -178,13 +178,6 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.ACCESS_COARSE_LOCATION)
         if (android.os.Build.VERSION.SDK_INT >= 33)
             perms += Manifest.permission.POST_NOTIFICATIONS
-        if (android.os.Build.VERSION.SDK_INT >= 31) {
-            // For OBD adapter connection (BLUETOOTH_CONNECT) and the in-app BLE
-            // scan (BLUETOOTH_SCAN). Requested here so OBD setup works without a
-            // separate prompt; harmless if the user never uses OBD.
-            perms += Manifest.permission.BLUETOOTH_CONNECT
-            perms += Manifest.permission.BLUETOOTH_SCAN
-        }
         permLauncher.launch(perms.toTypedArray())
         setContent { DbmTheme { Surface(Modifier.fillMaxSize()) { Root() } } }
     }
@@ -810,24 +803,10 @@ class MainActivity : ComponentActivity() {
                     onClick = {
                         candidates = obd.bondedCandidates(); picking = true
                         note = if (candidates.isEmpty())
-                            "No paired devices. Tap Scan to find nearby adapters, " +
-                            "or pair yours in Android Bluetooth settings first." else ""
+                            "No paired Bluetooth devices. Pair your OBD adapter in " +
+                            "Android Bluetooth settings first." else ""
                     },
-                    enabled = !busy) { Text("Paired", fontSize = 13.sp) }
-                Spacer(Modifier.width(8.dp))
-                androidx.compose.material3.OutlinedButton(
-                    onClick = {
-                        busy = true; picking = true
-                        note = "Scanning for nearby adapters (a few seconds)…"
-                        scope.launch {
-                            candidates = obd.scanForAdapters()
-                            busy = false
-                            note = if (candidates.isEmpty())
-                                "No adapters found. Make sure the adapter is " +
-                                "plugged in and the ignition is on." else ""
-                        }
-                    },
-                    enabled = !busy) { Text("Scan", fontSize = 13.sp) }
+                    enabled = !busy) { Text("Set up adapter", fontSize = 13.sp) }
                 if (remembered != null) {
                     Spacer(Modifier.width(8.dp))
                     androidx.compose.material3.OutlinedButton(
@@ -838,7 +817,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // Device picker (paired + scanned; OBD-looking names first).
+            // Device picker (bonded devices, OBD-looking ones first).
             if (picking && candidates.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
                 Text("Pick your adapter:", color = EnactOnSurfaceDim, fontSize = 12.sp)
@@ -856,8 +835,7 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-                        Text("${c.name}  (${c.mac})${if (!c.bonded) "  · nearby" else ""}",
-                            fontSize = 12.sp)
+                        Text("${c.name}  (${c.mac})", fontSize = 12.sp)
                     }
                 }
             }
