@@ -15,7 +15,7 @@ jobs:
           # face_landmarker.task and the EfficientDet fallback are NOT committed
           # (large / .gitignored) so are fetched here. The detection models
           # yolo26n.tflite, gtsrb_sign.tflite and traffic_light.tflite are
-          # committed and validated; do NOT overwrite them.
+          # committed and validated; do NOT overwrite them
           curl -fLO https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task
           curl -fL -o efficientdet_lite0.tflite https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/latest/efficientdet_lite0.tflite
       - name: Decode release keystore
