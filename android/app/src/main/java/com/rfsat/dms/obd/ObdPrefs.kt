@@ -24,13 +24,20 @@ class ObdPrefs(context: Context) {
         get() = sp.getString(KEY_NAME, null)
         set(v) { sp.edit().putString(KEY_NAME, v).apply() }
 
+    /** Which transport last worked for this adapter (Classic/BLE), or null. */
+    var transportKind: ObdTransportKind?
+        get() = sp.getString(KEY_KIND, null)?.let {
+            runCatching { ObdTransportKind.valueOf(it) }.getOrNull() }
+        set(v) { sp.edit().putString(KEY_KIND, v?.name).apply() }
+
     fun forget() {
-        sp.edit().remove(KEY_MAC).remove(KEY_NAME).apply()
+        sp.edit().remove(KEY_MAC).remove(KEY_NAME).remove(KEY_KIND).apply()
     }
 
     companion object {
         private const val KEY_ENABLED = "obd_enabled"
         private const val KEY_MAC = "obd_adapter_mac"
         private const val KEY_NAME = "obd_adapter_name"
+        private const val KEY_KIND = "obd_transport_kind"
     }
 }

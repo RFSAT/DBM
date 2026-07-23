@@ -34,7 +34,33 @@ class ObdManager(
     private val context: Context,
     private val prefs: ObdPrefs = ObdPrefs(context),
 ) {
-    private val transport = ObdBluetoothTransport()
+    private var transport: ObdTransport = ObdClassicTransport()
+
+    /** Connect using the remembered transport kind if known; otherwise try
+     *  Classic then BLE and remember whichever works. Sets [transport] to the
+     *  live one. Returns true on success. */
+    private suspend fun openTransport(mac: String): Boolean {
+        val remembered = prefs.transportKind
+        val order = when (remembered) {
+            ObdTransportKind.BLE -> listOf(ObdTransportKind.BLE, ObdTransportKind.CLASSIC)
+            ObdTransportKind.CLASSIC -> listOf(ObdTransportKind.CLASSIC, ObdTransportKind.BLE)
+            else -> listOf(ObdTransportKind.CLASSIC, ObdTransportKind.BLE)
+        }
+        for (kind in order) {
+            val t: ObdTransport = when (kind) {
+                ObdTransportKind.CLASSIC -> ObdClassicTransport()
+                ObdTransportKind.BLE -> ObdBleTransport(context)
+            }
+            if (t.connect(mac)) {
+                transport = t
+                prefs.transportKind = kind
+                com.rfsat.dms.util.DLog.i("ObdManager", "connected via $kind")
+                return true
+            }
+            t.close()
+        }
+        return false
+    }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var pollJob: Job? = null
 
@@ -87,7 +113,7 @@ class ObdManager(
     }
 
     /** A discoverable adapter candidate for the setup UI. */
-    data class Candidate(val name: String, val mac: String)
+    data class Candidate(val name: String, val mac: String, val bonded: Boolean = true)
 
     /**
      * List already-bonded Bluetooth devices (the usual place a paired OBD adapter
@@ -99,11 +125,57 @@ class ObdManager(
     @android.annotation.SuppressLint("MissingPermission")
     fun bondedCandidates(): List<Candidate> {
         val adapter = BluetoothAdapter.getDefaultAdapter() ?: return emptyList()
-        val hints = listOf("OBD", "ELM", "VIECAR", "VLINK", "V-LINK", "VGATE", "ICAR", "KONNWEI")
         return runCatching {
-            adapter.bondedDevices.orEmpty().map { Candidate(it.name ?: it.address, it.address) }
-                .sortedByDescending { c -> hints.any { c.name.uppercase().contains(it) } }
+            adapter.bondedDevices.orEmpty()
+                .map { Candidate(it.name ?: it.address, it.address, bonded = true) }
+                .sortedByDescending { looksLikeObd(it.name) }
         }.getOrDefault(emptyList())
+    }
+
+    /**
+     * Scan for nearby BLE OBD adapters that are NOT bonded (many BLE adapters
+     * connect without classic pairing, so they never appear in bondedDevices).
+     * Runs for [durationMs], collecting advertised devices, then returns the
+     * union of bonded + scanned candidates, OBD-looking names first, de-duplicated
+     * by MAC. Needs BLUETOOTH_SCAN (declared neverForLocation). Safe to call from
+     * the setup UI; returns bonded-only if scanning isn't available.
+     */
+    @android.annotation.SuppressLint("MissingPermission")
+    suspend fun scanForAdapters(durationMs: Long = 6000): List<Candidate> {
+        val adapter = BluetoothAdapter.getDefaultAdapter()
+        val scanner = adapter?.bluetoothLeScanner
+        val bonded = bondedCandidates()
+        if (scanner == null || !adapter.isEnabled) return bonded
+
+        val found = LinkedHashMap<String, Candidate>()
+        bonded.forEach { found[it.mac] = it }
+
+        val cb = object : android.bluetooth.le.ScanCallback() {
+            override fun onScanResult(type: Int, result: android.bluetooth.le.ScanResult) {
+                val dev = result.device ?: return
+                val name = dev.name ?: result.scanRecord?.deviceName ?: return
+                val mac = dev.address ?: return
+                if (!found.containsKey(mac)) {
+                    found[mac] = Candidate(name, mac, bonded = false)
+                }
+            }
+        }
+        runCatching {
+            scanner.startScan(cb)
+            kotlinx.coroutines.delay(durationMs)
+        }
+        runCatching { scanner.stopScan(cb) }
+
+        return found.values.sortedWith(
+            compareByDescending<Candidate> { looksLikeObd(it.name) }
+                .thenByDescending { it.bonded })
+    }
+
+    private fun looksLikeObd(name: String): Boolean {
+        val hints = listOf("OBD", "ELM", "VIECAR", "VLINK", "V-LINK", "VGATE",
+            "ICAR", "KONNWEI", "VEEPEAK", "OBDLINK", "SCAN")
+        val u = name.uppercase()
+        return hints.any { u.contains(it) }
     }
 
     /**
@@ -116,7 +188,7 @@ class ObdManager(
         if (!adapter.isEnabled) return false
         stop()
         _state.value = ObdConnectionState.CONNECTING
-        if (!transport.connect(adapter, candidate.mac)) {
+        if (!openTransport(candidate.mac)) {
             _state.value = ObdConnectionState.NOT_FOUND
             return false
         }
@@ -155,7 +227,7 @@ class ObdManager(
         while (scope.isActive && enabled && attempt < CONNECT_RETRIES) {
             attempt++
             _state.value = ObdConnectionState.CONNECTING
-            if (!transport.connect(adapter, mac)) {
+            if (!openTransport(mac)) {
                 _state.value = ObdConnectionState.NOT_FOUND
                 delay(RECONNECT_DELAY_MS)
                 continue

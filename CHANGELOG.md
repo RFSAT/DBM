@@ -1,5 +1,74 @@
 # DBM Changelog
 
+## v1.20.13 — Play compliance: API 36 + 16 KB page size (AGP/Gradle bump)
+- targetSdk/compileSdk 35 -> 36 (Android 16), as Google Play now requires for new
+  uploads and updates.
+- AGP 8.7.3 -> 8.12.0 and CI Gradle 8.10.2 -> 8.14, required because compileSdk 36
+  is not supported by AGP 8.7.x. Deliberately stays on the AGP 8.x line: the two
+  MANDATORY Play items need nothing from AGP 9, and AGP 9 is a breaking migration
+  best done in isolation.
+- 16 KB page size: added packaging { jniLibs { useLegacyPackaging = false } } so
+  native .so libraries are stored uncompressed and can be page-aligned/mmap'd on
+  16 KB devices. NOTE: the app ships no native code of its own — the remaining
+  work is bumping the dependencies that DO ship .so files (TF Lite 2.16.1 is the
+  prime suspect, plus MediaPipe / ML Kit / CameraX). See PLAY-COMPLIANCE.md.
+- R8 (isMinifyEnabled) deliberately NOT enabled. It is a Play RECOMMENDATION, not
+  a requirement, and this app loads TFLite/MediaPipe/ML Kit classes reflectively —
+  R8 can strip them and crash only in the release build at runtime. Keep rules are
+  already staged in proguard-rules.pro, so it is a one-line change plus a proper
+  test pass when scheduled; PLAY-COMPLIANCE.md documents the test procedure.
+- Added PLAY-COMPLIANCE.md covering all four Console items, which are mandatory
+  vs optional, and the staged plan.
+
+## v1.20.12 — more reliable speed-limit OCR reading
+- Rewrote how a speed value is extracted from the OCR result, to recover signs
+  the strict old parser dropped. It now: scans individual word elements as well
+  as full lines; extracts digit groups from within mixed text (e.g. "b50", "50.",
+  "50 km/h") instead of requiring the whole token to be numeric; applies common
+  digit-confusion fixes (O->0, I/l->1, S->5, B->8, Z->2) but ONLY on
+  digit-dominant tokens so words like "STOP"/"ZONE" can't fabricate a number; and
+  recovers a near-miss within 1 of a valid limit (49/51 -> 50) without snapping
+  values that are further off.
+- Validated against realistic noisy reads: recovers trailing-dot, leading-noise,
+  letter-confusion and near-miss cases that previously returned nothing, while
+  still rejecting word-only noise. Does not touch the detection or OCR-timing
+  gates (unchanged), so it adds recall at the read stage without new false limits
+  from mis-timing. Map/road-data limits are unaffected — this only improves the
+  camera OCR fallback.
+
+## v1.20.11 — OBD: in-app BLE scan for un-bonded adapters
+- Added a "Scan" action in OBD setup that discovers nearby BLE OBD adapters which
+  are NOT bonded (many BLE adapters connect without classic pairing, so they never
+  appeared in the paired list). Runs a ~6s BLE scan, merges results with paired
+  devices, de-duplicates by MAC, and lists OBD-looking names first; scanned (un-
+  bonded) devices are marked "· nearby". The setup buttons are now "Paired" and
+  "Scan".
+- ELM327-compatible adapters are the default target; the transport layer already
+  auto-detects Classic vs BLE, so a standard ELM327 adapter (Classic or BLE) is
+  the recommended first-test device. Proprietary adapters (e.g. Carly) may still
+  not speak standard ELM327 and are not relied upon.
+- Bluetooth runtime permissions (BLUETOOTH_CONNECT + BLUETOOTH_SCAN, API 31+) are
+  now requested with the initial camera/location permission flow, so OBD setup and
+  scanning work without a separate prompt.
+- On-device testing against a real ELM327 adapter is the next step.
+
+## v1.20.10 — OBD: Bluetooth LE support (broad adapter compatibility)
+- Added Bluetooth LE (GATT) transport so DBM works with modern BLE OBD adapters
+  (Veepeak and similar), not just Bluetooth Classic / SPP clones. Refactored the
+  OBD transport into an ObdTransport interface with a shared ElmProtocol base
+  (the ELM327 handshake + command framing is identical across transports); the
+  two implementations (ObdClassicTransport, ObdBleTransport) supply only the raw
+  byte pipe.
+- The manager auto-selects transport: tries Classic then BLE on first connect and
+  remembers whichever works (persisted), so reconnection goes straight to the
+  right one. BLE characteristic discovery prefers common BLE-OBD service UUIDs and
+  otherwise auto-detects a service exposing both a writable and a notifiable
+  characteristic, covering most ELM327-style BLE adapters.
+- NOTE: the setup picker still lists BONDED Bluetooth devices. Classic adapters
+  and bonded BLE adapters appear; un-bonded BLE adapters (some connect without
+  pairing) would need an in-app BLE scan, which is a later addition. On-device
+  testing against real adapters (Classic and BLE) is the next validation step.
+
 ## v1.20.9 — screen-dim mode (thermal/power saving)
 - The display now dims to near-black (~2% brightness) after a configurable idle
   period while monitoring on the Detector tab, removing the screen as a heat/

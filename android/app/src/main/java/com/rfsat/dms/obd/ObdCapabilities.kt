@@ -25,7 +25,7 @@ object ObdCapabilities {
      * all reachable blocks. On a clone that mis-reports, returns whatever it
      * could parse (possibly empty — the manager then assumes at least SPEED).
      */
-    suspend fun discover(transport: ObdBluetoothTransport): ObdCapabilitySet {
+    suspend fun discover(transport: ObdTransport): ObdCapabilitySet {
         val supported = mutableSetOf<Int>()
         for ((supportPid, nextBlockPid) in SUPPORT_CHAIN) {
             val raw = transport.send(supportPid.command, timeoutMs = 800)

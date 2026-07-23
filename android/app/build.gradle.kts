@@ -17,19 +17,19 @@ plugins {
 // ---------------------------------------------------------------------------
 val dmsVersionEpoch = 1
 val dmsVersionMajor = 20
-val dmsVersionMinor = 12
+val dmsVersionMinor = 13
 val dmsVersionName = "$dmsVersionEpoch.$dmsVersionMajor.$dmsVersionMinor"
 
 android {
     namespace = "com.rfsat.dms"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         // Play Store package ID (permanent once published). Kotlin namespace stays
         // com.rfsat.dms so no source refactor is needed — the two are independent.
         applicationId = "com.DBM"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = dmsVersionEpoch * 1_000_000 + dmsVersionMajor * 1000 + dmsVersionMinor
         versionName = dmsVersionName
     }
@@ -80,11 +80,23 @@ android {
         }
     }
     androidResources { noCompress += listOf("tflite", "task") }
+    packaging {
+        jniLibs {
+            // 16 KB page-size support: native .so libraries must be stored
+            // UNCOMPRESSED and page-aligned so the loader can mmap them directly
+            // on devices with 16 KB memory pages. Legacy packaging compresses
+            // them, which defeats alignment. This is the part of 16 KB
+            // compliance that is under our control — the rest depends on each
+            // dependency shipping 16 KB-aligned .so files (see README/CHANGELOG).
+            useLegacyPackaging = false
+        }
+    }
     lint {
         abortOnError = true
         checkReleaseBuilds = true
-        // Tracked as scheduled maintenance, not build-breakers:
-        // dependency bumps and the targetSdk 36 move (needs AGP/Gradle bump).
+        // Tracked as scheduled maintenance, not build-breakers: dependency
+        // bumps. (targetSdk is now 36; OldTargetApi stays suppressed only so a
+        // future API bump doesn't break the build before it's scheduled.)
         disable += listOf("GradleDependency", "OldTargetApi")
     }
 }

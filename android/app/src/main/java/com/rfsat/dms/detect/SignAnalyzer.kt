@@ -310,10 +310,63 @@ class SignAnalyzer(context: android.content.Context? = null) {
         DLog.i(TAG, "timing: OCR %d ms (crop %dx%d)".format(ocrMs, crop.width, crop.height))
         crop.recycle()
         if (ocr == null) return null
+        return extractSpeedLimit(ocr)
+    }
+
+    /**
+     * Extract a plausible speed-limit value from an OCR result. Robust to noise:
+     * scans lines AND individual elements (words), pulls digit groups out of
+     * mixed text (e.g. "b50", "50.", "50 km/h"), applies letter->digit fixes for
+     * the common OCR confusions, and accepts a value only if it's a plausible
+     * posted limit. Trying elements as well as lines, and extracting digits from
+     * within a token rather than requiring the whole token to be numeric, is what
+     * recovers the many signs the strict whole-line parse was dropping.
+     */
+    private fun extractSpeedLimit(ocr: com.google.mlkit.vision.text.Text): Int? {
+        val candidates = ArrayList<Int>()
+        fun consider(raw: String) {
+            val token = raw.trim()
+            if (token.isEmpty()) return
+            // Count how digit-like the token is BEFORE substitution. A real
+            // speed read is digit-dominated ("50", "5O", "b50"); words like
+            // "ZONE"/"STOP" are not, and must not be coerced into numbers by the
+            // letter->digit fixes (Z->2, S->5, B->8, O->0). Require the token to
+            // be majority digit-or-confusable and short, else skip it.
+            val fixable = "0123456789OolI|SBZ"
+            val digitish = token.count { it.isDigit() }
+            val fixableCount = token.count { it in fixable }
+            // Skip tokens that are mostly letters (would fabricate digits) or too
+            // long to be a speed number with a little surrounding noise.
+            if (token.length > 6) return
+            if (digitish == 0) return                 // no real digit at all -> skip
+            if (fixableCount * 2 < token.length) return  // majority non-fixable -> skip
+            val fixed = token
+                .replace('O', '0').replace('o', '0')
+                .replace('l', '1').replace('I', '1').replace('|', '1')
+                .replace('S', '5').replace('B', '8').replace('Z', '2')
+            Regex("\\d{1,3}").findAll(fixed).forEach { m ->
+                m.value.toIntOrNull()?.let { candidates.add(it) }
+            }
+        }
         for (block in ocr.textBlocks) for (line in block.lines) {
-            val txt = line.text.trim().replace("O", "0").replace("o", "0").replace(" ", "")
-            val v = txt.toIntOrNull() ?: continue
-            if (v in 5..130 && v % 5 == 0) return v
+            consider(line.text)
+            for (el in line.elements) consider(el.text)
+        }
+        // Prefer exact posted limits (multiple of 5, 5..130). If none, allow a
+        // near-miss snap to the closest valid limit for 2-3 digit reads, since a
+        // single mis-read digit shouldn't lose the whole sign.
+        val exact = candidates.firstOrNull { it in 5..130 && it % 5 == 0 }
+        if (exact != null) return exact
+        // Near-miss recovery: only when a read is within 1 of a valid limit
+        // (e.g. 49/51 -> 50), so a single mis-read digit doesn't lose the sign.
+        // Deliberately conservative — we don't snap values 2+ away, to avoid
+        // turning a bad read into a confident wrong limit.
+        val near = candidates.filter { it in 5..130 }
+            .firstOrNull { kotlin.math.abs(it - (Math.round(it / 5.0) * 5).toInt()) <= 1 }
+        if (near != null) {
+            val snapped = (Math.round(near / 5.0) * 5).toInt()
+            DLog.i(TAG, "OCR near-miss $near -> snapped $snapped")
+            return snapped
         }
         return null
     }
