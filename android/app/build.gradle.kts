@@ -17,7 +17,7 @@ plugins {
 // ---------------------------------------------------------------------------
 val dmsVersionEpoch = 1
 val dmsVersionMajor = 20
-val dmsVersionMinor = 14
+val dmsVersionMinor = 15
 val dmsVersionName = "$dmsVersionEpoch.$dmsVersionMajor.$dmsVersionMinor"
 
 android {
@@ -139,15 +139,28 @@ dependencies {
     // Driver analysis — MediaPipe Face Landmarker
     implementation("com.google.mediapipe:tasks-vision:0.10.20")
 
-    // Road object detection — TFLite
-    implementation("org.tensorflow:tensorflow-lite-task-vision:0.4.4")
-    // Core interpreter + NNAPI delegate for the raw YOLO26 decode path
-    implementation("org.tensorflow:tensorflow-lite:2.16.1")
-    implementation("org.tensorflow:tensorflow-lite-gpu:2.16.1")
-    // GPU delegate factory/options classes (GpuDelegateFactory$Options) live in the
-    // -gpu-api artifact; without it the GPU delegate fails to resolve at runtime
-    // (NoClassDefFoundError) and the app silently falls back to NNAPI. Pin to match.
-    implementation("org.tensorflow:tensorflow-lite-gpu-api:2.16.1")
+    // Road object detection — LiteRT (formerly TensorFlow Lite).
+    //
+    // 16 KB PAGE SIZE: org.tensorflow:tensorflow-lite:2.16.1 (and 2.17) ship
+    // native .so files aligned to 4 KB, which Google Play rejects. Those are
+    // prebuilt binaries and cannot be re-aligned with linker flags. LiteRT is
+    // Google's official successor to TF Lite and its natives ARE 16 KB aligned,
+    // so this is a coordinate swap: the Java API (org.tensorflow.lite.Interpreter,
+    // NnApiDelegate, GpuDelegateFactory) keeps the same package names, so no
+    // source change was needed for the Interpreter path.
+    //
+    // org.tensorflow:tensorflow-lite-task-vision:0.4.4 was REMOVED: it is the
+    // last release of an abandoned line, is not 16 KB aligned, and had no fixed
+    // version. It only backed the EfficientDet-Lite0 fallback in RoadAnalyzer,
+    // which was unreachable because yolo26n.tflite is committed. See
+    // PLAY-COMPLIANCE.md.
+    val litert = "1.4.0"
+    implementation("com.google.ai.edge.litert:litert:$litert")
+    implementation("com.google.ai.edge.litert:litert-gpu:$litert")
+    // GPU delegate factory/options classes (GpuDelegateFactory$Options) live in
+    // the -gpu-api artifact; without it the GPU delegate fails to resolve at
+    // runtime (NoClassDefFoundError) and the app silently falls back to NNAPI.
+    implementation("com.google.ai.edge.litert:litert-gpu-api:$litert")
 
     // Speed-limit sign reading — ML Kit on-device text recognition
     implementation("com.google.mlkit:text-recognition:16.0.1")

@@ -1,5 +1,33 @@
 # DBM Changelog
 
+## v1.20.15 — 16 KB page size: migrate TF Lite -> LiteRT, drop task-vision
+- ROOT CAUSE of the Play 16 KB rejection: two TensorFlow artifacts ship native
+  .so files aligned to 4 KB, and prebuilt binaries cannot be re-aligned by any
+  build setting (the v1.20.13 useLegacyPackaging change was necessary but not
+  sufficient).
+- Migrated org.tensorflow:tensorflow-lite{,-gpu,-gpu-api}:2.16.1 ->
+  com.google.ai.edge.litert:{litert,litert-gpu,litert-gpu-api}:1.4.0. LiteRT is
+  Google's official TF Lite successor and its natives ARE 16 KB aligned. The Java
+  API keeps the same package names (org.tensorflow.lite.Interpreter,
+  NnApiDelegate, GpuDelegateFactory), so this was a coordinate swap with NO
+  source change and no ProGuard-rule change.
+- REMOVED org.tensorflow:tensorflow-lite-task-vision:0.4.4 — not 16 KB aligned,
+  and 0.4.4 is the last release of an abandoned line so no fix will ever ship. It
+  only backed the EfficientDet-Lite0 fallback in RoadAnalyzer, which was
+  UNREACHABLE: that path runs only when yolo26n.tflite is missing, and that asset
+  is committed. Removed the dead fallback, its imports, and its CI model
+  download; RoadAnalyzer now degrades to an empty detection list if the YOLO
+  detector fails to initialise, instead of crashing on a null fallback.
+- Still to verify before the next upload: MediaPipe, ML Kit, CameraX and
+  androidx.graphics also ship .so files and may still be unaligned. These are
+  actively maintained, so they need a version bump rather than a migration —
+  PLAY-COMPLIANCE.md has the Analyze-APK / readelf procedure to identify exactly
+  which remain, one bump at a time.
+- The two Console WARNINGS are documented as accepted, not fixed: the
+  deobfuscation notice is inapplicable while R8 is off, and native debug symbols
+  cannot be produced because every .so is a third-party prebuilt that ships
+  already stripped (the app compiles no native code of its own).
+
 ## v1.20.14 — CI fix: AGP 8.x cannot run under the runner's Gradle 9.6
 - The build failed before compiling: the GitHub runner's PRE-INSTALLED Gradle is
   now 9.6.x, and AGP 8.x cannot be applied under it (AGP 8.x uses

@@ -21,41 +21,49 @@ risk. Treat them separately.
   files uncompressed so they can be page-aligned and mmap'd on 16 KB devices.
   This is the part of item 1 that is under our control.
 
-## Item 1 — 16 KB page size: the remaining work is DEPENDENCIES
+## Item 1 — 16 KB page size: root cause found
 
-Our app ships **no native code of its own**; every `.so` comes from a library.
-From the CI `stripReleaseDebugSymbols` output, the native libraries are:
+Our app ships **no native code of its own**; every `.so` comes from a library, and
+each must be built 16 KB-aligned **by its publisher**. `useLegacyPackaging = false`
+(added in v1.20.13) was necessary but **not sufficient** — Play still rejected
+v1.20.14.
+
+### Confirmed offenders, fixed in v1.20.15
+
+| Library | Problem | Fix |
+|---|---|---|
+| `org.tensorflow:tensorflow-lite*:2.16.1` | Prebuilt `.so` aligned to 4 KB. Confirmed unfixed in 2.17 too. Cannot be re-aligned with linker flags. | Migrated to **LiteRT** `com.google.ai.edge.litert:{litert,litert-gpu,litert-gpu-api}:1.4.0` — Google's official TF Lite successor, built 16 KB-aligned. Java packages (`org.tensorflow.lite.Interpreter`, `NnApiDelegate`, `GpuDelegateFactory`) are unchanged, so this was a **coordinate swap with no source change**. |
+| `org.tensorflow:tensorflow-lite-task-vision:0.4.4` | Not 16 KB aligned; 0.4.4 is the **last release** of an abandoned line, so no fixed version will ever exist. | **Removed entirely.** It only backed the EfficientDet-Lite0 fallback in `RoadAnalyzer`, which was *unreachable*: the fallback runs only when `yolo26n.tflite` is absent, and that asset is committed (see `.gitignore`). Dead code removed, plus its CI model download. |
+
+### Remaining: verify the other native libraries
+
+These also ship `.so` files and may still be unaligned. Check them **before**
+the next upload rather than guessing:
 
 ```
-libtensorflowlite_jni.so, libtensorflowlite_gpu_jni.so, libtask_vision_jni.so
-libmediapipe_tasks_vision_jni.so
-libmlkit_google_ocr_pipeline.so
-libimage_processing_util_jni.so   (CameraX)
-libandroidx.graphics.path.so, libsurface_util_jni.so
+libmediapipe_tasks_vision_jni.so   com.google.mediapipe:tasks-vision:0.10.20
+libmlkit_google_ocr_pipeline.so    com.google.mlkit:text-recognition:16.0.1
+libimage_processing_util_jni.so    androidx.camera:* 1.4.1
+libsurface_util_jni.so             androidx.camera:*
+libandroidx.graphics.path.so       androidx.graphics:graphics-path
 ```
 
-Each of these must be built 16 KB-aligned **by its publisher**. No build-config
-setting can align a third-party `.so`. So the fix is: bump each native-shipping
-dependency until the alignment warning clears. Current suspects (oldest first):
+**Procedure (do this before uploading):**
 
-- `org.tensorflow:tensorflow-lite*:2.16.1` — early 2024, the most likely
-  offender. Note TF Lite has been superseded by **LiteRT**
-  (`com.google.ai.edge.litert`); moving is a larger migration but is the
-  long-term path.
-- `org.tensorflow:tensorflow-lite-task-vision:0.4.4` — old.
-- `com.google.mediapipe:tasks-vision:0.10.20`
-- `com.google.mlkit:text-recognition:16.0.1`
-- CameraX / `androidx.graphics` — bump with the rest.
+1. Build the release AAB/APK in CI and download the artifact.
+2. Android Studio → **Build > Analyze APK** → expand `lib/arm64-v8a/`.
+   Any entry warning `4 KB LOAD section alignment, but 16 KB is required` is a
+   remaining offender. (Equivalently, from a shell:
+   `unzip -o app.apk 'lib/arm64-v8a/*' -d /tmp && readelf -lW /tmp/lib/arm64-v8a/*.so | grep -A1 LOAD` — aligned libraries show `0x4000`, unaligned show `0x1000`.)
+3. For each offender, bump that dependency to the newest version (Android Studio
+   → **Help > Check for Updates** / the Gradle version catalog warning, or the
+   library's release notes) and re-check. Bump **one at a time** so you learn
+   which version actually fixed it.
+4. Re-check in the Play Console: bundle details → **Memory page size**.
 
-### How to verify (do this per bump, it's fast)
-
-1. Build the release bundle/APK.
-2. Android Studio → **Build > Analyze APK** → open `lib/arm64-v8a/` and look for
-   the warning `4 KB LOAD section alignment, but 16 KB is required`.
-3. Or check the Play Console bundle details → **Memory page size**.
-
-Bump one library at a time and re-check — that identifies exactly which
-dependency is non-compliant instead of changing everything at once.
+The libraries above are all actively maintained by Google/AndroidX, so unlike the
+TF Lite Task library a fixed version should exist — it is a version bump, not a
+migration.
 
 ## Item 2 — R8: prepared, deliberately NOT enabled
 
@@ -118,3 +126,45 @@ So the migration is a coordinated bump of AGP + Gradle + Kotlin + KSP + Compose
 plugin. Do it on its own branch with the **AGP Upgrade Assistant**, one change
 at a time, so a failure is attributable. Do not combine it with an SDK bump or
 with enabling R8.
+
+---
+
+## The two Console WARNINGS (neither blocks release)
+
+### "No deobfuscation file associated with this App Bundle"
+
+**Expected, and not applicable.** A deobfuscation (mapping) file only exists when
+R8/ProGuard obfuscates the build. `isMinifyEnabled = false`, so nothing is
+renamed and stack traces are already readable — there is no mapping file to
+upload. Play shows this notice generically on any bundle without one.
+
+It becomes relevant only if/when R8 is enabled (item 2 above); AGP then produces
+`mapping.txt` and uploads it with the bundle automatically.
+
+### "Contains native code, and you've not uploaded debug symbols"
+
+`ndk { debugSymbolLevel = "FULL" }` **is** set on the release build, so this is
+worth understanding rather than chasing.
+
+Two things prevent it from producing anything useful here:
+
+1. **The CI runner has no NDK installed.** That is why the build log prints
+   `Unable to strip the following libraries, packaging them as they are: ...` —
+   AGP cannot run the NDK `strip`/`objcopy` tools, so it can neither strip the
+   libraries nor extract symbols from them into
+   `BUNDLE-METADATA/com.android.tools.build.debugsymbols/`.
+2. **More fundamentally, the symbols do not exist to extract.** Every `.so` in
+   this app comes from a third-party AAR (LiteRT, MediaPipe, ML Kit, CameraX) and
+   those are shipped **already stripped** by their publishers. We compile no
+   native code of our own, so there is nothing of ours to symbolicate.
+
+So even installing the NDK in CI (a large download, meaningful build-time cost)
+would likely yield empty or near-empty symbol metadata. And a native crash inside,
+say, MediaPipe could not be symbolicated by us regardless — we do not have their
+private symbol files.
+
+**Recommendation: accept this warning.** It is advisory, it does not block
+release, and the app cannot meaningfully satisfy it. All first-party code is
+Kotlin, and those crashes already report with full line numbers. Revisit only if
+the app ever adds its own `externalNativeBuild` C/C++ code, at which point the
+setting is already in place and only the CI NDK install would be needed.

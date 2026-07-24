@@ -8,12 +8,9 @@ import com.rfsat.dms.Detection
 import com.rfsat.dms.RiskEventCandidate
 import com.rfsat.dms.RiskType
 import com.rfsat.dms.Severity
-import org.tensorflow.lite.support.image.TensorImage
-import org.tensorflow.lite.task.core.BaseOptions
-import org.tensorflow.lite.task.vision.detector.ObjectDetector
 
 /**
- * Front/rear camera analysis: COCO object detection (EfficientDet-Lite0)
+ * Front/rear camera analysis: COCO object detection (YOLO26-nano)
  * + lightweight IoU tracker + monocular time-to-collision proxy.
  *
  * Risk logic:
@@ -22,50 +19,27 @@ import org.tensorflow.lite.task.vision.detector.ObjectDetector
  *  - vulnerable road users (person/bicycle/motorcycle) inside the central
  *    risk zone of the FRONT view -> VULNERABLE_ROAD_USER.
  *
- * Requires model asset: app/src/main/assets/efficientdet_lite0.tflite
- * https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/latest/efficientdet_lite0.tflite
+ * Requires model asset: app/src/main/assets/yolo26n.tflite (committed).
  * (e-scooters: fine-tune later; they typically classify as person+bicycle)
  */
 class RoadAnalyzer(context: Context, private val role: CameraRole) {
 
-    // Object detector — two supported paths:
-    //  * YOLO26-nano (yolo26n.tflite): raw [1,84,8400] output, decoded by
-    //    YoloDetector (the TFLite Task API cannot parse this format).
-    //  * EfficientDet-Lite0 (fallback): standard Task ObjectDetector.
-    // The YOLO path is used whenever the asset is present.
-    private val hasYolo =
-        runCatching { context.assets.open("yolo26n.tflite").close() }.isSuccess
-    private val yolo: YoloDetector? = if (hasYolo)
-        runCatching { YoloDetector(context) }.getOrNull() else null
-    private val detector: ObjectDetector? = if (yolo == null) {
-        fun build(useNnapi: Boolean) = ObjectDetector.createFromFileAndOptions(
-            context, "efficientdet_lite0.tflite",
-            ObjectDetector.ObjectDetectorOptions.builder()
-                .setBaseOptions(
-                    BaseOptions.builder().setNumThreads(2)
-                        .apply { if (useNnapi) useNnapi() }.build())
-                .setScoreThreshold(0.40f)
-                .setMaxResults(10)
-                .build())
-        runCatching { build(true) }.getOrElse { build(false) }
-    } else null
+    // Object detector: YOLO26-nano (yolo26n.tflite), raw [1,84,8400] output
+    // decoded by YoloDetector. The old EfficientDet-Lite0 fallback (TFLite Task
+    // ObjectDetector) was removed in v1.20.15: yolo26n.tflite is committed so the
+    // fallback was unreachable, and its library (tensorflow-lite-task-vision
+    // 0.4.4, the last release of an abandoned line) ships a native .so that is
+    // NOT 16 KB page-aligned and cannot be fixed — it blocked Play compliance.
+    private val yolo: YoloDetector? =
+        runCatching { YoloDetector(context) }.getOrNull()
 
     private val tracker = ByteTrackTracker()
 
     fun analyze(frame: Bitmap, tMs: Long): AnalysisResult {
-        val w = frame.width.toFloat(); val h = frame.height.toFloat()
-        val raw = if (yolo != null) {
-            yolo.detect(frame).filter { it.labelText in RELEVANT }
-        } else {
-            detector!!.detect(TensorImage.fromBitmap(frame))
-                .mapNotNull { d ->
-                    val c = d.categories.firstOrNull() ?: return@mapNotNull null
-                    if (c.label !in RELEVANT) return@mapNotNull null
-                    Detection(c.label, c.score,
-                        d.boundingBox.left / w, d.boundingBox.top / h,
-                        d.boundingBox.right / w, d.boundingBox.bottom / h)
-                }
-        }
+        // If the detector failed to initialise, degrade to "no detections"
+        // rather than crashing; the rest of the pipeline handles an empty list.
+        val raw = yolo?.detect(frame)?.filter { it.labelText in RELEVANT }
+            ?: emptyList()
 
         val tracks = tracker.update(raw, tMs)
         val events = mutableListOf<RiskEventCandidate>()
@@ -104,7 +78,7 @@ class RoadAnalyzer(context: Context, private val role: CameraRole) {
         return AnalysisResult(detections = out, events = events)
     }
 
-    fun close() { detector?.close(); yolo?.close() }
+    fun close() { yolo?.close() }
 
     companion object {
         val RELEVANT = setOf("car", "truck", "bus", "motorcycle", "bicycle", "person")
