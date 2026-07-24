@@ -1,5 +1,24 @@
 # DBM Changelog
 
+## v1.20.14 — CI fix: AGP 8.x cannot run under the runner's Gradle 9.6
+- The build failed before compiling: the GitHub runner's PRE-INSTALLED Gradle is
+  now 9.6.x, and AGP 8.x cannot be applied under it (AGP 8.x uses
+  org.gradle.api.problems.internal.InternalProblems, removed in Gradle 9.6.0).
+  The CI step `gradle wrapper --gradle-version 8.14` ran under that system Gradle
+  and made it CONFIGURE the project — applying AGP — which failed immediately.
+  The pinned wrapper Gradle (8.14) never got a chance to run.
+- Fix: generate the wrapper in an EMPTY scratch project (settings file only), so
+  the system Gradle never evaluates our build scripts, then copy gradlew +
+  gradle/wrapper into android/. The build then runs under Gradle 8.14, which is
+  compatible with AGP 8.12. Also insulates CI from future system-Gradle bumps.
+  Copy is idempotent (no nested gradle/gradle on re-run) and `./gradlew --version`
+  is echoed so the log shows which Gradle actually built.
+- No change to app code or to the v1.20.13 API-36 / 16 KB work.
+- PLAY-COMPLIANCE.md updated: this incompatibility puts the AGP 9 migration on a
+  clock. It remains a separate, scheduled change because it requires a coordinated
+  bump of AGP + Gradle + Kotlin + KSP + Compose compiler plugin (currently pinned
+  to Kotlin 2.0.21), which cannot be validated without a build.
+
 ## v1.20.13 — Play compliance: API 36 + 16 KB page size (AGP/Gradle bump)
 - targetSdk/compileSdk 35 -> 36 (Android 16), as Google Play now requires for new
   uploads and updates.

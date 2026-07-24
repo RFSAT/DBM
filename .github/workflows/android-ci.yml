@@ -36,7 +36,26 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
         run: |
-          gradle wrapper --gradle-version 8.14
+          # The runner's PRE-INSTALLED Gradle is now 9.6.x. AGP 8.x cannot be
+          # applied under Gradle 9.6+ (it uses org.gradle.api.problems.internal
+          # .InternalProblems, removed in Gradle 9.6.0). Running
+          # `gradle wrapper` here would make that system Gradle CONFIGURE this
+          # project — applying AGP — and fail before the build even starts.
+          #
+          # Fix: generate the wrapper in an EMPTY scratch project, so the system
+          # Gradle never evaluates our build scripts, then copy it in. The build
+          # itself then runs under the pinned wrapper version (8.14), which IS
+          # compatible with AGP 8.12. This also insulates CI from future bumps
+          # of the runner's system Gradle.
+          WRAPGEN="$RUNNER_TEMP/wrapgen"
+          mkdir -p "$WRAPGEN"
+          echo "rootProject.name = \"wrapgen\"" > "$WRAPGEN/settings.gradle.kts"
+          ( cd "$WRAPGEN" && gradle wrapper --gradle-version 8.14 )
+          mkdir -p gradle
+          cp -r "$WRAPGEN/gradle/." gradle/
+          cp "$WRAPGEN/gradlew" "$WRAPGEN/gradlew.bat" .
+          chmod +x gradlew
+          ./gradlew --version
           if [ -n "$KEYSTORE_FILE" ]; then
             ./gradlew lint assembleDebug assembleRelease bundleRelease
           else

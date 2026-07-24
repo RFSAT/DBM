@@ -87,21 +87,34 @@ Benefit when it works: smaller download and some runtime gain. The models
 (~25 MB of `.tflite`) dominate app size, so expect a modest reduction, not a
 dramatic one — another reason not to rush it.
 
-## Item 3 — Why not AGP 9 yet
+## Item 3 — Why not AGP 9 yet (but why it's now on the clock)
 
-AGP 9.0 is a major release with breaking changes: a new DSL (the old one is
-deprecated), built-in Kotlin support enabled by default (adds a KGP runtime
-dependency), Gradle 9.1+ required, and API-36.1 max support. Projects can opt out
-of the new DSL with `android.newDsl=false`, but the opt-out disappears in
-AGP 10.0.
+**New constraint discovered in CI:** AGP 8.x **cannot run under Gradle 9.6+**.
+It uses `org.gradle.api.problems.internal.InternalProblems`, which Gradle removed
+in 9.6.0. The GitHub runner's pre-installed Gradle is already 9.6.x, so the CI
+step that ran `gradle wrapper` inside the project failed while *configuring* the
+build — before compiling anything.
 
-None of the two **required** items need AGP 9 — AGP 8.12 satisfies both. So the
-sensible order is:
+Worked around (not papered over) by generating the wrapper in an empty scratch
+project, so the system Gradle never evaluates our build scripts; the build itself
+runs under the pinned wrapper Gradle 8.14, which is compatible with AGP 8.12.
+That is stable and insulates CI from further system-Gradle bumps.
 
-1. Ship compliance on AGP 8.x (this version).
-2. Migrate to AGP 9 as a **separate, isolated change**, using Android Studio's
-   **AGP Upgrade Assistant**, on its own branch, so a build break is attributable
-   to the migration and nothing else.
+But the direction is clear: the AGP 8.x line is at the end of its compatible
+range, and AGP 10.0 removes the new-DSL opt-out. **The AGP 9 migration should be
+scheduled, not indefinitely deferred.**
 
-Combining the AGP 9 migration with the SDK bump and R8 in one change would make
-any failure very hard to attribute. Keep them separate.
+It is still deliberately NOT bundled here, because it is a multi-version
+migration that cannot be validated without a build:
+
+- New DSL (old one deprecated); opt out with `android.newDsl=false` initially.
+- Built-in Kotlin support is enabled by default and pulls **KGP 2.2.10**, while
+  this project pins Kotlin **2.0.21**, the Compose compiler plugin 2.0.21, and
+  KSP **2.0.21-1.0.27**. Those four move in lockstep — KSP and the Compose
+  plugin must match the Kotlin version exactly.
+- Requires Gradle 9.1+.
+
+So the migration is a coordinated bump of AGP + Gradle + Kotlin + KSP + Compose
+plugin. Do it on its own branch with the **AGP Upgrade Assistant**, one change
+at a time, so a failure is attributable. Do not combine it with an SDK bump or
+with enabling R8.
