@@ -1,5 +1,25 @@
 # DBM Changelog
 
+## v1.20.16 — 16 KB: bump MediaPipe + CameraX, and check alignment IN CI
+- v1.20.15 fixed the TensorFlow offenders but Play still rejected the bundle, so
+  the remaining unaligned .so files came from other libraries:
+  * com.google.mediapipe:tasks-vision 0.10.20 -> 0.10.26.1. 0.10.20 ships
+    libmediapipe_tasks_vision_jni.so aligned to 4 KB; per the MediaPipe release
+    notes all current Google Maven packages are 16 KB-aligned, and 0.10.26.1 also
+    restores ARM v7 (32-bit) support.
+  * androidx.camera 1.4.1 -> 1.5.0 (libimage_processing_util_jni.so,
+    libsurface_util_jni.so). The CameraX APIs used here are source-compatible
+    across 1.4 -> 1.5.
+- NEW CI STEP "Check 16 KB page alignment of native libraries": unzips the built
+  APK and runs readelf on every .so, printing OK/UNALIGNED with the segment
+  alignment for each. Any UNALIGNED line is exactly the library Play would reject
+  on. This replaces the upload-and-wait-for-rejection loop with a CI log check.
+  It warns rather than fails, so artifacts are still produced.
+- Still possibly outstanding (not bumped, no confirmed 16 KB version identified):
+  com.google.mlkit:text-recognition:16.0.1 (libmlkit_google_ocr_pipeline.so) and
+  androidx.graphics:graphics-path (libandroidx.graphics.path.so, transitive from
+  the Compose BOM). The new CI step will name them if they are still unaligned.
+
 ## v1.20.15 — 16 KB page size: migrate TF Lite -> LiteRT, drop task-vision
 - ROOT CAUSE of the Play 16 KB rejection: two TensorFlow artifacts ship native
   .so files aligned to 4 KB, and prebuilt binaries cannot be re-aligned by any

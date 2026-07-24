@@ -63,6 +63,34 @@ jobs:
             echo "No signing secrets present — building debug only."
             ./gradlew lint assembleDebug
           fi
+      - name: Check 16 KB page alignment of native libraries
+        working-directory: android
+        run: |
+          # Google Play rejects bundles whose native .so files have LOAD segments
+          # aligned to 4 KB (0x1000) instead of 16 KB (0x4000). Every .so here comes
+          # from a third-party AAR, so the fix is always a dependency bump. This
+          # check names the offender BEFORE an upload is wasted.
+          APK=$(ls app/build/outputs/apk/release/*.apk 2>/dev/null | head -1 || true)
+          if [ -z "$APK" ]; then APK=$(ls app/build/outputs/apk/debug/*.apk 2>/dev/null | head -1 || true); fi
+          if [ -z "$APK" ]; then echo "No APK found; skipping."; exit 0; fi
+          echo "Checking native library alignment in $APK"
+          rm -rf "$RUNNER_TEMP/alncheck"; mkdir -p "$RUNNER_TEMP/alncheck"
+          unzip -qo "$APK" 'lib/*' -d "$RUNNER_TEMP/alncheck" || true
+          BAD=0
+          for so in $(find "$RUNNER_TEMP/alncheck/lib" -name '*.so' | sort); do
+            AL=$(readelf -lW "$so" 2>/dev/null | awk '/LOAD/ {print $NF; exit}')
+            REL=${so#"$RUNNER_TEMP/alncheck/"}
+            case "$AL" in
+              0x4000|0x10000) echo "  OK        $AL  $REL" ;;
+              *)              echo "  UNALIGNED $AL  $REL"; BAD=1 ;;
+            esac
+          done
+          if [ "$BAD" = 1 ]; then
+            echo "::warning::Native libraries above marked UNALIGNED are not 16 KB aligned. Google Play WILL reject this bundle. Bump the dependency that ships each library (see PLAY-COMPLIANCE.md)."
+          else
+            echo "All native libraries are 16 KB aligned."
+          fi
+
       - uses: actions/upload-artifact@v5
         with: { name: DBM-apk-debug, path: android/app/build/outputs/apk/debug/*.apk }
       - uses: actions/upload-artifact@v5

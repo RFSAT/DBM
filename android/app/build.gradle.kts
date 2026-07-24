@@ -17,7 +17,7 @@ plugins {
 // ---------------------------------------------------------------------------
 val dmsVersionEpoch = 1
 val dmsVersionMajor = 20
-val dmsVersionMinor = 15
+val dmsVersionMinor = 16
 val dmsVersionName = "$dmsVersionEpoch.$dmsVersionMajor.$dmsVersionMinor"
 
 android {
@@ -117,7 +117,11 @@ androidComponents {
 
 dependencies {
     val media3 = "1.5.1"
-    val camerax = "1.4.1"
+    // 16 KB: CameraX 1.4.x ships libimage_processing_util_jni.so and
+    // libsurface_util_jni.so aligned to 4 KB. Bumped to the 1.5.x line, which is
+    // 16 KB-aligned. The APIs used here (ProcessCameraProvider, Preview,
+    // ImageAnalysis, PreviewView) are source-compatible across 1.4 -> 1.5.
+    val camerax = "1.5.0"
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
@@ -136,8 +140,11 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-rtsp:$media3")
     implementation("androidx.media3:media3-ui:$media3")
 
-    // Driver analysis — MediaPipe Face Landmarker
-    implementation("com.google.mediapipe:tasks-vision:0.10.20")
+    // Driver analysis — MediaPipe Face Landmarker.
+    // 16 KB: 0.10.20 ships libmediapipe_tasks_vision_jni.so aligned to 4 KB.
+    // Per the MediaPipe release notes, all current Google Maven packages are
+    // 16 KB-aligned, and 0.10.26.1 additionally restores ARM v7 (32-bit).
+    implementation("com.google.mediapipe:tasks-vision:0.10.26.1")
 
     // Road object detection — LiteRT (formerly TensorFlow Lite).
     //
