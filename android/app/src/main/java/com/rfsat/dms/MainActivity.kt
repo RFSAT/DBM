@@ -625,10 +625,23 @@ class MainActivity : ComponentActivity() {
                 // lower-left for a few seconds after they leave the frame, for
                 // the driver's information (e.g. turn restrictions at lights).
                 if (analysing) RecentSignsOverlay()
-                // Speed readout with source qualifier, bottom-centre of the road
-                // view: always shows the current speed and where it's coming from
-                // (OBD adapter / GPS / camera visual estimate), colour-coded so
-                // the driver knows the provenance at a glance.
+                // Parking advisory banner: appears when stopped and the region
+                // has parking data for this spot. Advisory only — informs, never
+                // accuses. Sits above the speed badge, top-centre of the road view.
+                val parkAdvice by (service?.parkingAdvice
+                    ?: MutableStateFlow<String?>(null)).collectAsState()
+                if (analysing && parkAdvice != null) {
+                    val warn = parkAdvice!!.startsWith("No ") ||
+                        parkAdvice!!.startsWith("Restricted") ||
+                        parkAdvice!!.contains("only") || parkAdvice!!.contains("Private")
+                    Box(Modifier.align(Alignment.TopCenter).padding(top = 8.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (warn) Color(0xCCB5551F) else Color(0xCC1F6F6B))
+                            .padding(horizontal = 11.dp, vertical = 5.dp)) {
+                        Text("P  ${parkAdvice}", color = Color.White,
+                            fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
                 if (analysing) {
                     val (srcLabel, srcColor) = when (scState.speedSource) {
                         SpeedSource.OBD -> "OBD" to EnactGreen
@@ -1036,6 +1049,8 @@ class MainActivity : ComponentActivity() {
             DetectionElementRow("Unsafe following distance", "det_distance")
             DetectionElementRow("Traffic lights (red / amber crossing)", "det_lights")
             DetectionElementRow("Driver state (eyes, gaze, mirrors)", "det_driver")
+            DetectionElementRow("Parking advice when stopped (where data exists)",
+                "parking_advice", default = false)
             DetectionElementRow(
                 "Read lead-vehicle plate on serious hazard (stored locally only)",
                 "capture_plate", default = false)

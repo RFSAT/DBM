@@ -1,5 +1,42 @@
 # DBM Changelog
 
+## v1.20.18 — accept schema-4 (parking) region databases + server tooling
+- Raised SUPPORTED_DB_SCHEMA 3 -> 4 so the app accepts parking-enabled region
+  databases. Without this, a schema-4 .db from add_parking.py would be rejected
+  as UNSUPPORTED_SCHEMA and never install. (Schema 4 only ADDS parking tables;
+  existing segments/meta are unchanged, so the bump is additive.)
+- Added server/build tooling under tools/parking/:
+  * build_region.py — builds a region .db (base converter + add_parking) and
+    generates index.json in the exact shape MapCatalog.kt parses, computing
+    sizeBytes/sha256/dataDate/dbSchemaVersion per region and bumping `version`
+    only when a file's content actually changed.
+  * SERVER-DEPLOYMENT.md — step-by-step guide to rebuild, manifest, upload
+    (data first, index.json last), verify over HTTPS, and roll back.
+- No app-behaviour change beyond accepting the newer schema.
+## v1.20.17 — parking assistance (Tier 1: map data, advisory)
+- New parking feature, integrated into the app (off by default; enable in
+  Settings > Detection elements > "Parking advice when stopped").
+- When the vehicle comes to rest, DBM looks up parking rules for that spot from
+  the region database and shows a short ADVISORY banner on the road view
+  (e.g. "Permit holders only (residents)", "No stopping · Mo-Fr 07:00-09:00",
+  or "No parking data for this area"). Advisory only — it never asserts a
+  violation, because side-of-street, marked-bay and permit-holder status can't be
+  reliably determined. Empty data reads as "no information", never "allowed".
+- parkingNearby() returns the nearest public car parks (amenity=parking),
+  distance-ranked, private/permit-only excluded by default — the basis for a
+  "where can I park" list.
+- New: ParkingCondition (parser for the OSM conditional grammar —
+  "value @ (Mo-Fr 07:00-09:00)", ;-separated rules with later-wins precedence,
+  midnight-crossing spans; refuses to guess on stay-duration/date conditions,
+  surfacing the raw text instead), ParkingMonitor (reads the parking tables,
+  sharing OsmMap's db handle). Falls back cleanly on pre-v4 region databases
+  (feature simply unavailable, no crash).
+- Data pipeline (runs on your PC, not in the app): tools/parking/add_parking.py
+  adds parking_lot + parking_curb tables to an existing region .db from a
+  Geofabrik .pbf. This is the map-build side, equivalent to the speed-limit
+  converter; the app reads what it produces.
+- Tier 2 (camera detection of parking signs) remains a later, supplementary
+  source.
 ## v1.20.16 — 16 KB: bump MediaPipe + CameraX, and check alignment IN CI
 - v1.20.15 fixed the TensorFlow offenders but Play still rejected the bundle, so
   the remaining unaligned .so files came from other libraries:

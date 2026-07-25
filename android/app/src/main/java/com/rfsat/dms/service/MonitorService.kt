@@ -109,6 +109,17 @@ class MonitorService : Service() {
     @Volatile private var signScanStopLat = 0.0
     @Volatile private var signScanStopLon = 0.0
     @Volatile private var signScanDoneAtStop = false
+
+    // --- Parking advisory ---------------------------------------------------
+    // When the vehicle comes to rest we look up parking rules for that spot and
+    // publish a short advisory. ADVISORY ONLY: we never claim a violation, as we
+    // cannot reliably tell which side of the street the car is on, whether it is
+    // in a marked bay, or whether the driver holds a permit. Empty data means
+    // "no information", never "parking is allowed".
+    private val _parkingAdvice = MutableStateFlow<String?>(null)
+    val parkingAdvice: kotlinx.coroutines.flow.StateFlow<String?> = _parkingAdvice
+    @Volatile private var parkingCheckedAtStop = false
+    @Volatile var parkingEnabled = false; private set
     // The speed limit currently shown to the driver. Latched: it persists until a
     // DIFFERENT valid limit (camera or map, camera taking priority via the fuser)
     // replaces it, so the display never blanks on a momentary unknown.
@@ -172,6 +183,10 @@ class MonitorService : Service() {
 
     private fun applyElement(key: String, on: Boolean) = when (key) {
         "det_signs" -> detectSigns = on
+        "parking_advice" -> {
+            parkingEnabled = on
+            if (!on) _parkingAdvice.value = null
+        }
         "det_lanes" -> detectLaneMarkings = on
         "det_lane_cross" -> detectLaneCrossing = on
         "det_shoulder" -> detectHardShoulder = on
@@ -251,6 +266,8 @@ class MonitorService : Service() {
         // reachable, it provides wheel-sensor speed (more accurate/faster than
         // GPS) and, where the vehicle supports them, RPM/throttle/load. It runs
         // on its own coroutine and falls back silently to GPS/visual if absent.
+        parkingEnabled = getSharedPreferences("dbm", MODE_PRIVATE)
+            .getBoolean("parking_advice", false)
         obd = com.rfsat.dms.obd.ObdManager(this)
         obd.start()
         // Open the on-device speed-limit database (SQLite + R-tree) off the
@@ -652,6 +669,36 @@ class MonitorService : Service() {
     }
 
     /** Record that a sign scan has now run at the current stop location. */
+    private fun checkParkingAtStop(spd: Int) {
+        if (!parkingEnabled) return
+        if (spd > STATIONARY_KMH) {
+            if (parkingCheckedAtStop) { parkingCheckedAtStop = false; _parkingAdvice.value = null }
+            return
+        }
+        if (parkingCheckedAtStop) return
+        val pos = lastFusePos ?: return
+        val pm = osmMap?.parking
+        if (pm == null) { parkingCheckedAtStop = true; return }
+        parkingCheckedAtStop = true
+        val (lat, lon) = pos
+        val rules = pm.rulesAt(lat, lon)
+        val blocking = rules.firstOrNull { it.blocksParking || it.unresolved }
+        _parkingAdvice.value = when {
+            blocking != null -> blocking.describe()
+            rules.isNotEmpty() -> rules.first().describe()
+            !pm.hasCurbData -> "No parking data for this area"
+            else -> null
+        }
+        DLog.i(TAG, "parking advisory: ${_parkingAdvice.value} (${rules.size} rule(s))")
+    }
+
+    /** Nearby car parks for the "where can I park" list. Empty if unavailable. */
+    fun parkingNearby(publicOnly: Boolean = true): List<com.rfsat.dms.parking.ParkingLot> {
+        val pos = lastFusePos ?: return emptyList()
+        return osmMap?.parking?.lotsNear(pos.first, pos.second, publicOnly = publicOnly)
+            ?: emptyList()
+    }
+
     private fun markSignScanAtStop() {
         val pos = lastFusePos ?: return
         signScanStopLat = pos.first
@@ -676,6 +723,7 @@ class MonitorService : Service() {
 
         // ---- feed context-gated throttling governor from cheap, always-on signals ----
         governor.speedMs = bestSpeedKmh() / 3.6f
+        checkParkingAtStop(bestSpeedKmh())
         // Real thermal backoff: status listener + headroom forecast (logged).
         thermal?.pollHeadroom(tMs)
         governor.thermalMult = thermal?.multiplier ?: 1f

@@ -39,6 +39,17 @@ data class MatchResult(val mapLimit: Int, val segId: Long, val distM: Double)
  */
 class OsmMap private constructor(private val db: SQLiteDatabase) {
 
+    /**
+     * Parking data lives in the SAME region database (schema v4+, written by
+     * tools/add_parking.py). Sharing this handle avoids opening the file twice.
+     * Null when the downloaded region predates parking support, so older maps
+     * keep working with the feature simply unavailable.
+     */
+    val parking: com.rfsat.dms.parking.ParkingMonitor? by lazy {
+        com.rfsat.dms.parking.ParkingMonitor.from(db)
+    }
+
+
     private var lastSeg: Long = -1L
 
     companion object {
