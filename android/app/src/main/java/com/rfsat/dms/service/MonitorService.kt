@@ -186,6 +186,7 @@ class MonitorService : Service() {
         "parking_advice" -> {
             parkingEnabled = on
             if (!on) _parkingAdvice.value = null
+            Unit
         }
         "det_lanes" -> detectLaneMarkings = on
         "det_lane_cross" -> detectLaneCrossing = on

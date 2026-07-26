@@ -1,5 +1,10 @@
 # DBM Changelog
 
+## v1.20.19 — build fix (parking toggle branch)
+- Fixed a compile error in applyElement(): the "parking_advice" branch of the
+  = when(...) expression ended in an `if` without `else`, which isn't a valid
+  expression value. Added an explicit Unit so the branch matches the others.
+  No behavioural change.
 ## v1.20.18 — accept schema-4 (parking) region databases + server tooling
 - Raised SUPPORTED_DB_SCHEMA 3 -> 4 so the app accepts parking-enabled region
   databases. Without this, a schema-4 .db from add_parking.py would be rejected
