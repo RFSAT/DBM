@@ -1,5 +1,42 @@
 # DBM Changelog
 
+## v1.20.24 — progress monitoring in the speed-limit converter
+- tools/parking/osm_to_speedlimitdb.py now reports progress through both slow
+  phases: the .pbf scan (a line every 200,000 ways with elapsed time, roads kept
+  and ways/s), and the DB build (a percentage line every 100,000 segments during
+  simplify+insert), plus start/end banners and a VACUUM notice. Makes a
+  multi-minute country conversion observable instead of silent. No app change.
+## v1.20.23 — full-feature region pipeline (speed limits + parking + cameras)
+- build_europe.py now runs the COMPLETE feature pipeline per region: stage 1
+  osm_to_speedlimitdb.py (speed-limit `segments`, schema 3), stage 2 add_parking
+  (parking + speed_camera, schema 5). The stages compose safely — add_parking
+  preserves the segments table and upserts meta — so every final <region>.db has
+  all three feature sets. Verified end-to-end.
+- Per-file VERIFICATION now REQUIRES a non-empty segments table: a DB missing
+  speed limits is a hard FAIL, so an incomplete region can't be shipped by
+  accident. Summary reports segment count + with-maxspeed alongside parking/camera
+  counts.
+- POLICY: --drop-untagged-minor is intentionally NOT passed to the speed-limit
+  converter (keeps full road coverage; untagged minors get implicit defaults).
+  Documented in PIPELINE.md; only enable under real region-size pressure.
+- Added osm_to_speedlimitdb.py and PIPELINE.md to tools/parking/. No app change.
+## v1.20.22 — batch Europe region processor + manifest generator
+- New tools/parking/build_europe.py: processes ALL European Geofabrik country
+  .osm.pbf files in a folder (adds parking + speed cameras via add_parking),
+  then generates index.json in the app's manifest shape.
+  * Limits to recognised Europe COUNTRY regions from europe.html; excludes the
+    "special sub-regions" (Alps, Britain and Ireland, DACH, Great Britain) that
+    duplicate country data, and ignores non-Europe files.
+  * Skips files already processed unless the source .pbf changed (newer
+    download) — tracked in .build_state.json by source size+mtime; --force
+    overrides, --only limits to named regions.
+  * Per-file progress (via add_parking's element counter), plus a per-file
+    SUMMARY and VERIFICATION (schema=5, table counts, cameras-within-Europe-
+    bounds sanity) after each map.
+  * index.json version per region auto-bumps only when the built .db content
+    (sha256) actually changes, so re-runs don't needlessly update phones.
+- Handles date-stamped duplicates (greece-260801 vs greece-latest) by picking
+  the newest file per region. No app code change.
 ## v1.20.21 — progress reporting in the region data extractor
 - tools/parking/add_parking.py now prints progress while scanning a .pbf: a line
   every 500,000 elements showing elapsed time, node/way counts, running found
