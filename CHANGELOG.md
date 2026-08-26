@@ -1,5 +1,11 @@
 # DBM Changelog
 
+## v1.20.29 — build fix (duplicate @Composable annotation)
+- Fixed a compile error ("This annotation is not repeatable") on
+  RecentSignsOverlay: removing the unused SpeedCameraToggleTail stub in v1.20.27
+  left an orphaned @Composable that attached to the next function, which already
+  had its own. Removed the duplicate. Scanned the whole file — no other duplicate
+  or orphaned @Composable annotations. No behavioural change.
 ## v1.20.28 — on-screen speed-limit visibility toggle
 - Added a third on-road quick chip, "Limit On/Off", next to Cameras and Parking.
   It shows/hides the speed-limit roundel with a single tap — no trip into

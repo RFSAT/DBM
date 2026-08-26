@@ -1281,7 +1281,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @Composable
     /** Lower-left overlay: non-speed road signs (no-turn, no-entry, warnings…)
      *  recently seen, kept on screen ~3 s after they leave the frame so the
      *  driver can register turn restrictions etc. at lights or junctions.
