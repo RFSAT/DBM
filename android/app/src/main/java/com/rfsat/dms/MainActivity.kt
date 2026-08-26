@@ -606,7 +606,9 @@ class MainActivity : ComponentActivity() {
             if (role == CameraRole.FRONT) {
                 val scState by (service?.scorer?.state
                     ?: MutableStateFlow(ComplianceState())).collectAsState()
-                val lim = if (analysing) scState.activeSpeedLimitKmh else null
+                val showRoundel by (service?.showLimitRoundel
+                    ?: MutableStateFlow(true)).collectAsState()
+                val lim = if (analysing && showRoundel) scState.activeSpeedLimitKmh else null
                 // Speed-limit roundel, lower-right. Reduced 20% (96 -> 77 dp).
                 lim?.let { value ->
                     Box(Modifier.align(Alignment.BottomEnd).padding(12.dp)
@@ -1167,6 +1169,8 @@ class MainActivity : ComponentActivity() {
         val prefs = remember { getSharedPreferences("dbm", MODE_PRIVATE) }
         var cam by remember { mutableStateOf(prefs.getBoolean("hazard_speed_cameras", false)) }
         var park by remember { mutableStateOf(prefs.getBoolean("parking_advice", false)) }
+        val showLim by (service?.showLimitRoundel
+            ?: MutableStateFlow(true)).collectAsState()
 
         @Composable fun chip(label: String, on: Boolean, onTap: () -> Unit) {
             Box(Modifier.padding(end = 6.dp)
@@ -1190,6 +1194,10 @@ class MainActivity : ComponentActivity() {
                 park = !park
                 service?.setElement("parking_advice", park)
                     ?: prefs.edit().putBoolean("parking_advice", park).apply()
+            }
+            chip(if (showLim) "\u26D4 Limit On" else "\u26D4 Limit Off", showLim) {
+                service?.setShowLimitRoundel(!showLim)
+                    ?: prefs.edit().putBoolean("show_limit_roundel", !showLim).apply()
             }
         }
     }

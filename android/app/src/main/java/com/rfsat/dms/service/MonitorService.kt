@@ -127,6 +127,16 @@ class MonitorService : Service() {
     // some countries — the driver takes responsibility for local legality.
     private val _cameraWarning = MutableStateFlow<String?>(null)
     val cameraWarning: kotlinx.coroutines.flow.StateFlow<String?> = _cameraWarning
+
+    // Whether the on-screen speed-limit roundel is shown. Toggleable from an
+    // on-road quick chip (and persisted). Default on.
+    private val _showLimitRoundel = MutableStateFlow(true)
+    val showLimitRoundel: kotlinx.coroutines.flow.StateFlow<Boolean> = _showLimitRoundel
+    fun setShowLimitRoundel(on: Boolean) {
+        _showLimitRoundel.value = on
+        getSharedPreferences("dbm", MODE_PRIVATE).edit()
+            .putBoolean("show_limit_roundel", on).apply()
+    }
     @Volatile private var cameraEnabled = false
     @Volatile private var lastWarnedCamera: Pair<Double, Double>? = null
     // Camera warning distance in metres. 0 = auto (speed-scaled). >0 = fixed
@@ -304,6 +314,8 @@ class MonitorService : Service() {
             .getBoolean("persistent_limit", true)
         cameraWarnFixedM = getSharedPreferences("dbm", MODE_PRIVATE)
             .getInt("camera_warn_dist_m", 0)
+        _showLimitRoundel.value = getSharedPreferences("dbm", MODE_PRIVATE)
+            .getBoolean("show_limit_roundel", true)
         obd = com.rfsat.dms.obd.ObdManager(this)
         obd.start()
         // Open the on-device speed-limit database (SQLite + R-tree) off the

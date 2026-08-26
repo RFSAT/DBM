@@ -1,5 +1,12 @@
 # DBM Changelog
 
+## v1.20.28 — on-screen speed-limit visibility toggle
+- Added a third on-road quick chip, "Limit On/Off", next to Cameras and Parking.
+  It shows/hides the speed-limit roundel with a single tap — no trip into
+  Settings. Backed by a service StateFlow (showLimitRoundel) so the chip and the
+  roundel stay in sync and the choice persists (pref show_limit_roundel, default
+  on). This is a pure visibility toggle for the roundel; it does not change how
+  the limit is derived (see the persistent/real-only setting for that).
 ## v1.20.27 — configurable speed-camera warning distance
 - The speed-camera warning distance is now user-configurable (Settings, shown
   when camera warnings are enabled):
