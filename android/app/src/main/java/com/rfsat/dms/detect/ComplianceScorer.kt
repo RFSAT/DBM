@@ -41,6 +41,12 @@ class ComplianceScorer {
         _state.value = _state.value.copy(activeSpeedLimitKmh = limitKmh)
     }
 
+    /** Clear the displayed limit (real-only mode: no current map/camera data). */
+    fun clearSpeedLimit() {
+        if (_state.value.activeSpeedLimitKmh != null)
+            _state.value = _state.value.copy(activeSpeedLimitKmh = null)
+    }
+
     /** Call ~1 Hz with current speed and its source. May return a SPEEDING event. */
     fun onSpeed(speedKmh: Int, source: SpeedSource, tMs: Long): RiskEventCandidate? {
         _state.value = _state.value.copy(currentSpeedKmh = speedKmh, speedSource = source)

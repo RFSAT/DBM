@@ -115,12 +115,16 @@ STATE_FILE = ".build_state.json"
 # with parking + cameras (bumping to schema 5). Order matters: the speed-limit
 # tool DROPs/creates tables, so it must run before add_parking, never after.
 #
-# POLICY: --drop-untagged-minor is intentionally NOT passed. Per project
-# decision, we keep full road coverage (untagged minor roads included, with
-# implicit defaults) and only consider dropping them if a region .db becomes
-# impractically large. Do not add that flag here without that justification.
+# POLICY: --drop-untagged-minor IS now passed, to trim the combined DB. It drops
+# only DRIVABLE roads whose highway class is uncommon (not one of the ~12 classes
+# with an implicit default) AND that carry no maxspeed tag — e.g. highway=road
+# (unknown class), highway=track. All common classes (motorway…residential,
+# living_street, unclassified, service) keep their implicit default and are NOT
+# dropped. The app latches the last known limit across such gaps, so a driver
+# keeps a sensible limit on the few dropped roads. Remove the flag if you'd
+# rather maximise coverage over size.
 BASE_CONVERTER = ["python", "osm_to_speedlimitdb.py", "{pbf}", "{db}",
-                  "--region", "{region}"]
+                  "--region", "{region}", "--drop-untagged-minor"]
 
 
 def region_id_from_pbf(fname):

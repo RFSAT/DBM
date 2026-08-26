@@ -129,10 +129,18 @@ class MonitorService : Service() {
     val cameraWarning: kotlinx.coroutines.flow.StateFlow<String?> = _cameraWarning
     @Volatile private var cameraEnabled = false
     @Volatile private var lastWarnedCamera: Pair<Double, Double>? = null
+    // Camera warning distance in metres. 0 = auto (speed-scaled). >0 = fixed
+    // distance the driver has chosen in Settings.
+    @Volatile private var cameraWarnFixedM = 0
     // The speed limit currently shown to the driver. Latched: it persists until a
     // DIFFERENT valid limit (camera or map, camera taking priority via the fuser)
     // replaces it, so the display never blanks on a momentary unknown.
     @Volatile private var shownLimitKmh = -1
+    // Speed-limit display mode. true = persistent (latch last known limit across
+    // gaps — the default, safest for keeping a value on screen). false = real
+    // only (show the limit only where map/camera data exists; blank otherwise).
+    // User-selectable so the driver knows exactly how the limit is derived.
+    @Volatile private var persistentLimit = true
     private var road: RoadAnalyzer? = null
     private lateinit var lanes: LaneAnalyzer
     private var signs: SignAnalyzer? = null
@@ -200,6 +208,13 @@ class MonitorService : Service() {
         "hazard_speed_cameras" -> {
             cameraEnabled = on
             if (!on) _cameraWarning.value = null
+            Unit
+        }
+        "persistent_limit" -> {
+            persistentLimit = on
+            // In real-only mode, drop any currently-latched value immediately so
+            // the change is visible at once rather than at the next data gap.
+            if (!on && shownLimitKmh <= 0) scorer.clearSpeedLimit()
             Unit
         }
         "det_lanes" -> detectLaneMarkings = on
@@ -285,6 +300,10 @@ class MonitorService : Service() {
             .getBoolean("parking_advice", false)
         cameraEnabled = getSharedPreferences("dbm", MODE_PRIVATE)
             .getBoolean("hazard_speed_cameras", false)
+        persistentLimit = getSharedPreferences("dbm", MODE_PRIVATE)
+            .getBoolean("persistent_limit", true)
+        cameraWarnFixedM = getSharedPreferences("dbm", MODE_PRIVATE)
+            .getInt("camera_warn_dist_m", 0)
         obd = com.rfsat.dms.obd.ObdManager(this)
         obd.start()
         // Open the on-device speed-limit database (SQLite + R-tree) off the
@@ -362,6 +381,11 @@ class MonitorService : Service() {
                     } else if (fused.limitKmh > 0) {
                         // same value re-confirmed; keep scorer in sync, no log spam
                         scorer.onSpeedLimitSeen(fused.limitKmh)
+                    } else if (!persistentLimit) {
+                        // Real-only mode: no current map/camera limit -> clear the
+                        // display rather than latching the last value.
+                        shownLimitKmh = -1
+                        scorer.clearSpeedLimit()
                     }
                 }
 
@@ -385,6 +409,14 @@ class MonitorService : Service() {
     var cameraManager: com.rfsat.dms.capture.PhoneCameraManager? = null
 
     fun setAudioAlerts(on: Boolean) { alerter.audioEnabled = on }
+
+    /** Set the speed-camera warning distance in metres; 0 = auto (speed-scaled).
+     *  Persisted and applied live. */
+    fun setCameraWarnDistance(metres: Int) {
+        cameraWarnFixedM = metres.coerceAtLeast(0)
+        getSharedPreferences("dbm", MODE_PRIVATE).edit()
+            .putInt("camera_warn_dist_m", cameraWarnFixedM).apply()
+    }
     fun setTtsAlerts(on: Boolean) { alerter.ttsEnabled = on }
     /** N: how many failed re-confirmations evict a cached sign (sign-removed). */
     fun setCacheEvictMisses(n: Int) {
@@ -691,8 +723,11 @@ class MonitorService : Service() {
     private fun checkCamerasAhead(lat: Double, lon: Double, heading: Double, spd: Int) {
         if (!cameraEnabled || heading.isNaN()) return
         val cm = osmMap?.cameras ?: return
-        // ~10 s of lead time, clamped to a sensible band; faster roads warn earlier.
-        val aheadM = (spd / 3.6 * 10.0).coerceIn(150.0, 800.0)
+        // Warning distance: either a user-set fixed distance, or auto (speed-
+        // scaled ~10 s lead, clamped) so faster roads warn earlier. Configurable
+        // in Settings; default is auto.
+        val aheadM = if (cameraWarnFixedM > 0) cameraWarnFixedM.toDouble()
+                     else (spd / 3.6 * 10.0).coerceIn(150.0, 800.0)
         val nearest = cm.camerasAhead(lat, lon, heading.toFloat(), aheadM).firstOrNull()
         if (nearest == null) {
             if (_cameraWarning.value != null) _cameraWarning.value = null

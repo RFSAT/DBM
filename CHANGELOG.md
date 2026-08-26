@@ -1,5 +1,41 @@
 # DBM Changelog
 
+## v1.20.27 — configurable speed-camera warning distance
+- The speed-camera warning distance is now user-configurable (Settings, shown
+  when camera warnings are enabled):
+  * Auto (default): speed-scaled ~10 s lead time (150–800 m), so faster roads
+    warn from farther away — the previous fixed behaviour, now explicit.
+  * Fixed: a constant distance the driver sets on a slider (100–1000 m, 50 m
+    steps), applied regardless of speed.
+  Stored as camera_warn_dist_m (0 = auto). Applied live via
+  MonitorService.setCameraWarnDistance(); feeds the camerasAhead() query radius.
+## v1.20.26 — speed-limit display mode + on-screen quick toggles
+- NEW setting "Persistent speed limit": choose how the limit is shown.
+  * Persistent (default): keep the last known limit on screen across gaps where
+    the map/camera has no data; it changes only when a new limit is detected.
+  * Real only: show a limit ONLY where map/camera data exists, blank otherwise —
+    the driver sees exactly what is known, nothing carried over.
+  Makes the (previously implicit) latch behaviour explicit and user-selectable,
+  so drivers are aware how the displayed limit is derived. Added
+  ComplianceScorer.clearSpeedLimit() for the real-only path.
+- NEW on-screen quick toggles on the road view (top-left chips): flip Speed
+  Camera warnings and Parking advice with a single tap, no trip into Settings.
+  They write the same prefs and reflect current state (green = on).
+- Clarified how PARKING is shown: the parking advisory banner appears when the
+  vehicle comes to REST (not continuously while driving) and only where the
+  region DB has parking data for that spot; speed-camera warnings appear while
+  approaching. Both remain advisory-only.
+## v1.20.25 — enable --drop-untagged-minor to trim combined DB size
+- build_europe.py now passes --drop-untagged-minor to the speed-limit stage.
+  This drops only drivable roads with an uncommon highway class AND no maxspeed
+  (e.g. highway=road, highway=track); all common classes keep implicit defaults,
+  so the size saving is modest and coverage loss is limited to uncommon roads.
+- No app change needed for "assume last limit still valid": the app ALREADY
+  latches the last shown speed limit across any gap — when a segment is missing
+  or has no maxspeed, match() returns -1, the fuser yields no new limit, and the
+  display holds the last valid value. Confirmed in MonitorService/OsmMap. This is
+  the intended interaction with dropped roads: the driver keeps a sensible limit.
+- PIPELINE.md updated to document the flag and the latch interaction.
 ## v1.20.24 — progress monitoring in the speed-limit converter
 - tools/parking/osm_to_speedlimitdb.py now reports progress through both slow
   phases: the .pbf scan (a line every 200,000 ways with elapsed time, roads kept

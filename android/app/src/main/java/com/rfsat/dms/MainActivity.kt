@@ -625,6 +625,12 @@ class MainActivity : ComponentActivity() {
                 // lower-left for a few seconds after they leave the frame, for
                 // the driver's information (e.g. turn restrictions at lights).
                 if (analysing) RecentSignsOverlay()
+
+                // Quick on-screen toggles (cameras / parking) so the driver can
+                // switch these without opening Settings. Small chips, lower-left,
+                // above the recent-signs area. They write the same prefs as the
+                // Settings switches and reflect current state.
+                if (analysing) QuickToggles()
                 // Parking advisory banner: appears when stopped and the region
                 // has parking data for this spot. Advisory only — informs, never
                 // accuses. Sits above the speed badge, top-centre of the road view.
@@ -1059,6 +1065,7 @@ class MainActivity : ComponentActivity() {
                 fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
             DetectionElementRow("Road signs (speed limits)", "det_signs")
+            SpeedLimitModeRow()
             DetectionElementRow("Lane markings (overlay)", "det_lanes")
             DetectionElementRow("Single/double line-crossing events", "det_lane_cross")
             DetectionElementRow("Hard-shoulder driving", "det_shoulder")
@@ -1145,6 +1152,68 @@ class MainActivity : ComponentActivity() {
      *  dynamic speed-camera warnings are prohibited in some countries, so the
      *  driver opts in and is responsible for local legality. Data is read from
      *  the offline OpenStreetMap region database. */
+    /** Choice of how the speed limit is displayed:
+     *  - Persistent (default): keep the last known limit on screen across gaps
+     *    where the map/camera has no data — the value only changes when a new
+     *    limit is detected.
+     *  - Real only: show a limit ONLY where map or camera data exists; blank when
+     *    it doesn't. The driver sees exactly what is known, nothing inferred.
+     *  A switch (not buried) so the driver is aware which behaviour is active. */
+    /** Small on-road quick toggles for camera warnings and parking advice, so
+     *  the driver can flip them with a single tap instead of opening Settings.
+     *  Positioned top-start; each chip shows its state by colour/label. */
+    @Composable
+    private fun androidx.compose.foundation.layout.BoxScope.QuickToggles() {
+        val prefs = remember { getSharedPreferences("dbm", MODE_PRIVATE) }
+        var cam by remember { mutableStateOf(prefs.getBoolean("hazard_speed_cameras", false)) }
+        var park by remember { mutableStateOf(prefs.getBoolean("parking_advice", false)) }
+
+        @Composable fun chip(label: String, on: Boolean, onTap: () -> Unit) {
+            Box(Modifier.padding(end = 6.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (on) EnactGreen.copy(alpha = 0.85f)
+                                else Color(0x66000000))
+                    .clickable { onTap() }
+                    .padding(horizontal = 10.dp, vertical = 5.dp)) {
+                Text(label, color = if (on) Color.Black else EnactOnSurfaceDim,
+                    fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        Row(Modifier.align(Alignment.TopStart).padding(8.dp)) {
+            chip(if (cam) "\uD83D\uDCF7 Cameras On" else "\uD83D\uDCF7 Cameras Off", cam) {
+                cam = !cam
+                service?.setElement("hazard_speed_cameras", cam)
+                    ?: prefs.edit().putBoolean("hazard_speed_cameras", cam).apply()
+            }
+            chip(if (park) "P Parking On" else "P Parking Off", park) {
+                park = !park
+                service?.setElement("parking_advice", park)
+                    ?: prefs.edit().putBoolean("parking_advice", park).apply()
+            }
+        }
+    }
+
+    @Composable
+    private fun SpeedLimitModeRow() {
+        val prefs = remember { getSharedPreferences("dbm", MODE_PRIVATE) }
+        var persistent by remember {
+            mutableStateOf(prefs.getBoolean("persistent_limit", true)) }
+        SettingRow("Persistent speed limit (keep last until it changes)", persistent) {
+            persistent = it
+            service?.setElement("persistent_limit", it)
+                ?: prefs.edit().putBoolean("persistent_limit", it).apply()
+        }
+        Text(if (persistent)
+                "Keeps the last known limit on screen where the map/camera has no " +
+                "data. The shown limit changes only when a new one is detected."
+            else
+                "Shows a limit only where map or camera data exists — blank when it " +
+                "doesn't. You see only what is known, nothing carried over.",
+            color = EnactOnSurfaceDim, fontSize = 10.sp,
+            modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
+    }
+
     @Composable
     private fun SpeedCameraToggle() {
         val prefs = remember { getSharedPreferences("dbm", MODE_PRIVATE) }
@@ -1160,9 +1229,51 @@ class MainActivity : ComponentActivity() {
                 "Data comes from OpenStreetMap and may be incomplete or outdated.",
                 color = EnactWarning, fontSize = 10.sp,
                 modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
+            CameraDistanceControl()
         }
     }
 
+    /** Warning distance for speed cameras. Auto = speed-scaled (~10 s lead, so
+     *  faster roads warn earlier). Fixed = a constant distance the driver sets.
+     *  Stored as camera_warn_dist_m: 0 means auto, >0 is the fixed metres. */
+    @Composable
+    private fun CameraDistanceControl() {
+        val prefs = remember { getSharedPreferences("dbm", MODE_PRIVATE) }
+        var dist by remember { mutableStateOf(prefs.getInt("camera_warn_dist_m", 0)) }
+        var fixed by remember { mutableStateOf(dist > 0) }
+        // Remember a sensible slider value even while in Auto, so toggling Fixed
+        // on doesn't jump from nothing.
+        var sliderM by remember { mutableStateOf(if (dist > 0) dist.toFloat() else 300f) }
+        Column(Modifier.fillMaxWidth().padding(top = 4.dp)
+                .clip(RoundedCornerShape(12.dp)).background(EnactSurface)
+                .padding(horizontal = 12.dp, vertical = 8.dp)) {
+            SettingRow("Fixed warning distance", fixed) {
+                fixed = it
+                val v = if (it) sliderM.toInt() else 0
+                dist = v
+                service?.setCameraWarnDistance(v)
+                    ?: prefs.edit().putInt("camera_warn_dist_m", v).apply()
+            }
+            if (fixed) {
+                Text("Warn ${sliderM.toInt()} m before a camera",
+                    color = EnactOnSurface, fontSize = 13.sp)
+                Slider(value = sliderM, onValueChange = { sliderM = it },
+                    onValueChangeFinished = {
+                        val v = sliderM.toInt()
+                        dist = v
+                        service?.setCameraWarnDistance(v)
+                            ?: prefs.edit().putInt("camera_warn_dist_m", v).apply()
+                    },
+                    valueRange = 100f..1000f, steps = 17)   // 100..1000 in 50 m steps
+            } else {
+                Text("Auto: warns about 10 s ahead, so faster roads warn from " +
+                    "farther away (150–800 m).",
+                    color = EnactOnSurfaceDim, fontSize = 11.sp)
+            }
+        }
+    }
+
+    @Composable
     /** Lower-left overlay: non-speed road signs (no-turn, no-entry, warnings…)
      *  recently seen, kept on screen ~3 s after they leave the frame so the
      *  driver can register turn restrictions etc. at lights or junctions.

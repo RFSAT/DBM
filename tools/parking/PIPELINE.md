@@ -35,12 +35,19 @@ existing segments table).
 
 ## POLICY: --drop-untagged-minor
 
-osm_to_speedlimitdb.py supports `--drop-untagged-minor` (drops roads with no
-maxspeed and no implicit default, shrinking the DB). build_europe.py does NOT
-pass it: we keep full road coverage by default. Only add it — by editing the
-BASE_CONVERTER line in build_europe.py — if a specific region's .db becomes
-impractically large. Untagged minor roads still get sensible implicit defaults
-by highway class, so keeping them costs size but improves coverage.
+osm_to_speedlimitdb.py supports `--drop-untagged-minor`, and build_europe.py
+NOW PASSES IT (in the BASE_CONVERTER line) to trim the combined DB. It drops only
+DRIVABLE roads whose highway class is uncommon (not one of the ~12 classes with
+an implicit default) AND that carry no maxspeed — e.g. highway=road (unknown
+class), highway=track. All common classes (motorway…residential, living_street,
+unclassified, service) keep their implicit default and are NOT dropped, so the
+size saving is modest and the coverage loss is limited to uncommon roads.
+
+The app LATCHES the last known speed limit across any gap: when a segment is
+missing (dropped) or has no maxspeed, match() returns -1, the fuser yields no new
+limit, and the display keeps the last valid value. So a driver retains a sensible
+limit on the few dropped roads. Remove the flag from BASE_CONVERTER if you prefer
+maximum coverage over size.
 
 ## Then deploy
 
