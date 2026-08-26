@@ -42,14 +42,20 @@ v1.20.14.
 | `com.google.mediapipe:tasks-vision` | 0.10.20 — `libmediapipe_tasks_vision_jni.so` 4 KB-aligned | **0.10.26.1** | MediaPipe release notes: all current Google Maven packages are 16 KB-aligned; 0.10.26.1 also restores ARM v7. |
 | `androidx.camera:*` | 1.4.1 — `libimage_processing_util_jni.so`, `libsurface_util_jni.so` | **1.5.0** | AndroidX 16 KB work landed in the 1.5.x line. APIs used here are source-compatible. |
 
-### Possibly still outstanding
+### RESOLVED — Play accepted v1.20.19 (live on Google Play)
 
-| Library | Ships | Note |
+The 16 KB requirement is **satisfied**: Google Play accepted the v1.20.19 bundle
+and it is live. The libraries below were flagged as *possibly* unaligned during
+investigation, but the accepted build proves they are not a blocker in practice —
+either they are aligned in the versions shipped, or Play does not reject on them.
+No further action needed unless a future Play re-check flags a specific file.
+
+| Library | Ships | Status |
 |---|---|---|
-| `com.google.mlkit:text-recognition:16.0.1` | `libmlkit_google_ocr_pipeline.so` | Not yet bumped — no confirmed 16 KB version identified. |
-| `androidx.graphics:graphics-path` (transitive from Compose BOM 2024.12.01) | `libandroidx.graphics.path.so` | Bump the Compose BOM, or override directly: `implementation("androidx.graphics:graphics-path:<newer>")`. |
+| `com.google.mlkit:text-recognition:16.0.1` | `libmlkit_google_ocr_pipeline.so` | Accepted by Play in v1.20.19 — not a blocker. |
+| `androidx.graphics:graphics-path` (transitive from Compose BOM) | `libandroidx.graphics.path.so` | Accepted by Play in v1.20.19 — not a blocker. |
 
-**Do not upload to find out.** CI now runs a
+**Do not upload to find out.** CI runs a
 **"Check 16 KB page alignment of native libraries"** step that unzips the built
 APK and runs `readelf -lW` on every `.so`, printing:
 

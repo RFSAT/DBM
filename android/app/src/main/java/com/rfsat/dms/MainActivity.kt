@@ -628,13 +628,30 @@ class MainActivity : ComponentActivity() {
                 // Parking advisory banner: appears when stopped and the region
                 // has parking data for this spot. Advisory only — informs, never
                 // accuses. Sits above the speed badge, top-centre of the road view.
+                // Speed-camera warning banner (opt-in). Amber, top-centre, above
+                // the parking advisory. Advisory only; the driver has taken legal
+                // responsibility by enabling it in settings.
+                val camWarn by (service?.cameraWarning
+                    ?: MutableStateFlow<String?>(null)).collectAsState()
+                if (analysing && camWarn != null) {
+                    Box(Modifier.align(Alignment.TopCenter).padding(top = 8.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xE6C2410C))
+                            .padding(horizontal = 12.dp, vertical = 5.dp)) {
+                        Text("\uD83D\uDCF7  ${camWarn}", color = Color.White,
+                            fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
                 val parkAdvice by (service?.parkingAdvice
                     ?: MutableStateFlow<String?>(null)).collectAsState()
                 if (analysing && parkAdvice != null) {
                     val warn = parkAdvice!!.startsWith("No ") ||
                         parkAdvice!!.startsWith("Restricted") ||
                         parkAdvice!!.contains("only") || parkAdvice!!.contains("Private")
-                    Box(Modifier.align(Alignment.TopCenter).padding(top = 8.dp)
+                    // Sit below the camera banner if one is showing.
+                    val topPad = if (camWarn != null) 44.dp else 8.dp
+                    Box(Modifier.align(Alignment.TopCenter).padding(top = topPad)
                             .clip(RoundedCornerShape(8.dp))
                             .background(if (warn) Color(0xCCB5551F) else Color(0xCC1F6F6B))
                             .padding(horizontal = 11.dp, vertical = 5.dp)) {
@@ -1051,6 +1068,7 @@ class MainActivity : ComponentActivity() {
             DetectionElementRow("Driver state (eyes, gaze, mirrors)", "det_driver")
             DetectionElementRow("Parking advice when stopped (where data exists)",
                 "parking_advice", default = false)
+            SpeedCameraToggle()
             DetectionElementRow(
                 "Read lead-vehicle plate on serious hazard (stored locally only)",
                 "capture_plate", default = false)
@@ -1120,6 +1138,28 @@ class MainActivity : ComponentActivity() {
         SettingRow(label, on) {
             on = it
             service?.setElement(key, it) ?: prefs.edit().putBoolean(key, it).apply()
+        }
+    }
+
+    /** Speed-camera warning toggle. OFF by default, with a visible legal caveat:
+     *  dynamic speed-camera warnings are prohibited in some countries, so the
+     *  driver opts in and is responsible for local legality. Data is read from
+     *  the offline OpenStreetMap region database. */
+    @Composable
+    private fun SpeedCameraToggle() {
+        val prefs = remember { getSharedPreferences("dbm", MODE_PRIVATE) }
+        var on by remember { mutableStateOf(prefs.getBoolean("hazard_speed_cameras", false)) }
+        SettingRow("Speed camera warnings (OpenStreetMap)", on) {
+            on = it
+            service?.setElement("hazard_speed_cameras", it)
+                ?: prefs.edit().putBoolean("hazard_speed_cameras", it).apply()
+        }
+        if (on) {
+            Text("⚠ Dynamic speed-camera warnings are prohibited in some countries. " +
+                "You are responsible for ensuring this is legal where you drive. " +
+                "Data comes from OpenStreetMap and may be incomplete or outdated.",
+                color = EnactWarning, fontSize = 10.sp,
+                modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
         }
     }
 

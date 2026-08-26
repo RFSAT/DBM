@@ -29,7 +29,7 @@ class MapRepository(private val ctx: Context) {
     companion object {
         private const val TAG = "MapRepository"
         // The .db schema versions this app build can read.
-        const val SUPPORTED_DB_SCHEMA = 4
+        const val SUPPORTED_DB_SCHEMA = 5
     }
 
     fun installed(): Map<String, InstalledMap> {

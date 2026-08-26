@@ -46,3 +46,16 @@ Both tables mirror the existing `segments` table on purpose:
    `ch.poole:OpeningHoursParser` (used by JOSM/Vespucci) rather than writing it.
 3. **Runtime + UI** — `ParkingMonitor` reading these tables, advisory display,
    the finder, and the settings toggle.
+
+
+## Speed cameras (schema 5)
+
+`add_parking.py` also extracts `highway=speed_camera` nodes into a `speed_camera`
+table (id, lat, lon, maxspeed, direction, kind + bbox index). The app reads these
+for advance warnings, gated behind an explicit opt-in ("Speed camera warnings" in
+Settings, OFF by default).
+
+LEGAL: dynamic speed-camera warnings are prohibited in some countries. The app
+places responsibility on the driver (opt-in with a visible caveat), consistent
+with OSM's guidance that such warnings must be an explicit choice. Confirm the
+position for each market you distribute to.

@@ -49,6 +49,10 @@ class OsmMap private constructor(private val db: SQLiteDatabase) {
         com.rfsat.dms.parking.ParkingMonitor.from(db)
     }
 
+    /** Speed-camera data (schema v5+), sharing this db handle. Null on older
+     *  region databases, so the feature is simply unavailable there. */
+    val cameras: CameraMonitor? by lazy { CameraMonitor.from(db) }
+
 
     private var lastSeg: Long = -1L
 

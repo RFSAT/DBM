@@ -1,5 +1,22 @@
 # DBM Changelog
 
+## v1.20.20 — speed-camera warnings (OpenStreetMap)
+- NEW: advance speed-camera warnings sourced from OpenStreetMap
+  highway=speed_camera nodes (offline, from the region database — no live
+  connection). A camera ahead (within a speed-scaled distance, ~10 s lead, and
+  within +/-60 deg of travel) raises an amber advisory banner, once per camera,
+  cleared when passed.
+- Enable in Settings > Detection elements > "Speed camera warnings". OFF BY
+  DEFAULT with a visible legal caveat: dynamic speed-camera warnings are
+  prohibited in some countries, so the driver opts in and is responsible for
+  local legality (per OSM guidance). Confirm the legal position per market.
+- Data pipeline: tools/parking/add_parking.py now also extracts a speed_camera
+  table (schema_version 5). App SUPPORTED_DB_SCHEMA raised 4 -> 5. Region DBs
+  must be rebuilt and redeployed for warnings to have data; the feature stays
+  silent (not wrong) where a region lacks it.
+- New fusion/CameraMonitor.kt (ahead-of-driver query with bearing filter);
+  geometry validated (ahead warns; behind/side skipped). Extraction logic
+  unit-tested (tag parsing, schema, spatial query).
 ## v1.20.19 — build fix (parking toggle branch)
 - Fixed a compile error in applyElement(): the "parking_advice" branch of the
   = when(...) expression ended in an `if` without `else`, which isn't a valid

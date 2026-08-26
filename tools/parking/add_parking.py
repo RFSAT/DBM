@@ -34,7 +34,7 @@ import sqlite3
 import struct
 import sys
 
-SCHEMA_VERSION = 4          # bumped: adds parking_lot + parking_curb
+SCHEMA_VERSION = 5          # v4 parking; v5 adds speed_camera
 COORD_SCALE = 1e7
 
 # --- tag interpretation -----------------------------------------------------
@@ -101,6 +101,29 @@ def lot_tags(tags):
     }
 
 
+def camera_tags(tags):
+    """Extract speed-camera info from a node's tags, or None.
+
+    Recognises the standard `highway=speed_camera` node tagging. Optional
+    maxspeed and direction enrich the warning. Enforcement type is only read if
+    tagged on the node itself (the full picture lives in an `enforcement`
+    relation we don't traverse). Legality of surfacing camera warnings is a
+    CONSUMER concern handled in the app (opt-in), not an extraction concern.
+    """
+    if tags.get("highway") != "speed_camera":
+        return None
+    ms = tags.get("maxspeed")
+    try:
+        ms = int(str(ms).split()[0]) if ms else None    # "50" or "50 mph" -> 50
+    except (ValueError, IndexError):
+        ms = None
+    return {
+        "maxspeed": ms,
+        "direction": tags.get("direction"),
+        "kind": tags.get("enforcement"),
+    }
+
+
 def pack_coords(coords):
     """Pack [(lat, lon), ...] as little-endian int32 pairs (deg * 1e7).
 
@@ -156,6 +179,18 @@ CREATE TABLE parking_lot(
   minLat REAL, maxLat REAL, minLon REAL, maxLon REAL
 );
 CREATE INDEX idx_lot_bbox ON parking_lot(minLat, maxLat);
+
+DROP TABLE IF EXISTS speed_camera;
+CREATE TABLE speed_camera(
+  id        INTEGER,
+  lat       REAL,
+  lon       REAL,
+  maxspeed  INTEGER,     -- enforced limit if tagged, else NULL
+  direction TEXT,        -- forward | backward | both | compass, if tagged
+  kind      TEXT,        -- enforcement type if tagged on the node (maxspeed/average_speed)
+  minLat REAL, maxLat REAL, minLon REAL, maxLon REAL
+);
+CREATE INDEX idx_cam_bbox ON speed_camera(minLat, maxLat);
 """
 
 
@@ -181,13 +216,14 @@ def run(pbf, db_path):
         sys.exit("pyosmium is required for extraction: pip install osmium")
 
     con = open_db(db_path)
-    stats = {"curb": 0, "lot": 0}
+    stats = {"curb": 0, "lot": 0, "cam": 0}
 
     class Handler(osmium.SimpleHandler):
         def __init__(self):
             super().__init__()
             self.curb_rows = []
             self.lot_rows = []
+            self.cam_rows = []
 
         def _lot(self, o, coords):
             info = lot_tags(dict(o.tags))
@@ -203,8 +239,17 @@ def run(pbf, db_path):
             stats["lot"] += 1
 
         def node(self, n):
-            if n.location.valid():
-                self._lot(n, [(n.location.lat, n.location.lon)])
+            if not n.location.valid():
+                return
+            lat, lon = n.location.lat, n.location.lon
+            self._lot(n, [(lat, lon)])
+            cam = camera_tags(dict(n.tags))
+            if cam is not None:
+                m = 0.0002    # ~22 m bbox so the indexed range query finds it
+                self.cam_rows.append((
+                    n.id, lat, lon, cam["maxspeed"], cam["direction"], cam["kind"],
+                    lat - m, lat + m, lon - m, lon + m))
+                stats["cam"] += 1
 
         def way(self, w):
             try:
@@ -237,13 +282,17 @@ def run(pbf, db_path):
         "INSERT INTO parking_curb VALUES(" + ",".join("?" * 17) + ")", h.curb_rows)
     con.executemany(
         "INSERT INTO parking_lot VALUES(" + ",".join("?" * 14) + ")", h.lot_rows)
+    con.executemany(
+        "INSERT INTO speed_camera VALUES(" + ",".join("?" * 10) + ")", h.cam_rows)
     set_meta(con, "parking_curb_rows", stats["curb"])
     set_meta(con, "parking_lot_rows", stats["lot"])
+    set_meta(con, "speed_camera_rows", stats["cam"])
     set_meta(con, "schema_version", SCHEMA_VERSION)
     con.commit()
 
     print(f"parking_lot  : {stats['lot']:>7} features")
     print(f"parking_curb : {stats['curb']:>7} side-records")
+    print(f"speed_camera : {stats['cam']:>7} cameras")
     if stats["curb"] == 0:
         print("\nNo curbside restriction data in this region. That is common —")
         print("the app must present this as 'no data', never as 'no restrictions'.")

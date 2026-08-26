@@ -120,6 +120,15 @@ class MonitorService : Service() {
     val parkingAdvice: kotlinx.coroutines.flow.StateFlow<String?> = _parkingAdvice
     @Volatile private var parkingCheckedAtStop = false
     @Volatile var parkingEnabled = false; private set
+
+    // --- Speed-camera warnings ---------------------------------------------
+    // Advance warning of a mapped speed camera ahead. OFF by default and gated by
+    // an explicit opt-in, because dynamic speed-camera warnings are illegal in
+    // some countries — the driver takes responsibility for local legality.
+    private val _cameraWarning = MutableStateFlow<String?>(null)
+    val cameraWarning: kotlinx.coroutines.flow.StateFlow<String?> = _cameraWarning
+    @Volatile private var cameraEnabled = false
+    @Volatile private var lastWarnedCamera: Pair<Double, Double>? = null
     // The speed limit currently shown to the driver. Latched: it persists until a
     // DIFFERENT valid limit (camera or map, camera taking priority via the fuser)
     // replaces it, so the display never blanks on a momentary unknown.
@@ -186,6 +195,11 @@ class MonitorService : Service() {
         "parking_advice" -> {
             parkingEnabled = on
             if (!on) _parkingAdvice.value = null
+            Unit
+        }
+        "hazard_speed_cameras" -> {
+            cameraEnabled = on
+            if (!on) _cameraWarning.value = null
             Unit
         }
         "det_lanes" -> detectLaneMarkings = on
@@ -269,6 +283,8 @@ class MonitorService : Service() {
         // on its own coroutine and falls back silently to GPS/visual if absent.
         parkingEnabled = getSharedPreferences("dbm", MODE_PRIVATE)
             .getBoolean("parking_advice", false)
+        cameraEnabled = getSharedPreferences("dbm", MODE_PRIVATE)
+            .getBoolean("hazard_speed_cameras", false)
         obd = com.rfsat.dms.obd.ObdManager(this)
         obd.start()
         // Open the on-device speed-limit database (SQLite + R-tree) off the
@@ -319,6 +335,8 @@ class MonitorService : Service() {
                         else Double.NaN
                     } ?: Double.NaN
                     lastFusePos = pos
+
+                    checkCamerasAhead(lat, lon, heading, bestSpeedKmh())
 
                     val mr = osmMap?.match(lat, lon, heading)
                     val mapLimit = mr?.mapLimit ?: -1
@@ -670,6 +688,25 @@ class MonitorService : Service() {
     }
 
     /** Record that a sign scan has now run at the current stop location. */
+    private fun checkCamerasAhead(lat: Double, lon: Double, heading: Double, spd: Int) {
+        if (!cameraEnabled || heading.isNaN()) return
+        val cm = osmMap?.cameras ?: return
+        // ~10 s of lead time, clamped to a sensible band; faster roads warn earlier.
+        val aheadM = (spd / 3.6 * 10.0).coerceIn(150.0, 800.0)
+        val nearest = cm.camerasAhead(lat, lon, heading.toFloat(), aheadM).firstOrNull()
+        if (nearest == null) {
+            if (_cameraWarning.value != null) _cameraWarning.value = null
+            lastWarnedCamera = null
+            return
+        }
+        val key = nearest.lat to nearest.lon
+        if (key == lastWarnedCamera) return          // already warned for this one
+        lastWarnedCamera = key
+        val limit = nearest.maxspeed?.let { " · $it km/h zone" } ?: ""
+        _cameraWarning.value = "Speed camera ${nearest.distanceM.toInt()} m ahead$limit"
+        DLog.i(TAG, "camera warning: ${_cameraWarning.value}")
+    }
+
     private fun checkParkingAtStop(spd: Int) {
         if (!parkingEnabled) return
         if (spd > STATIONARY_KMH) {
