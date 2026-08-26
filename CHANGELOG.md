@@ -1,5 +1,11 @@
 # DBM Changelog
 
+## v1.20.21 — progress reporting in the region data extractor
+- tools/parking/add_parking.py now prints progress while scanning a .pbf: a line
+  every 500,000 elements showing elapsed time, node/way counts, running found
+  counts (parking lots, curb records, speed cameras) and the processing rate, plus
+  clear start/end banners for the scan and database-write phases. Makes a
+  multi-minute country extract observable instead of silent. No app code change.
 ## v1.20.20 — speed-camera warnings (OpenStreetMap)
 - NEW: advance speed-camera warnings sourced from OpenStreetMap
   highway=speed_camera nodes (offline, from the region database — no live

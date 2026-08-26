@@ -1,0 +1,38 @@
+# Reproducible environment for the PyTorch -> LiteRT conversion of Depth Anything
+# V2. The litert-torch converter (and its litert-converter / ai-edge-tensorflow
+# deps) publish wheels ONLY for Linux + CPython 3.10/3.11, which is why the pip
+# install fails on Windows/macOS natively. This container pins a known-good base
+# so the conversion runs the same everywhere, including from a Windows host via
+# Docker Desktop.
+#
+# Build:
+#   docker build -f Dockerfile.convert -t dbm-depth-convert .
+# Run (mounts the current dir so the .tflite lands on your host):
+#   docker run --rm -v "${PWD}:/work" dbm-depth-convert \
+#       python convert_depth_anything.py --out /work/dav2_small_metric.tflite
+#
+# For the reference harness (needs your captured session mounted in):
+#   docker run --rm -v "${PWD}:/work" -v "/path/to/session:/session" \
+#       dbm-depth-convert \
+#       python run_depth_reference.py --session /session --out /work/ref_out
+
+FROM python:3.11-slim
+
+# System libs OpenCV needs at runtime.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libglib2.0-0 libgl1 && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /work
+
+# CPU-only torch keeps the image small; the conversion trace does not need CUDA.
+# (If you want GPU, use a cuda base image and the matching torch wheel instead.)
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir \
+        torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir \
+        litert-torch ai-edge-litert \
+        transformers pillow numpy opencv-python-headless
+
+# The scripts are mounted at run time via -v, so nothing else to copy.
+CMD ["python", "-c", "import litert_torch; print('litert-torch import OK')"]

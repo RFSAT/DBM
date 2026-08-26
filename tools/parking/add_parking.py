@@ -218,6 +218,29 @@ def run(pbf, db_path):
     con = open_db(db_path)
     stats = {"curb": 0, "lot": 0, "cam": 0}
 
+    import time as _time
+    progress = {"nodes": 0, "ways": 0, "t0": _time.time(),
+                "last_t": _time.time(), "last_n": 0}
+    PROGRESS_EVERY = 500_000    # print roughly every half-million elements
+
+    def _tick(kind):
+        """Print a progress line every PROGRESS_EVERY elements, with rate."""
+        total = progress["nodes"] + progress["ways"]
+        if total % PROGRESS_EVERY != 0:
+            return
+        now = _time.time()
+        dt = now - progress["last_t"]
+        dn = total - progress["last_n"]
+        rate = (dn / dt) if dt > 0 else 0
+        elapsed = now - progress["t0"]
+        print(f"  [{elapsed:6.0f}s] {kind:5s}  "
+              f"nodes={progress['nodes']:>10,}  ways={progress['ways']:>9,}  "
+              f"| found: lots={stats['lot']:>6,} curb={stats['curb']:>6,} "
+              f"cams={stats['cam']:>4,}  "
+              f"| {rate/1000:.0f}k elem/s", flush=True)
+        progress["last_t"] = now
+        progress["last_n"] = total
+
     class Handler(osmium.SimpleHandler):
         def __init__(self):
             super().__init__()
@@ -239,6 +262,8 @@ def run(pbf, db_path):
             stats["lot"] += 1
 
         def node(self, n):
+            progress["nodes"] += 1
+            _tick("nodes")
             if not n.location.valid():
                 return
             lat, lon = n.location.lat, n.location.lon
@@ -252,6 +277,8 @@ def run(pbf, db_path):
                 stats["cam"] += 1
 
         def way(self, w):
+            progress["ways"] += 1
+            _tick("ways")
             try:
                 coords = [(nd.lat, nd.lon) for nd in w.nodes if nd.location.valid()]
             except osmium.InvalidLocationError:
@@ -276,7 +303,22 @@ def run(pbf, db_path):
 
     h = Handler()
     # locations=True builds the node-location index needed for way geometry.
+    import os as _os
+    try:
+        sz = _os.path.getsize(pbf) / 1e6
+        print(f"Scanning {pbf} ({sz:.0f} MB). Nodes are processed first, then "
+              f"ways; progress prints every {PROGRESS_EVERY:,} elements.", flush=True)
+    except OSError:
+        print(f"Scanning {pbf} ...", flush=True)
+    print("(A full country takes several minutes and builds a node-location "
+          "index first — the first progress line may take a little while.)",
+          flush=True)
     h.apply_file(pbf, locations=True)
+
+    total = progress["nodes"] + progress["ways"]
+    elapsed = _time.time() - progress["t0"]
+    print(f"Scan complete: {total:,} elements in {elapsed:.0f}s. "
+          f"Writing tables to the database…", flush=True)
 
     con.executemany(
         "INSERT INTO parking_curb VALUES(" + ",".join("?" * 17) + ")", h.curb_rows)
@@ -289,6 +331,7 @@ def run(pbf, db_path):
     set_meta(con, "speed_camera_rows", stats["cam"])
     set_meta(con, "schema_version", SCHEMA_VERSION)
     con.commit()
+    print("Database written.\n", flush=True)
 
     print(f"parking_lot  : {stats['lot']:>7} features")
     print(f"parking_curb : {stats['curb']:>7} side-records")
