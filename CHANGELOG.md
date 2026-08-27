@@ -1,5 +1,12 @@
 # DBM Changelog
 
+## v1.20.51 — Settings: collapse by default + General section
+- All Settings sections now start COLLAPSED (tap a header to expand), so the
+  screen opens as a short scannable list of section headers instead of a long
+  wall of options.
+- The five previously loose top-level options (Audio alert tones, Spoken warnings,
+  Mirror driver face box, Mirror road/plate boxes, Log GPS trace) are now enclosed
+  in a collapsible "General" section, consistent with the others.
 ## v1.20.50 — map manager: download progress + clear downloaded state
 - Download progress is now shown: an active download displays a message
   ("Downloading Greece: 12 / 45 MB"), a live progress bar, and an indeterminate

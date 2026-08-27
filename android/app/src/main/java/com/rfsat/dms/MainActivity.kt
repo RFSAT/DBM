@@ -1074,28 +1074,29 @@ class MainActivity : ComponentActivity() {
             Text("Settings", color = EnactGreen, fontSize = 18.sp,
                 fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(10.dp))
-            SettingRow("Audio alert tones", audio) {
-                audio = it; prefs.edit().putBoolean("alerts_audio", it).apply()
-                service?.setAudioAlerts(it)
+            CollapsibleSection("General") {
+                SettingRow("Audio alert tones", audio) {
+                    audio = it; prefs.edit().putBoolean("alerts_audio", it).apply()
+                    service?.setAudioAlerts(it)
+                }
+                SettingRow("Spoken warnings (TTS)", tts) {
+                    tts = it; prefs.edit().putBoolean("alerts_tts", it).apply()
+                    service?.setTtsAlerts(it)
+                }
+                SettingRow("Mirror driver face box", mirrorDriver) {
+                    mirrorDriver = it
+                    prefs.edit().putBoolean("mirror_driver_overlay", it).apply()
+                }
+                SettingRow("Mirror road/plate boxes", mirrorRoad) {
+                    mirrorRoad = it
+                    prefs.edit().putBoolean("mirror_road_overlay", it).apply()
+                }
+                SettingRow("Log GPS trace (for map cross-check dev)", logGps) {
+                    logGps = it
+                    service?.setElement("log_gps", it)
+                        ?: prefs.edit().putBoolean("log_gps", it).apply()
+                }
             }
-            SettingRow("Spoken warnings (TTS)", tts) {
-                tts = it; prefs.edit().putBoolean("alerts_tts", it).apply()
-                service?.setTtsAlerts(it)
-            }
-            SettingRow("Mirror driver face box", mirrorDriver) {
-                mirrorDriver = it
-                prefs.edit().putBoolean("mirror_driver_overlay", it).apply()
-            }
-            SettingRow("Mirror road/plate boxes", mirrorRoad) {
-                mirrorRoad = it
-                prefs.edit().putBoolean("mirror_road_overlay", it).apply()
-            }
-            SettingRow("Log GPS trace (for map cross-check dev)", logGps) {
-                logGps = it
-                service?.setElement("log_gps", it)
-                    ?: prefs.edit().putBoolean("log_gps", it).apply()
-            }
-            Spacer(Modifier.height(14.dp))
             CollapsibleSection("Detection elements") {
                 DetectionElementRow("Road signs (speed limits)", "det_signs")
                 SpeedLimitModeRow()
@@ -1816,7 +1817,7 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun CollapsibleSection(
         title: String,
-        startExpanded: Boolean = true,
+        startExpanded: Boolean = false,
         content: @Composable () -> Unit
     ) {
         var expanded by rememberSaveable(title) { mutableStateOf(startExpanded) }
