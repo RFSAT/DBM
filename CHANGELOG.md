@@ -1,5 +1,33 @@
 # DBM Changelog
 
+## v1.20.53 — enrich_index.py: back-fill counts + bbox without reprocessing
+- Added tools/parking/enrich_index.py so existing regions get the new info-panel
+  data (content counts + bounding box) WITHOUT reprocessing the .pbf. It reads
+  each already-built <region>.db and updates index.json in place:
+  * counts from COUNT(*) on the segments/parking/camera tables;
+  * with_maxspeed from meta, else computed (maxspeed > 0);
+  * bbox from meta, else COMPUTED from the segments table's own lat/lon columns —
+    so even .db files built before bbox was ever stored get a bounding box.
+- Safe: dry-run by default (--apply to write), atomic write, idempotent
+  ("already up to date" on re-run), preserves all other fields, and skips regions
+  whose .db is missing with a clear note. Run it once in the map folder and the
+  app's region-info panel is fully populated for maps you already built.
+## v1.20.52 — map selection: full region info + location preview
+- Tapping a region name (marked with ⓘ) in the Settings map manager now opens a
+  detail dialog showing what's inside that map and where it is:
+  * Content counts: roads, roads with a speed limit, parking areas, curbside
+    rules, speed cameras.
+  * Map data date, version, and download size.
+  * A location preview: the region's bounding box drawn on a simple Europe
+    graticule (offline, no map SDK) plus its lat/lon extent — the offline
+    equivalent of Geofabrik's region thumbnail.
+- Pipeline: build_europe.py now writes each region's bounding box (bbox) into the
+  manifest (read from the base converter's db meta). The content counts were
+  already in the manifest; the app now parses and displays them.
+- App model: MapRegion gains roads/roadsWithLimit/parkingLots/parkingCurb/
+  speedCameras/bbox fields (parsed from the manifest counts + bbox), with a
+  bounds helper. Backward compatible — all new fields default to 0/empty when a
+  manifest predates them.
 ## v1.20.51 — Settings: collapse by default + General section
 - All Settings sections now start COLLAPSED (tap a header to expand), so the
   screen opens as a short scannable list of section headers instead of a long

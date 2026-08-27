@@ -78,19 +78,43 @@ data class MapRegion(
     val dataDate: String,      // OSM data date the .db was built from
     val version: Int,          // bump when regenerated
     val dbSchemaVersion: Int,  // schema inside the .db (app must support it)
+    // Per-region content counts (from the pipeline manifest): roads (segments),
+    // roads with a speed limit, parking lots, curbside rules, speed cameras.
+    val roads: Int = 0,
+    val roadsWithLimit: Int = 0,
+    val parkingLots: Int = 0,
+    val parkingCurb: Int = 0,
+    val speedCameras: Int = 0,
+    // Bounding box "minLat,minLon,maxLat,maxLon" (empty if not provided), used to
+    // draw a location preview and report the region's extent.
+    val bbox: String = "",
 ) {
+    /** Parsed bbox as (minLat, minLon, maxLat, maxLon), or null if absent/bad. */
+    val bounds: FloatArray?
+        get() = bbox.split(",").mapNotNull { it.trim().toFloatOrNull() }
+            .takeIf { it.size == 4 }?.toFloatArray()
+
     companion object {
-        fun fromJson(o: JSONObject, country: String, countryId: String) = MapRegion(
-            id = o.getString("id"),
-            name = o.getString("name"),
-            country = country,
-            countryId = countryId,
-            file = o.getString("file"),
-            sizeBytes = o.optLong("sizeBytes", 0),
-            sha256 = o.optString("sha256", ""),
-            dataDate = o.optString("dataDate", ""),
-            version = o.optInt("version", 1),
-            dbSchemaVersion = o.optInt("dbSchemaVersion", 2),
-        )
+        fun fromJson(o: JSONObject, country: String, countryId: String): MapRegion {
+            val c = o.optJSONObject("counts")
+            return MapRegion(
+                id = o.getString("id"),
+                name = o.getString("name"),
+                country = country,
+                countryId = countryId,
+                file = o.getString("file"),
+                sizeBytes = o.optLong("sizeBytes", 0),
+                sha256 = o.optString("sha256", ""),
+                dataDate = o.optString("dataDate", ""),
+                version = o.optInt("version", 1),
+                dbSchemaVersion = o.optInt("dbSchemaVersion", 2),
+                roads = c?.optInt("segments", 0) ?: 0,
+                roadsWithLimit = c?.optInt("with_maxspeed", 0) ?: 0,
+                parkingLots = c?.optInt("parking_lot", 0) ?: 0,
+                parkingCurb = c?.optInt("parking_curb", 0) ?: 0,
+                speedCameras = c?.optInt("speed_camera", 0) ?: 0,
+                bbox = o.optString("bbox", ""),
+            )
+        }
     }
 }

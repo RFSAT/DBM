@@ -195,6 +195,7 @@ def write_manifest(d, base_url, state):
             "version": info["version"],
             "dbSchemaVersion": int(info.get("schema") or 5),
             "counts": info.get("counts", {}),
+            "bbox": info.get("bbox", ""),
         })
     manifest = {
         "schemaVersion": 1,
@@ -529,6 +530,7 @@ def main():
             "counts": {k: findings.get(k) for k in
                        ("segments", "with_maxspeed", "parking_lot",
                         "parking_curb", "speed_camera")},
+            "bbox": db_meta(db_path).get("bbox", ""),
             "processed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
         if is_new:

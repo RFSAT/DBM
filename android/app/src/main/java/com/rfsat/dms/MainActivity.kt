@@ -1384,6 +1384,8 @@ class MainActivity : ComponentActivity() {
             mutableStateOf<com.rfsat.dms.maps.MapRegion?>(null) }
         var toDelete by remember {
             mutableStateOf<com.rfsat.dms.maps.MapRegion?>(null) }
+        var info by remember {
+            mutableStateOf<com.rfsat.dms.maps.MapRegion?>(null) }
         var expandedCountries by remember { mutableStateOf(setOf<String>()) }
         // Which region id is currently downloading, and its progress (0..1, or
         // -1 for indeterminate phases like verifying). Lets us show a per-region
@@ -1469,6 +1471,50 @@ class MainActivity : ComponentActivity() {
                 dismissButton = {
                     androidx.compose.material3.TextButton(onClick = {
                         toDelete = null }) { Text("Cancel") }
+                })
+        }
+
+        // Region info + location preview (Geofabrik-style: what's inside the map,
+        // when it was built, and where the region sits on a simple Europe outline).
+        info?.let { r ->
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { info = null },
+                title = { Text(r.name, fontSize = 16.sp) },
+                text = {
+                    Column {
+                        // Location preview: the region's bounding box on Europe.
+                        RegionPreview(r.bounds)
+                        Spacer(Modifier.height(10.dp))
+                        fun row(k: String, v: String) {
+                            Row(Modifier.fillMaxWidth().padding(vertical = 1.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(k, color = EnactOnSurfaceDim, fontSize = 12.sp)
+                                Text(v, color = EnactOnSurface, fontSize = 12.sp)
+                            }
+                        }
+                        fun fmt(n: Int) = "%,d".format(n)
+                        row("Roads", fmt(r.roads))
+                        row("…with speed limit", fmt(r.roadsWithLimit))
+                        row("Parking areas", fmt(r.parkingLots))
+                        row("Curbside rules", fmt(r.parkingCurb))
+                        row("Speed cameras", fmt(r.speedCameras))
+                        androidx.compose.material3.HorizontalDivider(
+                            Modifier.padding(vertical = 6.dp),
+                            color = EnactOnSurfaceDim.copy(alpha = 0.3f))
+                        row("Map data date", r.dataDate.ifEmpty { "—" })
+                        row("Version", "v${r.version}")
+                        row("Download size",
+                            if (r.sizeBytes > 0) "%.0f MB".format(r.sizeBytes / 1e6) else "—")
+                        if (r.bounds != null) {
+                            val b = r.bounds!!
+                            row("Extent (lat)", "%.2f…%.2f".format(b[0], b[2]))
+                            row("Extent (lon)", "%.2f…%.2f".format(b[1], b[3]))
+                        }
+                    }
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        info = null }) { Text("Close") }
                 })
         }
 
@@ -1569,8 +1615,8 @@ class MainActivity : ComponentActivity() {
                     val nameColor = if (installed) EnactOnSurfaceDim else EnactOnSurface
                     Row(Modifier.fillMaxWidth().padding(top = 6.dp, start = 10.dp),
                         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(r.name, color = nameColor, fontSize = 12.sp)
+                        Column(Modifier.weight(1f).clickable { info = r }) {
+                            Text(r.name + "  \u24D8", color = nameColor, fontSize = 12.sp)
                             Text(if (isDownloadingThis) "Downloading…" else label,
                                 color = if (isDownloadingThis) EnactLime else labelColor,
                                 fontSize = 10.sp)
@@ -1811,9 +1857,47 @@ class MainActivity : ComponentActivity() {
         Spacer(Modifier.height(4.dp))
     }
 
-    /** A Settings section with a tappable header that expands/collapses its
-     *  content. Collapsed by default state is caller-provided. Uses a text
-     *  chevron so no icon dependency is needed. State is remembered per title. */
+    /** A simple offline "where is this region" preview: draws Europe's rough
+     *  lon/lat frame and highlights the region's bounding box inside it. No map
+     *  SDK or network — just enough to show location and extent (Geofabrik shows
+     *  a rendered thumbnail; we can't reproduce that offline, so this shows the
+     *  bounding box on a plain graticule instead). */
+    @Composable
+    private fun RegionPreview(bounds: FloatArray?) {
+        // Europe frame in degrees: lon -25..45 (W..E), lat 34..72 (S..N).
+        val wLon = -25f; val eLon = 45f; val sLat = 34f; val nLat = 72f
+        Canvas(Modifier.fillMaxWidth().height(150.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFF10232E))) {
+            val w = size.width; val h = size.height
+            fun xOf(lon: Float) = (lon - wLon) / (eLon - wLon) * w
+            // latitude grows upward, screen y grows downward -> invert
+            fun yOf(lat: Float) = (nLat - lat) / (nLat - sLat) * h
+            // graticule every 10°, faint
+            val grid = EnactOnSurfaceDim.copy(alpha = 0.25f)
+            var lon = -20f
+            while (lon <= eLon) { drawLine(grid, Offset(xOf(lon), 0f), Offset(xOf(lon), h), 1f); lon += 10f }
+            var lat = 40f
+            while (lat <= nLat) { drawLine(grid, Offset(0f, yOf(lat)), Offset(w, yOf(lat)), 1f); lat += 10f }
+            // the region box
+            if (bounds != null) {
+                val minLat = bounds[0]; val minLon = bounds[1]
+                val maxLat = bounds[2]; val maxLon = bounds[3]
+                val l = xOf(minLon).coerceIn(0f, w); val rt = xOf(maxLon).coerceIn(0f, w)
+                val tp = yOf(maxLat).coerceIn(0f, h); val bt = yOf(minLat).coerceIn(0f, h)
+                // filled highlight + outline
+                drawRect(EnactGreen.copy(alpha = 0.35f),
+                    topLeft = Offset(l, tp), size = Size((rt - l).coerceAtLeast(2f), (bt - tp).coerceAtLeast(2f)))
+                drawRect(EnactGreen, topLeft = Offset(l, tp),
+                    size = Size((rt - l).coerceAtLeast(2f), (bt - tp).coerceAtLeast(2f)),
+                    style = Stroke(width = 2f))
+            }
+        }
+        if (bounds == null)
+            Text("(location preview needs an updated map file)",
+                color = EnactOnSurfaceDim, fontSize = 10.sp,
+                modifier = Modifier.padding(top = 2.dp))
+    }
     @Composable
     private fun CollapsibleSection(
         title: String,
