@@ -1485,7 +1485,7 @@ class MainActivity : ComponentActivity() {
                         // Location preview: the region's bounding box on Europe.
                         RegionPreview(r.bounds)
                         Spacer(Modifier.height(10.dp))
-                        fun row(k: String, v: String) {
+                        val row: @Composable (String, String) -> Unit = { k, v ->
                             Row(Modifier.fillMaxWidth().padding(vertical = 1.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text(k, color = EnactOnSurfaceDim, fontSize = 12.sp)

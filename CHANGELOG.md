@@ -1,5 +1,11 @@
 # DBM Changelog
 
+## v1.20.54 — build fix: region-info dialog compile error
+- Fixed the compile error introduced with the region-info dialog (v1.20.52): the
+  local `fun row(...)` helper invoked @Composable functions (Row/Text), which a
+  plain local function may not do. Changed it to a `@Composable (String,String) ->
+  Unit` lambda; call sites are unchanged. Swept the file to confirm no other local
+  function invokes composables (fmt/xOf/yOf/drawSeg etc. are all non-composable).
 ## v1.20.53 — enrich_index.py: back-fill counts + bbox without reprocessing
 - Added tools/parking/enrich_index.py so existing regions get the new info-panel
   data (content counts + bounding box) WITHOUT reprocessing the .pbf. It reads
