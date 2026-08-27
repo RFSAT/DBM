@@ -1,5 +1,10 @@
 # DBM Changelog
 
+## v1.20.35 — align up-to-date skip messages
+- build_europe.py: the per-region "up-to-date, skipping (source unchanged)"
+  lines now use a fixed-width name field so the status text lines up in a column
+  across all skipped regions, instead of starting at a ragged position that
+  varied with each region name's length. Tooling only; no app change.
 ## v1.20.34 — build_europe: clearer dependency docs + upfront check
 - Fixed build_europe.py documentation that mentioned only add_parking.py as a
   required co-located script; osm_to_speedlimitdb.py is equally required (it is

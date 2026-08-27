@@ -449,7 +449,8 @@ def main():
         sig = src_signature(pbf)
         prev = state.get(rid, {})
         if not a.force and prev.get("src_sig") == sig and os.path.exists(f"{rid}.db"):
-            print(f"== {name} ({rid}): up-to-date, skipping (source unchanged) ==")
+            label = f"{name} ({rid})"
+            print(f"  {label:<40s}  up-to-date, skipping (source unchanged)")
             skipped_uptodate.append(rid)
             continue
 
