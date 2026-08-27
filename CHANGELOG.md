@@ -1,5 +1,15 @@
 # DBM Changelog
 
+## v1.20.46 — fix: sub-folders named with spaces / display names ignored
+- build_europe.py matched sub-folder names only against the exact Geofabrik region
+  id (e.g. "czech-republic"), so a folder named with the DISPLAY name or a space —
+  "Czech Republic", "Russian Federation" — was silently ignored and its
+  sub-regions never processed. Folder-name matching is now flexible: it resolves
+  a folder to its region id by id OR display name, case-insensitively and treating
+  spaces, hyphens and underscores as equivalent. So "Czech Republic" ->
+  czech-republic and "Russian Federation" -> russia both work, while junk folders
+  (e.g. __pycache__) are still ignored. Canonical ids are used for the resulting
+  sub-region db names (czech-republic__praha, russia__moscow).
 ## v1.20.45 — fix: empty sub-folder silently skipped a whole country
 - build_europe.py: a sub-folder named after a country (e.g. czech-republic/) that
   contained NO .osm.pbf files still caused the full-country file in root to be

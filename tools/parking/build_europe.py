@@ -404,14 +404,26 @@ def main():
             skipped.append((f, "not a recognised Europe country")); continue
         consider(os.path.join(d, f), rid, EUROPE_REGIONS[rid], None)
 
+    # Build a lookup from several folder-name spellings to the canonical region
+    # id, so a sub-folder can be named by its Geofabrik id ("czech-republic"),
+    # its display name ("Czech Republic", "Russian Federation"), or a mix of
+    # case and space/hyphen. Without this, a folder named with a space or the
+    # display name is silently ignored and its sub-regions never processed.
+    def _norm(s):
+        return s.strip().lower().replace(" ", "").replace("-", "").replace("_", "")
+    folder_to_id = {}
+    for _id, _disp in EUROPE_REGIONS.items():
+        folder_to_id[_norm(_id)] = _id       # e.g. "czechrepublic" -> czech-republic
+        folder_to_id[_norm(_disp)] = _id     # e.g. "russianfederation" -> russia
+
     # (2) sub-folders: each is a parent region; files inside are sub-regions.
     for entry in sorted(os.listdir(d)):
         sub = os.path.join(d, entry)
         if not os.path.isdir(sub):
             continue
-        parent_id = entry.lower()
-        if parent_id not in EUROPE_REGIONS:
-            # Only treat folders named after a known country as region folders;
+        parent_id = folder_to_id.get(_norm(entry))
+        if parent_id is None:
+            # Not a folder named after a known country (by id or display name);
             # ignore unrelated dirs (e.g. __pycache__, output dirs).
             continue
         parent_name = EUROPE_REGIONS[parent_id]
