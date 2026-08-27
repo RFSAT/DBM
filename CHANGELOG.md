@@ -1,5 +1,13 @@
 # DBM Changelog
 
+## v1.20.41 — add_parking shows % for BOTH node and way phases
+- Stage 1 (osm_to_speedlimitdb) already records both total_nodes and total_ways
+  in the DB meta. add_parking.py now reads BOTH and shows a real percentage for
+  each phase — the node phase against total_nodes and the way phase against
+  total_ways — instead of only the node phase. So progress climbs 0->100% through
+  nodes, then 0->100% through ways: meaningful the whole way through. Falls back
+  to counts + rate only if a total is absent (e.g. base stage skipped). Tooling
+  only; no app change.
 ## v1.20.40 — single-line (overwriting) progress in map processing
 - Progress lines in osm_to_speedlimitdb.py (scan + DB-build phases) and
   add_parking.py (scan phase) now overwrite each other on ONE line using a

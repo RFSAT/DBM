@@ -242,31 +242,38 @@ def run(pbf, db_path):
             _pw["max"] = 0
 
     # The speed-limit stage (osm_to_speedlimitdb) scanned this same .pbf first and
-    # recorded the node total in the DB's meta table. We scan the SAME file, so
-    # that total is a valid denominator — read it back for a real percentage.
+    # recorded BOTH the node and way totals in the DB's meta table. We scan the
+    # SAME file, so both are valid denominators — read them back so each phase
+    # (nodes, then ways) shows a real percentage.
     total_nodes = 0
+    total_ways = 0
     try:
-        row = con.execute(
-            "SELECT value FROM meta WHERE key='total_nodes'").fetchone()
-        if row:
-            total_nodes = int(row[0])
-    except sqlite3.Error:
-        total_nodes = 0
+        for key, setter in (("total_nodes", "n"), ("total_ways", "w")):
+            row = con.execute(
+                "SELECT value FROM meta WHERE key=?", (key,)).fetchone()
+            if row:
+                if setter == "n":
+                    total_nodes = int(row[0])
+                else:
+                    total_ways = int(row[0])
+    except (sqlite3.Error, ValueError):
+        total_nodes = total_ways = 0
 
     progress = {"nodes": 0, "ways": 0, "t0": _time.time(),
-                "last_t": _time.time(), "last_n": 0, "total_nodes": total_nodes}
+                "last_t": _time.time(), "last_n": 0,
+                "total_nodes": total_nodes, "total_ways": total_ways}
     try:
         _mb = os.path.getsize(pbf) / 1e6
     except OSError:
         _mb = 0.0
-    if total_nodes > 0:
-        # We know the node total from stage 1, so the node phase shows a real
-        # percentage. (Ways come after nodes in a PBF; the way phase then shows
-        # counts + rate — its own total isn't needed for the useful progress.)
-        print(f"  scanning {pbf} ({_mb:.0f} MB, ~{total_nodes:,} nodes) for "
-              f"parking + cameras — node phase shows % complete…", flush=True)
+    if total_nodes > 0 or total_ways > 0:
+        # Stage 1 recorded both totals, so BOTH phases show a real percentage:
+        # the node phase against total_nodes, the way phase against total_ways.
+        print(f"  scanning {pbf} ({_mb:.0f} MB, ~{total_nodes:,} nodes, "
+              f"~{total_ways:,} ways) for parking + cameras — % complete per "
+              f"phase…", flush=True)
     else:
-        # No stored total (e.g. base stage was skipped) — fall back to counts+rate.
+        # No stored totals (e.g. base stage was skipped) — fall back to counts+rate.
         print(f"  scanning {pbf} ({_mb:.0f} MB) for parking + cameras; progress "
               f"every 200k nodes / 100k ways (elapsed / counts / rate)…",
               flush=True)
@@ -278,11 +285,14 @@ def run(pbf, db_path):
         dn = total - progress["last_n"]
         rate = (dn / dt) if dt > 0 else 0
         elapsed = now - progress["t0"]
-        # Percentage only makes sense during the node phase against total_nodes.
+        # Each phase gets a percentage against its own stage-1 total: the node
+        # phase vs total_nodes, the way phase vs total_ways.
         if kind == "nodes" and progress["total_nodes"] > 0:
             pct = f"{100.0 * progress['nodes'] / progress['total_nodes']:4.0f}%"
+        elif kind == "ways" and progress["total_ways"] > 0:
+            pct = f"{100.0 * progress['ways'] / progress['total_ways']:4.0f}%"
         else:
-            pct = "    "     # blank slot keeps columns aligned in the way phase
+            pct = "    "     # blank slot keeps columns aligned when total unknown
         _line(f"  [{elapsed:6.0f}s] {pct} {kind:5s}  "
               f"nodes={progress['nodes']:>10,}  ways={progress['ways']:>9,}  "
               f"| found: lots={stats['lot']:>6,} curb={stats['curb']:>6,} "
