@@ -218,7 +218,7 @@ def build_db(db_path, region, segments, bbox, counts=None):
     cur.execute("VACUUM")
     conn.commit()
     conn.close()
-    print(f"wrote {db_path}: {meta['segments']} segments "
+    print(f"  wrote {db_path}: {meta['segments']} segments "
           f"({tagged} with maxspeed) for region '{region}'")
 
 

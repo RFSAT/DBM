@@ -288,7 +288,7 @@ def process_one(pbf, region_id, region_name, add_parking, skip_base):
             sys.exit("BASE_CONVERTER not set — cannot produce speed limits.")
         cmd = [c.format(pbf=pbf, db=db_path, region=region_name)
                for c in BASE_CONVERTER]
-        print(f"  [1/2] speed limits: {' '.join(cmd)}", flush=True)
+        print(f"\n  [1/2] speed limits: {' '.join(cmd)}", flush=True)
         import subprocess
         subprocess.run(cmd, check=True)
     elif not os.path.exists(db_path):
@@ -296,7 +296,7 @@ def process_one(pbf, region_id, region_name, add_parking, skip_base):
                  f"speed-limit conversion first, or drop --skip-base.")
 
     # add_parking prints its own per-500k-element progress.
-    print(f"  [2/2] parking + cameras", flush=True)
+    print(f"\n  [2/2] parking + cameras", flush=True)
     add_parking.run(pbf, db_path)
     return db_path
 

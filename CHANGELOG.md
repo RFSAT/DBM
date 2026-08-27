@@ -1,5 +1,13 @@
 # DBM Changelog
 
+## v1.20.43 — map-processing console tidy-ups
+- Removed the "(A full country takes several minutes…)" node-index warning from
+  add_parking.py.
+- osm_to_speedlimitdb.py: the final "wrote <db>" line is now indented two spaces
+  to align with the other step-one messages (scan done, building DB, compacting).
+- build_europe.py: a blank line now precedes each step banner ([1/2] speed limits
+  and [2/2] parking + cameras) so the two stages stand out in the console.
+- Tooling only; no app change.
 ## v1.20.42 — single continuous scan percentage in add_parking
 - add_parking.py now shows ONE continuous percentage over the whole scan rather
   than a separate 0-100% bar per phase. Denominator = total_nodes + total_ways

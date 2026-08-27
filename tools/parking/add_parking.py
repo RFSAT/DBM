@@ -367,9 +367,6 @@ def run(pbf, db_path):
 
     h = Handler()
     # locations=True builds the node-location index needed for way geometry.
-    print("(A full country takes several minutes and builds a node-location "
-          "index first — the first progress line may take a little while.)",
-          flush=True)
     h.apply_file(pbf, locations=True)
     _finish_line()   # end the overwriting progress line before the summary
 
