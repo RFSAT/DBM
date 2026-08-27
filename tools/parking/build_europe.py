@@ -31,8 +31,10 @@ Usage:
     python build_europe.py --dir . --base-url ... --force        # ignore state
     python build_europe.py --dir . --base-url ... --only greece,cyprus
 
-Requires: add_parking.py in the same folder (imported), and pyosmium
-(pip install osmium).
+Requires (all in the same folder as this script, i.e. the map folder):
+  - add_parking.py            (imported; adds parking + speed cameras)
+  - osm_to_speedlimitdb.py    (run as the base speed-limit stage)
+  - pyosmium                  (pip install osmium)
 """
 
 import argparse
@@ -316,11 +318,34 @@ def main():
 
     d = os.path.abspath(a.dir)
     sys.path.insert(0, d)
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    here = os.path.dirname(os.path.abspath(__file__))
+    sys.path.insert(0, here)
+
+    # Both helper scripts must be present in the same folder as this one (the map
+    # folder). Check them up front so a missing file fails immediately with a
+    # clear message, rather than an obscure import error or a mid-run subprocess
+    # failure part-way through the first region.
+    missing = []
+    for helper in ("add_parking.py", "osm_to_speedlimitdb.py"):
+        if not (os.path.exists(os.path.join(here, helper))
+                or os.path.exists(os.path.join(d, helper))):
+            missing.append(helper)
+    if missing:
+        sys.exit("Missing required script(s) in the map folder: "
+                 + ", ".join(missing)
+                 + ".\nbuild_europe.py needs BOTH add_parking.py and "
+                 "osm_to_speedlimitdb.py alongside it (plus the .pbf files).")
+
     try:
         import add_parking
+    except ImportError as e:
+        sys.exit(f"Could not import add_parking.py: {e}. It must be in the map "
+                 "folder alongside build_europe.py.")
+
+    try:
+        import osmium  # noqa: F401  (used by the helper scripts)
     except ImportError:
-        sys.exit("add_parking.py must be alongside this script (and pyosmium installed).")
+        sys.exit("pyosmium is not installed. Run:  pip install osmium")
 
     only = {x.strip() for x in a.only.split(",") if x.strip()}
     state = load_state(d)

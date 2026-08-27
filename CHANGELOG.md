@@ -1,5 +1,15 @@
 # DBM Changelog
 
+## v1.20.34 — build_europe: clearer dependency docs + upfront check
+- Fixed build_europe.py documentation that mentioned only add_parking.py as a
+  required co-located script; osm_to_speedlimitdb.py is equally required (it is
+  the base speed-limit stage). Both the module docstring and the error message
+  now list BOTH scripts.
+- Added an upfront dependency check: build_europe.py now verifies add_parking.py
+  and osm_to_speedlimitdb.py are both present, and that pyosmium is installed,
+  before any processing — failing immediately with a precise message (naming the
+  missing file, or "pip install osmium") instead of an obscure import error or a
+  mid-run subprocess failure. Tooling only; no app change.
 ## v1.20.33 — clearer, reliable processing progress
 - Map-processing progress now gives a real feel for how far along each region is,
   using the signal that is actually reliable at each phase:
