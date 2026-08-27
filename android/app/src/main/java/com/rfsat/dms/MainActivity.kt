@@ -1384,6 +1384,12 @@ class MainActivity : ComponentActivity() {
         var toDelete by remember {
             mutableStateOf<com.rfsat.dms.maps.MapRegion?>(null) }
         var expandedCountries by remember { mutableStateOf(setOf<String>()) }
+        // Which region id is currently downloading, and its progress (0..1, or
+        // -1 for indeterminate phases like verifying). Lets us show a per-region
+        // progress bar and disable only THAT region's button — not all of them.
+        var downloadingId by remember { mutableStateOf<String?>(null) }
+        var downloadFrac by remember { mutableStateOf(-1f) }
+        val progressMsg by mapImportStatus.collectAsState()
         val indexUrl = "https://www.rfsat.com/products/maps/index.json"
 
         fun refresh() {
@@ -1402,15 +1408,22 @@ class MainActivity : ComponentActivity() {
 
         fun startDownload(r: com.rfsat.dms.maps.MapRegion) {
             val cat = currentCatalog ?: return
-            busy = true; mapImportStatus.value = "Starting download…"
+            busy = true; downloadingId = r.id; downloadFrac = -1f
+            mapImportStatus.value = "Starting download…"
             scope.launch(kotlinx.coroutines.Dispatchers.IO) {
                 downloader.download(cat, r) { p ->
                     val msg = when (p) {
-                        is com.rfsat.dms.maps.MapDownloader.Progress.Downloading ->
+                        is com.rfsat.dms.maps.MapDownloader.Progress.Downloading -> {
+                            val frac = if (p.total > 0)
+                                p.bytes.toFloat() / p.total.toFloat() else -1f
+                            runOnUiThread { downloadFrac = frac }
                             "Downloading ${r.name}: %d / %d MB".format(
                                 p.bytes / 1_000_000, p.total / 1_000_000)
-                        com.rfsat.dms.maps.MapDownloader.Progress.Verifying ->
+                        }
+                        com.rfsat.dms.maps.MapDownloader.Progress.Verifying -> {
+                            runOnUiThread { downloadFrac = -1f }
                             "Verifying ${r.name}…"
+                        }
                         com.rfsat.dms.maps.MapDownloader.Progress.Done ->
                             "${r.name} ready. Restart monitoring to load it."
                         is com.rfsat.dms.maps.MapDownloader.Progress.Failed ->
@@ -1418,7 +1431,7 @@ class MainActivity : ComponentActivity() {
                     }
                     runOnUiThread { mapImportStatus.value = msg }
                 }
-                runOnUiThread { busy = false; refresh() }
+                runOnUiThread { busy = false; downloadingId = null; downloadFrac = -1f; refresh() }
             }
         }
 
@@ -1483,6 +1496,27 @@ class MainActivity : ComponentActivity() {
                 Text(note, color = EnactOnSurface, fontSize = 11.sp,
                     modifier = Modifier.padding(top = 2.dp))
 
+            // Active-download progress: a visible message + bar so the user can
+            // see a download is happening and how far along it is.
+            if (downloadingId != null && progressMsg.isNotEmpty()) {
+                Text(progressMsg, color = EnactLime, fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 4.dp))
+                if (downloadFrac >= 0f)
+                    androidx.compose.material3.LinearProgressIndicator(
+                        progress = { downloadFrac },
+                        color = EnactGreen,
+                        modifier = Modifier.fillMaxWidth().padding(top = 3.dp))
+                else
+                    androidx.compose.material3.LinearProgressIndicator(
+                        color = EnactGreen,
+                        modifier = Modifier.fillMaxWidth().padding(top = 3.dp))
+            } else if (progressMsg.isNotEmpty() &&
+                       (progressMsg.contains("ready") || progressMsg.contains("failed"))) {
+                // Keep the final "ready"/"failed" line visible after completion.
+                Text(progressMsg, color = EnactOnSurfaceDim, fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 4.dp))
+            }
+
             // Group regions by country, with a collapsible header per country.
             // With the full Geofabrik catalogue (~500 regions) the list must not
             // render every row at once, so countries start collapsed; tap a
@@ -1491,8 +1525,9 @@ class MainActivity : ComponentActivity() {
             val byCountry = statuses.groupBy { it.region.country }
                 .toSortedMap()
             for ((country, regionStatuses) in byCountry) {
-                val anyInstalled = regionStatuses.any {
-                    it.state == com.rfsat.dms.maps.MapState.INSTALLED }
+                val installedCount = regionStatuses.count {
+                    it.state == com.rfsat.dms.maps.MapState.INSTALLED ||
+                    it.state == com.rfsat.dms.maps.MapState.UPDATE_AVAILABLE }
                 val expanded = expandedCountries.contains(country)
                 Row(Modifier.fillMaxWidth()
                         .clickable {
@@ -1505,37 +1540,51 @@ class MainActivity : ComponentActivity() {
                         color = EnactLime, fontSize = 12.sp,
                         fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
                         modifier = Modifier.weight(1f))
-                    // A small marker if any region of this country is downloaded.
-                    if (anyInstalled)
-                        Text("downloaded", color = EnactOnSurfaceDim, fontSize = 10.sp)
+                    // Clear marker: how many of this country's regions are on the
+                    // phone (green check), or nothing if none are.
+                    if (installedCount > 0)
+                        Text("\u2713 $installedCount downloaded",
+                            color = EnactGreen, fontSize = 10.sp)
                 }
                 if (!expanded) continue
                 for (st in regionStatuses) {
                     val r = st.region
                     val installed = st.state == com.rfsat.dms.maps.MapState.INSTALLED
+                    val isDownloadingThis = downloadingId == r.id
                     val label = when (st.state) {
-                        com.rfsat.dms.maps.MapState.INSTALLED -> "Installed v${r.version}"
+                        com.rfsat.dms.maps.MapState.INSTALLED -> "\u2713 Downloaded (v${r.version})"
                         com.rfsat.dms.maps.MapState.UPDATE_AVAILABLE ->
-                            "Update available (v${r.version}, ${r.dataDate})"
+                            "\u2713 Downloaded • update available (v${r.version}, ${r.dataDate})"
                         com.rfsat.dms.maps.MapState.NOT_INSTALLED ->
-                            if (r.sizeBytes > 0) "%.0f MB".format(r.sizeBytes / 1e6) else "Available"
+                            "Not downloaded" + (if (r.sizeBytes > 0)
+                                " • %.0f MB".format(r.sizeBytes / 1e6) else "")
                         com.rfsat.dms.maps.MapState.UNSUPPORTED_SCHEMA -> "Needs app update"
+                    }
+                    val labelColor = when (st.state) {
+                        com.rfsat.dms.maps.MapState.INSTALLED,
+                        com.rfsat.dms.maps.MapState.UPDATE_AVAILABLE -> EnactGreen
+                        else -> EnactOnSurfaceDim
                     }
                     val nameColor = if (installed) EnactOnSurfaceDim else EnactOnSurface
                     Row(Modifier.fillMaxWidth().padding(top = 6.dp, start = 10.dp),
                         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(r.name, color = nameColor, fontSize = 12.sp)
-                            Text(label, color = EnactOnSurfaceDim, fontSize = 10.sp)
+                            Text(if (isDownloadingThis) "Downloading…" else label,
+                                color = if (isDownloadingThis) EnactLime else labelColor,
+                                fontSize = 10.sp)
                         }
                         when (st.state) {
                             com.rfsat.dms.maps.MapState.NOT_INSTALLED,
                             com.rfsat.dms.maps.MapState.UPDATE_AVAILABLE ->
                                 androidx.compose.material3.TextButton(
-                                    enabled = !busy,
+                                    // Disable only while THIS region downloads (or
+                                    // another is in progress), not as a "done" signal.
+                                    enabled = downloadingId == null,
                                     onClick = { pending = r }) {
-                                    Text(if (st.state == com.rfsat.dms.maps.MapState.UPDATE_AVAILABLE)
-                                        "Update" else "Download")
+                                    Text(if (isDownloadingThis) "…"
+                                        else if (st.state == com.rfsat.dms.maps.MapState.UPDATE_AVAILABLE)
+                                            "Update" else "Download")
                                 }
                             com.rfsat.dms.maps.MapState.INSTALLED ->
                                 androidx.compose.material3.TextButton(

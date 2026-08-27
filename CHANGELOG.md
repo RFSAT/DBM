@@ -1,5 +1,20 @@
 # DBM Changelog
 
+## v1.20.50 — map manager: download progress + clear downloaded state
+- Download progress is now shown: an active download displays a message
+  ("Downloading Greece: 12 / 45 MB"), a live progress bar, and an indeterminate
+  bar during verification. Previously the progress was computed but never
+  displayed on screen.
+- Clear downloaded/not-downloaded indication:
+  * Each region row now reads "✓ Downloaded (vN)", "✓ Downloaded • update
+    available", or "Not downloaded • NN MB" in a distinct colour (green when on
+    the phone), instead of the ambiguous greyed-out styling.
+  * Each country header shows "✓ N downloaded" when regions are installed.
+  * The region currently downloading shows "Downloading…" inline.
+- Fixed the misleading grayed-out Download button: it was disabled whenever ANY
+  download was in progress (looking like "already downloaded"). It's now disabled
+  only while a download is actually running, and a downloaded region shows Delete
+  (not a greyed Download), so button state no longer implies download status.
 ## v1.20.49 — bring living docs current; add release checklist
 - OPEN-ITEMS.md and PLAY-COMPLIANCE.md were stale since v1.20.19 — they didn't
   reflect R8 being enabled (v1.20.32), the Europe map pipeline, the sub-region
