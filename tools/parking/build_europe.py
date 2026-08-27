@@ -415,13 +415,21 @@ def main():
             # ignore unrelated dirs (e.g. __pycache__, output dirs).
             continue
         parent_name = EUROPE_REGIONS[parent_id]
+        sub_pbfs = [f for f in os.listdir(sub) if f.endswith(".osm.pbf")]
+        # Only let a sub-folder REPLACE the full-country file if it actually
+        # contains sub-region .pbf files. An empty (or .pbf-less) folder must NOT
+        # cause the full country to be dropped — that would silently skip the
+        # region entirely.
+        if not sub_pbfs:
+            print(f"  note: '{entry}/' sub-folder has no .osm.pbf files — "
+                  f"ignoring it and keeping the full {parent_name} file if present.")
+            continue
         # If a full-country file for this parent is ALSO in root, warn & skip it
         # (sub-regions replace the full country to avoid the huge download).
         if parent_id in candidates and candidates[parent_id]["parent"] is None:
             print(f"  note: '{entry}/' sub-folder present, so ignoring the full "
                   f"{parent_name} file in root (sub-regions replace it).")
             del candidates[parent_id]
-        sub_pbfs = [f for f in os.listdir(sub) if f.endswith(".osm.pbf")]
         for f in sorted(sub_pbfs):
             sub_stem = region_id_from_pbf(f)
             # Use "__" (never present in a Geofabrik region id, which uses only

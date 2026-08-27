@@ -1,5 +1,15 @@
 # DBM Changelog
 
+## v1.20.45 — fix: empty sub-folder silently skipped a whole country
+- build_europe.py: a sub-folder named after a country (e.g. czech-republic/) that
+  contained NO .osm.pbf files still caused the full-country file in root to be
+  dropped — so the region was silently skipped and never built. Now the full
+  country is only replaced when the sub-folder actually contains sub-region .pbf
+  files; an empty/.pbf-less folder is ignored with a note and the full-country
+  file is kept. Fixes Czech Republic (and any country) being skipped when an
+  empty same-named folder is present.
+- The region set, filenames, and id parser were all verified correct against the
+  live Geofabrik list; this was purely the empty-sub-folder edge case.
 ## v1.20.44 — build fix: missing rememberSaveable import
 - Fixed the compile error present since v1.20.36 (the collapsible Settings
   sections): rememberSaveable was used but never imported. Added
