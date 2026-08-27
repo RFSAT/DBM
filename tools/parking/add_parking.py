@@ -221,18 +221,35 @@ def run(pbf, db_path):
 
     import time as _time
 
+    # The speed-limit stage (osm_to_speedlimitdb) scanned this same .pbf first and
+    # recorded the node total in the DB's meta table. We scan the SAME file, so
+    # that total is a valid denominator — read it back for a real percentage.
+    total_nodes = 0
+    try:
+        row = con.execute(
+            "SELECT value FROM meta WHERE key='total_nodes'").fetchone()
+        if row:
+            total_nodes = int(row[0])
+    except sqlite3.Error:
+        total_nodes = 0
+
     progress = {"nodes": 0, "ways": 0, "t0": _time.time(),
-                "last_t": _time.time(), "last_n": 0}
+                "last_t": _time.time(), "last_n": 0, "total_nodes": total_nodes}
     try:
         _mb = os.path.getsize(pbf) / 1e6
     except OSError:
         _mb = 0.0
-    # osmium streams with no dependable up-front element count, so no percentage
-    # here — each line shows elapsed time, running counts, features found, and
-    # rate, which always works and conveys how far the scan has gone. (Nodes
-    # stream before ways in a PBF, so ways stay 0 during the node phase.)
-    print(f"  scanning {pbf} ({_mb:.0f} MB) for parking + cameras; progress "
-          f"every 200k nodes / 100k ways (elapsed / counts / rate)…", flush=True)
+    if total_nodes > 0:
+        # We know the node total from stage 1, so the node phase shows a real
+        # percentage. (Ways come after nodes in a PBF; the way phase then shows
+        # counts + rate — its own total isn't needed for the useful progress.)
+        print(f"  scanning {pbf} ({_mb:.0f} MB, ~{total_nodes:,} nodes) for "
+              f"parking + cameras — node phase shows % complete…", flush=True)
+    else:
+        # No stored total (e.g. base stage was skipped) — fall back to counts+rate.
+        print(f"  scanning {pbf} ({_mb:.0f} MB) for parking + cameras; progress "
+              f"every 200k nodes / 100k ways (elapsed / counts / rate)…",
+              flush=True)
 
     def _emit(kind):
         now = _time.time()
@@ -241,7 +258,12 @@ def run(pbf, db_path):
         dn = total - progress["last_n"]
         rate = (dn / dt) if dt > 0 else 0
         elapsed = now - progress["t0"]
-        print(f"  [{elapsed:6.0f}s] {kind:5s}  "
+        # Percentage only makes sense during the node phase against total_nodes.
+        if kind == "nodes" and progress["total_nodes"] > 0:
+            pct = f"{100.0 * progress['nodes'] / progress['total_nodes']:4.0f}%"
+        else:
+            pct = "    "     # blank slot keeps columns aligned in the way phase
+        print(f"  [{elapsed:6.0f}s] {pct} {kind:5s}  "
               f"nodes={progress['nodes']:>10,}  ways={progress['ways']:>9,}  "
               f"| found: lots={stats['lot']:>6,} curb={stats['curb']:>6,} "
               f"cams={stats['cam']:>4,}  "

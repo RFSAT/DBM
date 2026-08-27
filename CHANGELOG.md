@@ -1,5 +1,38 @@
 # DBM Changelog
 
+## v1.20.39 — real % progress in add_parking (reusing stage-1 node total)
+- The speed-limit stage (osm_to_speedlimitdb.py) now records the source node/way
+  totals in the DB's meta table (total_nodes, total_ways) after its scan.
+- add_parking.py reads total_nodes back and shows a REAL percentage during its
+  node phase (both stages scan the same .pbf, so it's a valid denominator) —
+  replacing the previous count-only line. The node total is the useful one since
+  the node phase dominates; the way phase still shows counts + rate.
+- Robust handoff via the shared .db meta table (no fragile stdout parsing);
+  add_parking's DDL never touches meta and set_meta upserts, so the stage-1 total
+  survives. Falls back to counts + rate if the total isn't present (e.g. base
+  stage skipped). Tooling only; no app change.
+## v1.20.38 — migration helper for the sub-region rename (no reprocessing)
+- Added tools/parking/migrate_subregion_names.py: a one-shot helper so
+  sub-region databases built under the OLD single-hyphen scheme (germany-bayern.db)
+  do NOT need rebuilding after v1.20.37 changed the separator to "__"
+  (germany__bayern.db). The .db content is identical, so it just renames the
+  files and updates .build_state.json + index.json in place, preserving each
+  region's version/sha/counts so the app sees no change and re-downloads nothing.
+- Conservative: migrates only the parent countries you name (--parents), never
+  touches full-country files, refuses to overwrite an existing new-name file, and
+  is dry-run by default (--apply to perform). After running it, build_europe.py
+  treats the migrated sub-regions as up-to-date and skips them.
+## v1.20.37 — unambiguous sub-region DB filenames (fix hyphen collision)
+- build_europe.py: sub-region ids/filenames now use "__" to join parent and
+  sub-region (germany__bayern.db) instead of a single hyphen. Geofabrik region
+  ids use single hyphens only, so a hyphenated full-country name like
+  ireland-and-northern-ireland.db can no longer be confused with — or collide on
+  disk with — a sub-region id, even when the sub-region name itself contains
+  hyphens (germany__baden-wurttemberg.db). Parent-vs-sub is now decidable from
+  the filename alone by splitting on "__".
+- The manifest already carries an explicit "parent" field; when the app's
+  collapsible sub-region UI is built it must read that field (or split on "__"),
+  never parse single hyphens. No app change in this version.
 ## v1.20.36 — Exit in the top menu bar + progress/UI fixes
 - Added "Exit" to the top tab bar. It's an action, not a screen: tapping it fully
   shuts the app down via the existing exitApp() (pauses analysis, releases

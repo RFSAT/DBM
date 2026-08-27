@@ -128,7 +128,7 @@ def simplify(coords, tol_m=2.0):
     return [c for c, k in zip(coords, keep) if k]
 
 
-def build_db(db_path, region, segments, bbox):
+def build_db(db_path, region, segments, bbox, counts=None):
     """segments: list of (maxspeed:int, coords:list[(lat,lon)])."""
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
@@ -182,6 +182,12 @@ def build_db(db_path, region, segments, bbox):
         "schema_version": "3",
         "coord_encoding": "int32_1e7",
     }
+    # Record the source element totals so the parking/camera stage (add_parking)
+    # can show a real percentage — it scans the same .pbf, so these are its
+    # denominators. total_nodes is the useful one (its node phase dominates).
+    if counts:
+        meta["total_nodes"] = str(counts.get("total_nodes", 0))
+        meta["total_ways"] = str(counts.get("total_ways", 0))
     cur.executemany("INSERT INTO meta(key,value) VALUES(?,?)", list(meta.items()))
     conn.commit()
     # compact the file
@@ -271,10 +277,12 @@ def read_with_osmium(osm_path, drop_untagged_minor=False):
     h = Handler()
     # locations=True resolves node coords for ways in one pass
     h.apply_file(osm_path, locations=True)
-    print(f"  scan done: {h.ways_seen:,} ways seen, {len(h.segments):,} road "
-          f"segments kept in {time.time() - h.t0:.0f}s", flush=True)
+    print(f"  scan done: {h.nodes_seen:,} nodes, {h.ways_seen:,} ways seen, "
+          f"{len(h.segments):,} road segments kept in "
+          f"{time.time() - h.t0:.0f}s", flush=True)
     bbox = (h.minlat, h.minlon, h.maxlat, h.maxlon)
-    return h.segments, bbox
+    counts = {"total_nodes": h.nodes_seen, "total_ways": h.ways_seen}
+    return h.segments, bbox, counts
 
 
 def read_with_xml(osm_path, drop_untagged_minor=False):
@@ -320,7 +328,10 @@ def read_with_xml(osm_path, drop_untagged_minor=False):
                         minlat = min(minlat, la); maxlat = max(maxlat, la)
                         minlon = min(minlon, lo); maxlon = max(maxlon, lo)
             el.clear()
-    return segments, (minlat, minlon, maxlat, maxlon)
+    # XML fallback: node/way totals aren't tracked separately here; report what
+    # we can (0 signals "unknown" to downstream, which then shows counts+rate).
+    counts = {"total_nodes": len(nodes), "total_ways": 0}
+    return segments, (minlat, minlon, maxlat, maxlon), counts
 
 
 def main():
@@ -336,20 +347,20 @@ def main():
     args = ap.parse_args()
 
     if args.xml:
-        segments, bbox = read_with_xml(args.input, args.drop_untagged_minor)
+        segments, bbox, counts = read_with_xml(args.input, args.drop_untagged_minor)
     else:
         try:
-            segments, bbox = read_with_osmium(args.input, args.drop_untagged_minor)
+            segments, bbox, counts = read_with_osmium(args.input, args.drop_untagged_minor)
         except ImportError:
             print("osmium not installed; falling back to XML reader "
                   "(slower; .pbf NOT supported this way).", file=sys.stderr)
-            segments, bbox = read_with_xml(args.input, args.drop_untagged_minor)
+            segments, bbox, counts = read_with_xml(args.input, args.drop_untagged_minor)
 
     if not segments:
         print("no highway segments found — check the input file", file=sys.stderr)
         sys.exit(1)
 
-    build_db(args.output, args.region, segments, bbox)
+    build_db(args.output, args.region, segments, bbox, counts)
 
 
 if __name__ == "__main__":

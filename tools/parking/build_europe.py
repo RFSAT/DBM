@@ -370,9 +370,12 @@ def main():
     # ------------------------------------------------------------------
     # Discover candidate .pbf files, in the root folder AND one level of
     # sub-folders. A sub-folder is treated as a PARENT region named by the
-    # folder; each .pbf inside is a SUB-REGION with id "<parent>-<sub>".
+    # folder; each .pbf inside is a SUB-REGION with id "<parent>__<sub>".
     #   root/greece-latest.osm.pbf          -> id "greece"        (full country)
-    #   root/germany/bayern-latest.osm.pbf  -> id "germany-bayern" parent "germany"
+    #   root/germany/bayern-latest.osm.pbf  -> id "germany__bayern" parent "germany"
+    # The "__" separator is unambiguous: Geofabrik ids use single hyphens only,
+    # so a hyphenated country (ireland-and-northern-ireland) can never collide
+    # with a parent__sub sub-region id or its .db filename.
     # candidates[id] = {pbf, mtime, name, parent}
     # ------------------------------------------------------------------
     candidates = {}
@@ -421,7 +424,13 @@ def main():
         sub_pbfs = [f for f in os.listdir(sub) if f.endswith(".osm.pbf")]
         for f in sorted(sub_pbfs):
             sub_stem = region_id_from_pbf(f)
-            rid = f"{parent_id}-{sub_stem}"
+            # Use "__" (never present in a Geofabrik region id, which uses only
+            # single hyphens) to join parent and sub-region. This makes the id —
+            # and therefore the .db filename — unambiguous: a full country like
+            # "ireland-and-northern-ireland" can never collide with a sub-region
+            # id, and parent-vs-sub is decidable from the filename by splitting on
+            # "__". e.g. germany/bayern-latest.osm.pbf -> "germany__bayern".
+            rid = f"{parent_id}__{sub_stem}"
             name = f"{parent_name} / {sub_stem.replace('-', ' ').title()}"
             consider(os.path.join(sub, f), rid, name, parent_id)
 
