@@ -223,25 +223,30 @@ def read_with_osmium(osm_path, drop_untagged_minor=False):
             self.ways_seen = 0
             self.t0 = time.time()
             self.last_t = self.t0
+            self.last_n = 0
 
         def _tick(self, kind):
             now = time.time()
             dt = now - self.last_t
-            rate = 200_000 / dt if dt > 0 else 0
+            done = self.nodes_seen + self.ways_seen
+            rate = (done - self.last_n) / dt if dt > 0 else 0
             print(f"    [{now - self.t0:5.0f}s] {kind:5s} "
                   f"nodes={self.nodes_seen:>10,} ways={self.ways_seen:>9,}"
                   f"  | kept roads {len(self.segments):>8,}"
                   f"  | {rate/1000:.0f}k/s", flush=True)
             self.last_t = now
+            self.last_n = done
 
         def node(self, n):
             self.nodes_seen += 1
-            if (self.nodes_seen + self.ways_seen) % 200_000 == 0:
+            # Tick on the node counter itself (node callbacks may be the only
+            # ones firing during the node phase).
+            if self.nodes_seen % 200_000 == 0:
                 self._tick("nodes")
 
         def way(self, w):
             self.ways_seen += 1
-            if (self.nodes_seen + self.ways_seen) % 200_000 == 0:
+            if self.ways_seen % 100_000 == 0:
                 self._tick("ways")
             if "highway" not in w.tags:
                 return

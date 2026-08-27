@@ -221,49 +221,27 @@ def run(pbf, db_path):
 
     import time as _time
 
-    # Best-effort total element count from the PBF header, for a real percentage.
-    total_est = 0
-    try:
-        rdr = osmium.io.Reader(pbf)
-        hdr = rdr.header()
-        for key in ("osmium_object_count", "count", "elements"):
-            try:
-                v = int(hdr.get(key)) if hasattr(hdr, "get") else 0
-                if v > 0:
-                    total_est = v; break
-            except (ValueError, TypeError):
-                continue
-        rdr.close()
-    except Exception:
-        total_est = 0
-
     progress = {"nodes": 0, "ways": 0, "t0": _time.time(),
-                "last_t": _time.time(), "last_n": 0, "total_est": total_est}
-    PROGRESS_EVERY = 500_000    # print roughly every half-million elements
+                "last_t": _time.time(), "last_n": 0}
     try:
         _mb = os.path.getsize(pbf) / 1e6
     except OSError:
         _mb = 0.0
-    if total_est > 0:
-        print(f"  scanning {pbf} ({_mb:.0f} MB, ~{total_est:,} elements) for "
-              f"parking + cameras…", flush=True)
-    else:
-        print(f"  scanning {pbf} ({_mb:.0f} MB) for parking + cameras… "
-              f"(element total unknown; showing count + rate)", flush=True)
+    # osmium streams with no dependable up-front element count, so no percentage
+    # here — each line shows elapsed time, running counts, features found, and
+    # rate, which always works and conveys how far the scan has gone. (Nodes
+    # stream before ways in a PBF, so ways stay 0 during the node phase.)
+    print(f"  scanning {pbf} ({_mb:.0f} MB) for parking + cameras; progress "
+          f"every 200k nodes / 100k ways (elapsed / counts / rate)…", flush=True)
 
-    def _tick(kind):
-        """Print a progress line every PROGRESS_EVERY elements, with rate."""
-        total = progress["nodes"] + progress["ways"]
-        if total % PROGRESS_EVERY != 0:
-            return
+    def _emit(kind):
         now = _time.time()
+        total = progress["nodes"] + progress["ways"]
         dt = now - progress["last_t"]
         dn = total - progress["last_n"]
         rate = (dn / dt) if dt > 0 else 0
         elapsed = now - progress["t0"]
-        pct = (f"{100.0 * total / progress['total_est']:4.0f}%"
-               if progress["total_est"] > 0 else "  --%")
-        print(f"  [{elapsed:6.0f}s] {pct}  {kind:5s}  "
+        print(f"  [{elapsed:6.0f}s] {kind:5s}  "
               f"nodes={progress['nodes']:>10,}  ways={progress['ways']:>9,}  "
               f"| found: lots={stats['lot']:>6,} curb={stats['curb']:>6,} "
               f"cams={stats['cam']:>4,}  "
@@ -293,7 +271,8 @@ def run(pbf, db_path):
 
         def node(self, n):
             progress["nodes"] += 1
-            _tick("nodes")
+            if progress["nodes"] % 200_000 == 0:
+                _emit("nodes")
             if not n.location.valid():
                 return
             lat, lon = n.location.lat, n.location.lon
@@ -308,7 +287,8 @@ def run(pbf, db_path):
 
         def way(self, w):
             progress["ways"] += 1
-            _tick("ways")
+            if progress["ways"] % 100_000 == 0:
+                _emit("ways")
             try:
                 coords = [(nd.lat, nd.lon) for nd in w.nodes if nd.location.valid()]
             except osmium.InvalidLocationError:
@@ -333,13 +313,6 @@ def run(pbf, db_path):
 
     h = Handler()
     # locations=True builds the node-location index needed for way geometry.
-    import os as _os
-    try:
-        sz = _os.path.getsize(pbf) / 1e6
-        print(f"Scanning {pbf} ({sz:.0f} MB). Nodes are processed first, then "
-              f"ways; progress prints every {PROGRESS_EVERY:,} elements.", flush=True)
-    except OSError:
-        print(f"Scanning {pbf} ...", flush=True)
     print("(A full country takes several minutes and builds a node-location "
           "index first — the first progress line may take a little while.)",
           flush=True)

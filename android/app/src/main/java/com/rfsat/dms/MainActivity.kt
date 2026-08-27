@@ -262,6 +262,18 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun Root() {
         var tab by remember { mutableIntStateOf(0) }
+        // OBD tab (index 4) is only shown when the OBD adapter is enabled in
+        // Settings. We keep the index mapping intact (so the `when (tab)` dispatch
+        // is unchanged) and simply skip rendering that one tab when disabled.
+        val prefs = remember { getSharedPreferences("dbm", MODE_PRIVATE) }
+        var obdOn by remember { mutableStateOf(prefs.getBoolean("obd_enabled", false)) }
+        // Re-read when returning to the tab row (cheap; keeps it in sync after the
+        // user toggles OBD in Settings).
+        androidx.compose.runtime.LaunchedEffect(tab) {
+            obdOn = prefs.getBoolean("obd_enabled", false)
+            // If OBD was turned off while its tab was selected, fall back to Detector.
+            if (tab == 4 && !obdOn) tab = 1
+        }
         Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().background(EnactDark).safeDrawingPadding()) {
             ScrollableTabRow(
@@ -270,16 +282,34 @@ class MainActivity : ComponentActivity() {
                 contentColor = EnactGreen,
                 edgePadding = 8.dp,
                 indicator = { pos ->
-                    TabRowDefaults.SecondaryIndicator(
-                        Modifier.tabIndicatorOffset(pos[tab]), color = EnactGreen)
-                }
+                    // When the OBD tab is hidden, the rendered position list is
+                    // shorter than the tab index space; map the selected logical
+                    // tab to its rendered position and clamp to avoid overflow.
+                    val renderedIndex = if (!obdOn && tab > 4) tab - 1 else tab
+                    if (renderedIndex in pos.indices) {
+                        TabRowDefaults.SecondaryIndicator(
+                            Modifier.tabIndicatorOffset(pos[renderedIndex]),
+                            color = EnactGreen)
+                    }
+                },
             ) {
                 tabs.forEachIndexed { i, name ->
+                    // Skip the OBD tab (index 4) when OBD is disabled.
+                    if (i == 4 && !obdOn) return@forEachIndexed
                     Tab(selected = tab == i, onClick = { tab = i },
                         selectedContentColor = EnactGreen,
                         unselectedContentColor = EnactOnSurfaceDim,
                         text = { Text(name, fontSize = 13.sp) })
                 }
+                // Exit: an action, not a screen. Never "selected"; tapping it
+                // fully shuts the app down (stops the foreground service and
+                // releases cameras) via the shared exitApp(). Tinted to read as
+                // an action rather than another tab.
+                Tab(selected = false, onClick = { exitApp() },
+                    selectedContentColor = EnactWarning,
+                    unselectedContentColor = EnactWarning,
+                    text = { Text("Exit", fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold) })
             }
             when (tab) {
                 0 -> AboutScreen()
@@ -687,8 +717,10 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+            // Camera/role label — top-RIGHT so it doesn't overlap the quick-toggle
+            // chips (cameras/parking/limit) that sit top-left.
             Text(role.label, color = EnactOnSurface, fontSize = 11.sp,
-                modifier = Modifier.padding(8.dp)
+                modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)
                     .clip(RoundedCornerShape(6.dp))
                     .background(EnactDarkMid.copy(alpha = 0.8f))
                     .padding(horizontal = 6.dp, vertical = 2.dp))
@@ -1063,74 +1095,63 @@ class MainActivity : ComponentActivity() {
                     ?: prefs.edit().putBoolean("log_gps", it).apply()
             }
             Spacer(Modifier.height(14.dp))
-            Text("Detection elements", color = EnactGreen, fontSize = 15.sp,
-                fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(8.dp))
-            DetectionElementRow("Road signs (speed limits)", "det_signs")
-            SpeedLimitModeRow()
-            DetectionElementRow("Lane markings (overlay)", "det_lanes")
-            DetectionElementRow("Single/double line-crossing events", "det_lane_cross")
-            DetectionElementRow("Hard-shoulder driving", "det_shoulder")
-            DetectionElementRow("Road objects (vehicles, pedestrians…)", "det_objects")
-            DetectionElementRow("Unsafe following distance", "det_distance")
-            DetectionElementRow("Traffic lights (red / amber crossing)", "det_lights")
-            DetectionElementRow("Driver state (eyes, gaze, mirrors)", "det_driver")
-            DetectionElementRow("Parking advice when stopped (where data exists)",
-                "parking_advice", default = false)
-            SpeedCameraToggle()
-            DetectionElementRow(
-                "Read lead-vehicle plate on serious hazard (stored locally only)",
-                "capture_plate", default = false)
-            Spacer(Modifier.height(14.dp))
-            Text("Self-calibration", color = EnactGreen, fontSize = 15.sp,
-                fontWeight = FontWeight.Bold)
-            Text("DBM adapts to the driver and mount during use: eye-closure " +
-                "baseline, straight-ahead head pose, the visual speed scale and " +
-                "the following-distance focal factor are learned automatically " +
-                "and bounded for safety. Independent detectors cross-check each " +
-                "other — two speed sources must agree before a speeding alert, a " +
-                "close gap must also be closing, and a line crossing must coincide " +
-                "with an actual heading change — reducing false positives.",
-                color = EnactOnSurfaceDim, fontSize = 11.sp,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Justify)
-            Spacer(Modifier.height(6.dp))
-            androidx.compose.material3.OutlinedButton(
-                onClick = { service?.resetCalibration() }) {
-                Text("Reset calibration")
+            CollapsibleSection("Detection elements") {
+                DetectionElementRow("Road signs (speed limits)", "det_signs")
+                SpeedLimitModeRow()
+                DetectionElementRow("Lane markings (overlay)", "det_lanes")
+                DetectionElementRow("Single/double line-crossing events", "det_lane_cross")
+                DetectionElementRow("Hard-shoulder driving", "det_shoulder")
+                DetectionElementRow("Road objects (vehicles, pedestrians…)", "det_objects")
+                DetectionElementRow("Unsafe following distance", "det_distance")
+                DetectionElementRow("Traffic lights (red / amber crossing)", "det_lights")
+                DetectionElementRow("Driver state (eyes, gaze, mirrors)", "det_driver")
+                DetectionElementRow("Parking advice when stopped (where data exists)",
+                    "parking_advice", default = false)
+                SpeedCameraToggle()
+                DetectionElementRow(
+                    "Read lead-vehicle plate on serious hazard (stored locally only)",
+                    "capture_plate", default = false)
             }
-            Spacer(Modifier.height(14.dp))
-            Text("Following distance", color = EnactGreen, fontSize = 15.sp,
-                fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(6.dp))
-            StoppingDistanceSlider()
-            CacheEvictionSlider()
-            MirrorIntervalSliders()
-            MapManagerSection()
-            LaneCalibrationSliders()
-            DriverViewZoomSlider()
-            Spacer(Modifier.height(14.dp))
-            Text("Display & power", color = EnactGreen, fontSize = 15.sp,
-                fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(6.dp))
-            ScreenDimSlider()
-            Spacer(Modifier.height(14.dp))
-            Text("OBD-II adapter", color = EnactGreen, fontSize = 15.sp,
-                fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(6.dp))
-            ObdSection(showLiveData = false)
-            Spacer(Modifier.height(14.dp))
-            Text("Video recording", color = EnactGreen, fontSize = 15.sp,
-                fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(6.dp))
-            VideoRecordingRow()
-            Spacer(Modifier.height(14.dp))
-            Text("Compliance score weights", color = EnactGreen, fontSize = 15.sp,
-                fontWeight = FontWeight.Bold)
-            Text("Points deducted per occurrence (scaled by severity).",
-                color = EnactOnSurfaceDim, fontSize = 11.sp)
-            Spacer(Modifier.height(6.dp))
-            RiskType.entries.filter { it.implemented }.forEach { rt ->
-                WeightSlider(rt)
+            CollapsibleSection("Self-calibration") {
+                Text("DBM adapts to the driver and mount during use: eye-closure " +
+                    "baseline, straight-ahead head pose, the visual speed scale and " +
+                    "the following-distance focal factor are learned automatically " +
+                    "and bounded for safety. Independent detectors cross-check each " +
+                    "other — two speed sources must agree before a speeding alert, a " +
+                    "close gap must also be closing, and a line crossing must coincide " +
+                    "with an actual heading change — reducing false positives.",
+                    color = EnactOnSurfaceDim, fontSize = 11.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Justify)
+                Spacer(Modifier.height(6.dp))
+                androidx.compose.material3.OutlinedButton(
+                    onClick = { service?.resetCalibration() }) {
+                    Text("Reset calibration")
+                }
+            }
+            CollapsibleSection("Following distance") {
+                StoppingDistanceSlider()
+                CacheEvictionSlider()
+                MirrorIntervalSliders()
+                MapManagerSection()
+                LaneCalibrationSliders()
+                DriverViewZoomSlider()
+            }
+            CollapsibleSection("Display & power") {
+                ScreenDimSlider()
+            }
+            CollapsibleSection("OBD-II adapter") {
+                ObdSection(showLiveData = false)
+            }
+            CollapsibleSection("Video recording") {
+                VideoRecordingRow()
+            }
+            CollapsibleSection("Compliance score weights") {
+                Text("Points deducted per occurrence (scaled by severity).",
+                    color = EnactOnSurfaceDim, fontSize = 11.sp)
+                Spacer(Modifier.height(6.dp))
+                RiskType.entries.filter { it.implemented }.forEach { rt ->
+                    WeightSlider(rt)
+                }
             }
             Spacer(Modifier.height(14.dp))
             Text("Data retention: 30 days (older data is automatically removed)",
@@ -1737,6 +1758,30 @@ class MainActivity : ComponentActivity() {
                 valueRange = 0f..25f, steps = 24)
         }
         Spacer(Modifier.height(4.dp))
+    }
+
+    /** A Settings section with a tappable header that expands/collapses its
+     *  content. Collapsed by default state is caller-provided. Uses a text
+     *  chevron so no icon dependency is needed. State is remembered per title. */
+    @Composable
+    private fun CollapsibleSection(
+        title: String,
+        startExpanded: Boolean = true,
+        content: @Composable () -> Unit
+    ) {
+        var expanded by rememberSaveable(title) { mutableStateOf(startExpanded) }
+        Spacer(Modifier.height(14.dp))
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                .clickable { expanded = !expanded }
+                .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(if (expanded) "\u25BE  $title" else "\u25B8  $title",
+                color = EnactGreen, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        }
+        if (expanded) {
+            Spacer(Modifier.height(8.dp))
+            content()
+        }
     }
 
     @Composable

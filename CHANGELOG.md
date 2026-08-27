@@ -1,5 +1,27 @@
 # DBM Changelog
 
+## v1.20.36 — Exit in the top menu bar + progress/UI fixes
+- Added "Exit" to the top tab bar. It's an action, not a screen: tapping it fully
+  shuts the app down via the existing exitApp() (pauses analysis, releases
+  cameras, unbinds + stops the foreground service, removes the task), so the
+  monitoring service doesn't keep running. Tinted amber to read as an action;
+  never shows as a selected tab, so the index-based screen dispatch is unaffected.
+- Python progress fixes:
+  * add_parking.py no longer prints "--%": removed the unreliable PBF-header
+    element-count percentage (the header rarely carries it); shows elapsed /
+    counts / features / rate instead. Also fixed a bug that made it scan the file
+    twice.
+  * osm_to_speedlimitdb.py now actually prints scan progress: it ticks per
+    callback (nodes every 200k, ways every 100k) instead of on a combined
+    modulo that could never fire if node callbacks are absent during the
+    location-index build.
+- App UI:
+  * Camera/role label moved to top-RIGHT so it no longer overlaps the top-left
+    quick-toggle chips (cameras / parking / limit).
+  * The OBD tab now appears only when the OBD adapter is enabled in Settings.
+  * Settings sections (Detection elements, Self-calibration, Following distance,
+    Display & power, OBD-II adapter, Video recording, Compliance score weights)
+    are now collapsible.
 ## v1.20.35 — align up-to-date skip messages
 - build_europe.py: the per-region "up-to-date, skipping (source unchanged)"
   lines now use a fixed-width name field so the status text lines up in a column
