@@ -261,17 +261,19 @@ def run(pbf, db_path):
 
     progress = {"nodes": 0, "ways": 0, "t0": _time.time(),
                 "last_t": _time.time(), "last_n": 0,
-                "total_nodes": total_nodes, "total_ways": total_ways}
+                "total_all": total_nodes + total_ways}
     try:
         _mb = os.path.getsize(pbf) / 1e6
     except OSError:
         _mb = 0.0
-    if total_nodes > 0 or total_ways > 0:
-        # Stage 1 recorded both totals, so BOTH phases show a real percentage:
-        # the node phase against total_nodes, the way phase against total_ways.
-        print(f"  scanning {pbf} ({_mb:.0f} MB, ~{total_nodes:,} nodes, "
-              f"~{total_ways:,} ways) for parking + cameras — % complete per "
-              f"phase…", flush=True)
+    if progress["total_all"] > 0:
+        # Stage 1 counted the whole file, so we show ONE continuous percentage
+        # over the entire scan: numerator = nodes+ways processed so far,
+        # denominator = total_nodes + total_ways. It climbs monotonically 0->100%
+        # (nodes carry it up first, then ways finish it) with no mid-scan reset.
+        print(f"  scanning {pbf} ({_mb:.0f} MB, "
+              f"{progress['total_all']:,} elements) for parking + cameras — "
+              f"% is over the whole scan…", flush=True)
     else:
         # No stored totals (e.g. base stage was skipped) — fall back to counts+rate.
         print(f"  scanning {pbf} ({_mb:.0f} MB) for parking + cameras; progress "
@@ -285,12 +287,12 @@ def run(pbf, db_path):
         dn = total - progress["last_n"]
         rate = (dn / dt) if dt > 0 else 0
         elapsed = now - progress["t0"]
-        # Each phase gets a percentage against its own stage-1 total: the node
-        # phase vs total_nodes, the way phase vs total_ways.
-        if kind == "nodes" and progress["total_nodes"] > 0:
-            pct = f"{100.0 * progress['nodes'] / progress['total_nodes']:4.0f}%"
-        elif kind == "ways" and progress["total_ways"] > 0:
-            pct = f"{100.0 * progress['ways'] / progress['total_ways']:4.0f}%"
+        # One continuous percentage over the whole scan (nodes + ways), using the
+        # combined total from stage 1. Clamped to 100 in case counts differ
+        # slightly from stage 1 (e.g. relations, which we don't count here).
+        if progress["total_all"] > 0:
+            raw = 100.0 * total / progress["total_all"]
+            pct = f"{min(raw, 100.0):4.0f}%"
         else:
             pct = "    "     # blank slot keeps columns aligned when total unknown
         _line(f"  [{elapsed:6.0f}s] {pct} {kind:5s}  "

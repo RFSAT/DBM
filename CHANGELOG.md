@@ -1,5 +1,13 @@
 # DBM Changelog
 
+## v1.20.42 — single continuous scan percentage in add_parking
+- add_parking.py now shows ONE continuous percentage over the whole scan rather
+  than a separate 0-100% bar per phase. Denominator = total_nodes + total_ways
+  (both from stage 1); numerator = nodes+ways processed so far. It climbs
+  monotonically 0->100% — nodes carry it up to the node fraction, then ways finish
+  it — with no confusing mid-scan reset. Clamped to 100% (relations aren't
+  counted, so processed counts can differ slightly from stage 1). Falls back to
+  counts+rate when totals are absent. Tooling only; no app change.
 ## v1.20.41 — add_parking shows % for BOTH node and way phases
 - Stage 1 (osm_to_speedlimitdb) already records both total_nodes and total_ways
   in the DB meta. add_parking.py now reads BOTH and shows a real percentage for
