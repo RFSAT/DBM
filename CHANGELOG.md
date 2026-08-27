@@ -1,5 +1,30 @@
 # DBM Changelog
 
+## v1.20.33 — clearer, reliable processing progress
+- Map-processing progress now gives a real feel for how far along each region is,
+  using the signal that is actually reliable at each phase:
+  * .pbf SCAN phase (osm_to_speedlimitdb.py, add_parking.py): osmium streams with
+    no dependable up-front element count, so each line shows elapsed time, live
+    node/way counts, roads/features kept, and processing rate — always works,
+    never shows a misleading percentage. (Nodes stream before ways, so ways stay
+    0 during the node phase — expected.)
+  * DB BUILD/WRITE phase (osm_to_speedlimitdb.py): the total is known here, so a
+    true percentage is shown (every 100k segments).
+- Removed an earlier attempt to read a percentage from the PBF header: that count
+  is frequently absent and couldn't be relied on, so it was replaced with the
+  robust elapsed/counts/rate lines above. Tooling only; no app change.
+## v1.20.33 — percentage in map-processing progress lines
+- Both map-processing scripts now show a percentage of completion in each
+  progress line, per region and per stage:
+  * osm_to_speedlimitdb.py (speed-limit scan) and add_parking.py (parking +
+    cameras) read the PBF header's element count up front when available and
+    print "NN%" on every progress line, so you can see how far through the
+    current file each stage is.
+  * If the header does not carry a count (varies by extract/writer), the line
+    shows "--%" and still reports live counts + rate — never fails the run.
+  Note: pyosmium streams the file with no guaranteed pre-count, so an exact
+  node maximum cannot be stated before processing; the header-count percentage
+  is the reliable equivalent. Tooling only; no app change.
 ## v1.20.32 — enable R8 minification/obfuscation for Play optimisation
 - Google Play flagged app optimisation below threshold (Obfuscation 1%). Enabled
   R8 for the release build: isMinifyEnabled = true, isShrinkResources = true.

@@ -17,7 +17,7 @@ plugins {
 // ---------------------------------------------------------------------------
 val dmsVersionEpoch = 1
 val dmsVersionMajor = 20
-val dmsVersionMinor = 32
+val dmsVersionMinor = 33
 val dmsVersionName = "$dmsVersionEpoch.$dmsVersionMajor.$dmsVersionMinor"
 
 android {

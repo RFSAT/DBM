@@ -30,6 +30,7 @@ Requires: pyosmium  (pip install osmium)
 """
 
 import argparse
+import os
 import sqlite3
 import struct
 import sys
@@ -219,9 +220,36 @@ def run(pbf, db_path):
     stats = {"curb": 0, "lot": 0, "cam": 0}
 
     import time as _time
+
+    # Best-effort total element count from the PBF header, for a real percentage.
+    total_est = 0
+    try:
+        rdr = osmium.io.Reader(pbf)
+        hdr = rdr.header()
+        for key in ("osmium_object_count", "count", "elements"):
+            try:
+                v = int(hdr.get(key)) if hasattr(hdr, "get") else 0
+                if v > 0:
+                    total_est = v; break
+            except (ValueError, TypeError):
+                continue
+        rdr.close()
+    except Exception:
+        total_est = 0
+
     progress = {"nodes": 0, "ways": 0, "t0": _time.time(),
-                "last_t": _time.time(), "last_n": 0}
+                "last_t": _time.time(), "last_n": 0, "total_est": total_est}
     PROGRESS_EVERY = 500_000    # print roughly every half-million elements
+    try:
+        _mb = os.path.getsize(pbf) / 1e6
+    except OSError:
+        _mb = 0.0
+    if total_est > 0:
+        print(f"  scanning {pbf} ({_mb:.0f} MB, ~{total_est:,} elements) for "
+              f"parking + cameras…", flush=True)
+    else:
+        print(f"  scanning {pbf} ({_mb:.0f} MB) for parking + cameras… "
+              f"(element total unknown; showing count + rate)", flush=True)
 
     def _tick(kind):
         """Print a progress line every PROGRESS_EVERY elements, with rate."""
@@ -233,7 +261,9 @@ def run(pbf, db_path):
         dn = total - progress["last_n"]
         rate = (dn / dt) if dt > 0 else 0
         elapsed = now - progress["t0"]
-        print(f"  [{elapsed:6.0f}s] {kind:5s}  "
+        pct = (f"{100.0 * total / progress['total_est']:4.0f}%"
+               if progress["total_est"] > 0 else "  --%")
+        print(f"  [{elapsed:6.0f}s] {pct}  {kind:5s}  "
               f"nodes={progress['nodes']:>10,}  ways={progress['ways']:>9,}  "
               f"| found: lots={stats['lot']:>6,} curb={stats['curb']:>6,} "
               f"cams={stats['cam']:>4,}  "

@@ -198,12 +198,19 @@ def read_with_osmium(osm_path, drop_untagged_minor=False):
     import osmium
     import time
 
+    file_mb = 0.0
     try:
-        sz = os.path.getsize(osm_path) / 1e6
-        print(f"  reading {osm_path} ({sz:.0f} MB) — scanning ways for highways…",
-              flush=True)
+        file_mb = os.path.getsize(osm_path) / 1e6
     except OSError:
-        print(f"  reading {osm_path} …", flush=True)
+        pass
+
+    # Note on progress: osmium streams the file and gives no reliable up-front
+    # element count, so we don't show a percentage here. Instead each line shows
+    # elapsed time, running node/way counts, roads kept and the processing rate —
+    # which always works and gives a clear feel for how far the scan has gone.
+    # (Nodes stream before ways in a PBF, so ways stay 0 during the node phase.)
+    print(f"  reading {osm_path} ({file_mb:.0f} MB) — scanning; progress every "
+          f"200k elements (elapsed / counts / rate)…", flush=True)
 
     class Handler(osmium.SimpleHandler):
         def __init__(self):
@@ -212,20 +219,30 @@ def read_with_osmium(osm_path, drop_untagged_minor=False):
             self.segments = []
             self.minlat = self.minlon = 1e9
             self.maxlat = self.maxlon = -1e9
+            self.nodes_seen = 0
             self.ways_seen = 0
             self.t0 = time.time()
             self.last_t = self.t0
 
+        def _tick(self, kind):
+            now = time.time()
+            dt = now - self.last_t
+            rate = 200_000 / dt if dt > 0 else 0
+            print(f"    [{now - self.t0:5.0f}s] {kind:5s} "
+                  f"nodes={self.nodes_seen:>10,} ways={self.ways_seen:>9,}"
+                  f"  | kept roads {len(self.segments):>8,}"
+                  f"  | {rate/1000:.0f}k/s", flush=True)
+            self.last_t = now
+
+        def node(self, n):
+            self.nodes_seen += 1
+            if (self.nodes_seen + self.ways_seen) % 200_000 == 0:
+                self._tick("nodes")
+
         def way(self, w):
             self.ways_seen += 1
-            if self.ways_seen % 200_000 == 0:
-                now = time.time()
-                dt = now - self.last_t
-                rate = 200_000 / dt if dt > 0 else 0
-                print(f"    [{now - self.t0:5.0f}s] ways scanned "
-                      f"{self.ways_seen:>10,}  | kept roads {len(self.segments):>8,}"
-                      f"  | {rate/1000:.0f}k ways/s", flush=True)
-                self.last_t = now
+            if (self.nodes_seen + self.ways_seen) % 200_000 == 0:
+                self._tick("ways")
             if "highway" not in w.tags:
                 return
             hw = w.tags.get("highway")
