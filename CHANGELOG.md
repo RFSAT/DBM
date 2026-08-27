@@ -1,5 +1,22 @@
 # DBM Changelog
 
+## v1.20.32 — enable R8 minification/obfuscation for Play optimisation
+- Google Play flagged app optimisation below threshold (Obfuscation 1%). Enabled
+  R8 for the release build: isMinifyEnabled = true, isShrinkResources = true.
+- Strengthened proguard-rules.pro: explicit keeps for LiteRT
+  (com.google.ai.edge.litert.**), TFLite, MediaPipe, ML Kit, native-method
+  classes, and the app's own detect/fusion data classes; standard Kotlin/Compose
+  attribute keeps; dontwarn for known-safe optional absences. The ML AARs also
+  ship their own consumer keep rules that AGP merges automatically, so these are
+  belt-and-suspenders.
+- IMPORTANT: R8 stripping errors are RELEASE-ONLY and do not appear in the debug
+  build. CI builds assembleRelease + bundleRelease so build-time R8 failures are
+  caught, but a stripped-at-runtime crash can only be found by testing the actual
+  RELEASE build on-device. Test the release AAB/APK on the S24 before publishing:
+  launch, run monitoring, exercise sign OCR, traffic-light, face landmarker, and
+  OBD paths — these are the reflection/JNI surfaces R8 could affect.
+- isShrinkResources strips only unused res/, never assets/, so bundled .tflite
+  models are unaffected.
 ## v1.20.31 — build_europe: sub-regions, stale cleanup, full summary
 - build_europe.py now scans one level of SUB-FOLDERS in addition to root files.
   A sub-folder named after a country is a PARENT region; each .pbf inside is a

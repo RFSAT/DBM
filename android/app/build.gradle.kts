@@ -17,7 +17,7 @@ plugins {
 // ---------------------------------------------------------------------------
 val dmsVersionEpoch = 1
 val dmsVersionMajor = 20
-val dmsVersionMinor = 31
+val dmsVersionMinor = 32
 val dmsVersionName = "$dmsVersionEpoch.$dmsVersionMajor.$dmsVersionMinor"
 
 android {
@@ -57,13 +57,16 @@ android {
 
     buildTypes {
         release {
-            // Minification is OFF during active development: R8 on an ML-heavy
-            // app (TFLite + MediaPipe + ML Kit) can strip reflection-loaded code
-            // and cause launch-time crashes that don't show at build time. The
-            // proguard-rules.pro (keep + dontwarn rules) is already in place, so
-            // re-enabling for a Play Store build is just flipping this to true
-            // and testing the shrunk APK thoroughly.
-            isMinifyEnabled = false
+            // Minification (R8) is ENABLED for Play's app-optimisation / obfuscation
+            // requirement. R8 on an ML-heavy app (LiteRT + MediaPipe + ML Kit) can
+            // strip reflection/JNI-loaded code and cause release-only crashes, so:
+            //  - the ML AARs ship their own consumer keep rules (merged by AGP), and
+            //  - proguard-rules.pro adds explicit keeps for those packages + the
+            //    app's own model-decoding classes as belt-and-suspenders.
+            // MUST be verified on a real device with the RELEASE build — R8
+            // breakage does not appear in the debug build that CI compiles.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // Include native debug symbols (FULL) in the bundle so crashes/ANRs
             // inside the TFLite .so libraries show readable function names in the
