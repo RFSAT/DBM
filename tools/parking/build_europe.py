@@ -288,7 +288,7 @@ def process_one(pbf, region_id, region_name, add_parking, skip_base):
             sys.exit("BASE_CONVERTER not set — cannot produce speed limits.")
         cmd = [c.format(pbf=pbf, db=db_path, region=region_name)
                for c in BASE_CONVERTER]
-        print(f"\n  [1/2] speed limits: {' '.join(cmd)}", flush=True)
+        print(f"\n  [1/2] speed limits", flush=True)
         import subprocess
         subprocess.run(cmd, check=True)
     elif not os.path.exists(db_path):

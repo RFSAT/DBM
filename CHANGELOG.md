@@ -1,5 +1,10 @@
 # DBM Changelog
 
+## v1.20.47 — tidy [1/2] banner
+- build_europe.py: the "[1/2] speed limits" banner no longer prints the full
+  python command line being executed; it now reads simply "[1/2] speed limits",
+  matching the "[2/2] parking + cameras" banner. The command is still run
+  unchanged. Tooling only; no app change.
 ## v1.20.46 — fix: sub-folders named with spaces / display names ignored
 - build_europe.py matched sub-folder names only against the exact Geofabrik region
   id (e.g. "czech-republic"), so a folder named with the DISPLAY name or a space —
