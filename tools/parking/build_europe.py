@@ -167,6 +167,47 @@ def save_state(d, state):
     json.dump(state, open(os.path.join(d, STATE_FILE), "w"), indent=2)
 
 
+def write_manifest(d, base_url, state):
+    """Write index.json from the accumulated state — every region whose .db is
+    present on disk. Called after EACH region so an interrupted run always leaves
+    a complete, valid manifest covering everything finished so far (resume-safe).
+
+    Written atomically (temp file + rename) so an interruption mid-write can
+    never leave a truncated/corrupt index.json.
+    Returns the number of regions listed.
+    """
+    regions = []
+    for rid, info in sorted(state.items()):
+        db_path = os.path.join(d, f"{rid}.db")
+        if not os.path.exists(db_path):
+            continue
+        regions.append({
+            "id": rid,
+            "name": info.get("name") or EUROPE_REGIONS.get(rid, rid.capitalize()),
+            "country": EUROPE_REGIONS.get(info.get("parent") or rid, rid.capitalize()),
+            "parent": info.get("parent"),
+            "file": f"{rid}.db",
+            "sizeBytes": info["db_size"],
+            "sha256": info["db_sha256"],
+            "dataDate": info["data_date"],
+            "version": info["version"],
+            "dbSchemaVersion": int(info.get("schema") or 5),
+            "counts": info.get("counts", {}),
+        })
+    manifest = {
+        "schemaVersion": 1,
+        "baseUrl": base_url.rstrip("/"),
+        "updated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "regions": regions,
+    }
+    final = os.path.join(d, "index.json")
+    tmp = final + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(manifest, f, indent=2)
+    os.replace(tmp, final)          # atomic on the same filesystem
+    return len(regions)
+
+
 def src_signature(path):
     """A cheap fingerprint of the source .pbf: size + mtime. If the user
     downloads a newer file, this changes and we reprocess."""
@@ -284,56 +325,115 @@ def main():
     only = {x.strip() for x in a.only.split(",") if x.strip()}
     state = load_state(d)
 
-    # Discover candidate .pbf files.
-    pbfs = [f for f in os.listdir(d) if f.endswith(".osm.pbf")]
-    if not pbfs:
-        sys.exit(f"No *.osm.pbf files found in {d}")
+    # ------------------------------------------------------------------
+    # Stale-entry cleanup: drop any region from state whose .db no longer
+    # exists on disk, so deleting a .db file cleanly removes that region from
+    # both .build_state.json and index.json on the next run. Reported below.
+    # ------------------------------------------------------------------
+    removed_ids = []
+    for rid in list(state.keys()):
+        if not os.path.exists(os.path.join(d, f"{rid}.db")):
+            removed_ids.append(rid)
+            del state[rid]
+    if removed_ids:
+        save_state(d, state)
+        print("Removed from state (their .db is gone):")
+        for rid in sorted(removed_ids):
+            print(f"  - {rid}")
+        print()
 
-    # Map them to region ids, filter to Europe country set, dedupe (prefer the
-    # newest file if both greece-latest and greece-260801 exist).
-    candidates = {}   # region_id -> (pbf_path, mtime)
-    skipped_non_europe = []
-    for f in sorted(pbfs):
+    # ------------------------------------------------------------------
+    # Discover candidate .pbf files, in the root folder AND one level of
+    # sub-folders. A sub-folder is treated as a PARENT region named by the
+    # folder; each .pbf inside is a SUB-REGION with id "<parent>-<sub>".
+    #   root/greece-latest.osm.pbf          -> id "greece"        (full country)
+    #   root/germany/bayern-latest.osm.pbf  -> id "germany-bayern" parent "germany"
+    # candidates[id] = {pbf, mtime, name, parent}
+    # ------------------------------------------------------------------
+    candidates = {}
+    skipped = []
+    # display names + parent, filled as we discover
+    disp = {}       # id -> display name
+    parent_of = {}  # id -> parent id (or None)
+
+    def consider(path, rid, name, parent):
+        if only and rid not in only and (parent or rid) not in only:
+            return
+        mt = os.stat(path).st_mtime
+        if rid not in candidates or mt > candidates[rid]["mtime"]:
+            candidates[rid] = {"pbf": path, "mtime": mt, "name": name, "parent": parent}
+            disp[rid] = name
+            parent_of[rid] = parent
+
+    # (1) root-level files: recognised full-country regions.
+    root_pbfs = [f for f in os.listdir(d)
+                 if f.endswith(".osm.pbf") and os.path.isfile(os.path.join(d, f))]
+    for f in sorted(root_pbfs):
         rid = region_id_from_pbf(f)
         if rid in EXCLUDED_IDS:
-            skipped_non_europe.append((f, "special sub-region / excluded"))
-            continue
+            skipped.append((f, "special sub-region / excluded")); continue
         if rid not in EUROPE_REGIONS:
-            skipped_non_europe.append((f, "not a recognised Europe country"))
-            continue
-        if only and rid not in only:
-            continue
-        path = os.path.join(d, f)
-        mt = os.stat(path).st_mtime
-        if rid not in candidates or mt > candidates[rid][1]:
-            candidates[rid] = (path, mt)
+            skipped.append((f, "not a recognised Europe country")); continue
+        consider(os.path.join(d, f), rid, EUROPE_REGIONS[rid], None)
 
-    print(f"Found {len(candidates)} European region file(s) to consider"
-          + (f"; skipping {len(skipped_non_europe)} non-Europe/special file(s)"
-             if skipped_non_europe else "") + ".\n")
-    for f, why in skipped_non_europe:
+    # (2) sub-folders: each is a parent region; files inside are sub-regions.
+    for entry in sorted(os.listdir(d)):
+        sub = os.path.join(d, entry)
+        if not os.path.isdir(sub):
+            continue
+        parent_id = entry.lower()
+        if parent_id not in EUROPE_REGIONS:
+            # Only treat folders named after a known country as region folders;
+            # ignore unrelated dirs (e.g. __pycache__, output dirs).
+            continue
+        parent_name = EUROPE_REGIONS[parent_id]
+        # If a full-country file for this parent is ALSO in root, warn & skip it
+        # (sub-regions replace the full country to avoid the huge download).
+        if parent_id in candidates and candidates[parent_id]["parent"] is None:
+            print(f"  note: '{entry}/' sub-folder present, so ignoring the full "
+                  f"{parent_name} file in root (sub-regions replace it).")
+            del candidates[parent_id]
+        sub_pbfs = [f for f in os.listdir(sub) if f.endswith(".osm.pbf")]
+        for f in sorted(sub_pbfs):
+            sub_stem = region_id_from_pbf(f)
+            rid = f"{parent_id}-{sub_stem}"
+            name = f"{parent_name} / {sub_stem.replace('-', ' ').title()}"
+            consider(os.path.join(sub, f), rid, name, parent_id)
+
+    if not candidates:
+        sys.exit(f"No usable *.osm.pbf files found in {d} or its region sub-folders")
+
+    n_sub = sum(1 for c in candidates.values() if c["parent"])
+    print(f"Found {len(candidates)} region file(s) to consider "
+          f"({len(candidates)-n_sub} full, {n_sub} sub-region)"
+          + (f"; skipping {len(skipped)} non-Europe/special file(s)"
+             if skipped else "") + ".\n")
+    for f, why in skipped:
         print(f"  skip {f}: {why}")
-    if skipped_non_europe:
+    if skipped:
         print()
 
     processed, skipped_uptodate, failed = [], [], []
+    added_ids = []
     t_all = time.time()
 
     for rid in sorted(candidates):
-        pbf, _ = candidates[rid]
+        info = candidates[rid]
+        pbf = info["pbf"]
+        name = info["name"]
         sig = src_signature(pbf)
         prev = state.get(rid, {})
         if not a.force and prev.get("src_sig") == sig and os.path.exists(f"{rid}.db"):
-            print(f"== {EUROPE_REGIONS[rid]} ({rid}): up-to-date, skipping "
-                  f"(source unchanged) ==")
+            print(f"== {name} ({rid}): up-to-date, skipping (source unchanged) ==")
             skipped_uptodate.append(rid)
             continue
 
-        print(f"\n{'='*70}\n== {EUROPE_REGIONS[rid]} ({rid}) — processing "
+        is_new = rid not in state
+        print(f"\n{'='*70}\n== {name} ({rid}) — processing "
               f"{os.path.basename(pbf)} ==\n{'='*70}", flush=True)
         t0 = time.time()
         try:
-            db_path = process_one(pbf, rid, EUROPE_REGIONS[rid], add_parking, a.skip_base)
+            db_path = process_one(pbf, rid, name, add_parking, a.skip_base)
         except Exception as e:
             print(f"  FAILED: {e.__class__.__name__}: {e}", flush=True)
             failed.append(rid)
@@ -342,7 +442,7 @@ def main():
 
         ok, findings = verify_db(db_path)
         # Per-file SUMMARY + VERIFICATION
-        print(f"\n  --- {EUROPE_REGIONS[rid]} summary ---")
+        print(f"\n  --- {name} summary ---")
         print(f"    time            : {dt:.0f}s")
         print(f"    schema_version  : {findings.get('schema_version')}")
         print(f"    segments (roads): {findings.get('segments')}  "
@@ -364,51 +464,78 @@ def main():
             version = version + 1 if version else 1
         state[rid] = {
             "src_sig": sig,
+            "name": name,
+            "parent": info["parent"],
             "db_sha256": sha,
             "db_size": size,
             "version": version,
             "data_date": pbf_date(pbf),
             "schema": findings.get("schema_version"),
             "counts": {k: findings.get(k) for k in
-                       ("parking_lot", "parking_curb", "speed_camera")},
+                       ("segments", "with_maxspeed", "parking_lot",
+                        "parking_curb", "speed_camera")},
             "processed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
+        if is_new:
+            added_ids.append(rid)
         save_state(d, state)     # save after each file so a crash doesn't lose progress
+        # Also refresh index.json now, so an interruption leaves a complete,
+        # deployable manifest covering every region finished so far.
+        n_listed = write_manifest(d, a.base_url, state)
+        print(f"  index.json updated: {n_listed} region(s) listed so far",
+              flush=True)
         processed.append(rid)
 
-    # ----- generate index.json from ALL region .db present in state -----
-    regions = []
-    for rid, info in sorted(state.items()):
-        db_path = os.path.join(d, f"{rid}.db")
-        if not os.path.exists(db_path):
-            continue
-        regions.append({
-            "id": rid,
-            "name": EUROPE_REGIONS.get(rid, rid.capitalize()),
-            "country": EUROPE_REGIONS.get(rid, rid.capitalize()),
-            "file": f"{rid}.db",
-            "sizeBytes": info["db_size"],
-            "sha256": info["db_sha256"],
-            "dataDate": info["data_date"],
-            "version": info["version"],
-            "dbSchemaVersion": int(info.get("schema") or 5),
-        })
+    # ----- final manifest refresh (also written after each region above) -----
+    regions_listed = write_manifest(d, a.base_url, state)
 
-    manifest = {
-        "schemaVersion": 1,
-        "baseUrl": a.base_url.rstrip("/"),
-        "updated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "regions": regions,
-    }
-    with open(os.path.join(d, "index.json"), "w") as f:
-        json.dump(manifest, f, indent=2)
+    # ----- comprehensive final summary -----
+    print(f"\n{'='*70}\nBATCH COMPLETE in {time.time()-t_all:.0f}s\n{'='*70}")
 
-    # ----- overall summary -----
-    print(f"\n{'='*70}\nBATCH COMPLETE in {time.time()-t_all:.0f}s")
-    print(f"  processed now   : {len(processed)}  {processed}")
+    # Changes to the JSON files this run.
+    print("JSON changes this run:")
+    if added_ids:
+        print(f"  added ({len(added_ids)}): {', '.join(sorted(added_ids))}")
+    if removed_ids:
+        print(f"  removed ({len(removed_ids)}): {', '.join(sorted(removed_ids))}")
+    reprocessed = [r for r in processed if r not in added_ids]
+    if reprocessed:
+        print(f"  updated ({len(reprocessed)}): {', '.join(sorted(reprocessed))}")
+    if not (added_ids or removed_ids or reprocessed):
+        print("  none")
+
+    print(f"\nRun outcome:")
+    print(f"  processed now   : {len(processed)}")
     print(f"  up-to-date skip : {len(skipped_uptodate)}")
-    print(f"  failed          : {len(failed)}  {failed}")
-    print(f"  index.json      : {len(regions)} region(s) listed")
+    print(f"  failed          : {len(failed)}  {failed if failed else ''}")
+
+    # Full per-region table + feature totals across everything in the manifest.
+    print(f"\nAll regions in index.json ({regions_listed}):")
+    print(f"  {'region':28s} {'roads':>9s} {'w/lim':>8s} {'parking':>8s} "
+          f"{'curb':>6s} {'cams':>6s} {'MB':>7s}")
+    tot = {"segments": 0, "with_maxspeed": 0, "parking_lot": 0,
+           "parking_curb": 0, "speed_camera": 0, "bytes": 0}
+    def _i(v):
+        try: return int(v)
+        except (TypeError, ValueError): return 0
+    for rid in sorted(state.keys()):
+        if not os.path.exists(os.path.join(d, f"{rid}.db")):
+            continue
+        info = state[rid]
+        c = info.get("counts", {})
+        seg = _i(c.get("segments")); wl = _i(c.get("with_maxspeed"))
+        pl = _i(c.get("parking_lot")); pc = _i(c.get("parking_curb"))
+        cam = _i(c.get("speed_camera")); mb = info.get("db_size", 0) / 1e6
+        tot["segments"] += seg; tot["with_maxspeed"] += wl
+        tot["parking_lot"] += pl; tot["parking_curb"] += pc
+        tot["speed_camera"] += cam; tot["bytes"] += info.get("db_size", 0)
+        print(f"  {info.get('name', rid)[:28]:28s} {seg:>9,} {wl:>8,} "
+              f"{pl:>8,} {pc:>6,} {cam:>6,} {mb:>7.1f}")
+    print(f"  {'-'*28} {'-'*9} {'-'*8} {'-'*8} {'-'*6} {'-'*6} {'-'*7}")
+    print(f"  {'TOTAL':28s} {tot['segments']:>9,} {tot['with_maxspeed']:>8,} "
+          f"{tot['parking_lot']:>8,} {tot['parking_curb']:>6,} "
+          f"{tot['speed_camera']:>6,} {tot['bytes']/1e6:>7.1f}")
+
     print(f"\nUpload every changed .db AND index.json to {a.base_url}")
     print("(data files FIRST, index.json LAST — see SERVER-DEPLOYMENT.md)")
 

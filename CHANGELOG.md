@@ -1,5 +1,31 @@
 # DBM Changelog
 
+## v1.20.31 — build_europe: sub-regions, stale cleanup, full summary
+- build_europe.py now scans one level of SUB-FOLDERS in addition to root files.
+  A sub-folder named after a country is a PARENT region; each .pbf inside is a
+  sub-region with id "<parent>-<sub>" (e.g. germany/bayern-latest.osm.pbf ->
+  germany-bayern, parent germany). Lets large countries be provided as smaller
+  sub-region downloads instead of one huge file.
+- If a full-country file is in root AND a sub-folder for it exists, the full file
+  is ignored (with a note) — sub-regions replace it.
+- Manifest entries now carry name + parent + per-feature counts, so the app can
+  group sub-regions under their parent country and show a data summary.
+- STALE CLEANUP: at each run, any region whose .db is missing is removed from
+  both .build_state.json and index.json (reported). Deleting a .db file now
+  cleanly removes that region — no manual JSON editing.
+- Comprehensive end-of-run summary: JSON changes (added/removed/updated) and a
+  full per-region table (roads, roads-with-limit, parking, curb, cameras, MB)
+  with totals. Tooling only; no app change in this version.
+## v1.20.30 — resumable batch: index.json saved after each region
+- build_europe.py now writes index.json after EVERY processed region (not only at
+  the end), from the accumulated state. A long full-Europe run can be interrupted
+  and restarted: already-done regions are skipped (existing .build_state.json),
+  and the manifest on disk always reflects every region finished so far — so the
+  partial set is immediately deployable and the resume continues from the last
+  processed region onward.
+- The manifest write is atomic (temp file + os.replace), so an interruption
+  mid-write can never leave a truncated/corrupt index.json. Tooling only; no app
+  change.
 ## v1.20.29 — build fix (duplicate @Composable annotation)
 - Fixed a compile error ("This annotation is not repeatable") on
   RecentSignsOverlay: removing the unused SpeedCameraToggleTail stub in v1.20.27
