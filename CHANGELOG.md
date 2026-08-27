@@ -1,5 +1,14 @@
 # DBM Changelog
 
+## v1.20.44 — build fix: missing rememberSaveable import
+- Fixed the compile error present since v1.20.36 (the collapsible Settings
+  sections): rememberSaveable was used but never imported. Added
+  "import androidx.compose.runtime.saveable.rememberSaveable". The second reported
+  error ("Unresolved reference 'not' for operator '!'" on !expanded) was a cascade
+  from that — with the import resolved, expanded is typed Boolean and it compiles.
+- Verified every import used by the recent UI work (clickable, LaunchedEffect,
+  rememberSaveable, etc.) is present as an actual import statement. No app
+  behaviour change.
 ## v1.20.43 — map-processing console tidy-ups
 - Removed the "(A full country takes several minutes…)" node-index warning from
   add_parking.py.
