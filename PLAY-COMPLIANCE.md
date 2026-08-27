@@ -1,15 +1,30 @@
 # Google Play compliance — four Console items
 
-Two of the four are **hard requirements**; two are **optional recommendations**.
-The Console presents them together, but they carry very different urgency and
-risk. Treat them separately.
+**Current as of v1.20.48.** Two of the four are **hard requirements**; two are
+**optional recommendations**. The Console presents them together, but they carry
+very different urgency and risk. Treat them separately.
 
 | # | Item | Status | Risk to this app |
 |---|------|--------|------------------|
-| 1 | 16 KB memory page size | **REQUIRED** (deadline passed May 31 2026) | Low config risk; depends on dependency versions |
-| 4 | Target Android 16 (API 36) | **REQUIRED** for new uploads/updates | Low–moderate (behaviour changes on 16) |
-| 2 | Enable R8 optimization | Recommended | **HIGH** — can break the ML stack at runtime |
-| 3 | Upgrade to AGP 9.0 | Recommended | **HIGH** — breaking DSL/Kotlin changes |
+| 1 | 16 KB memory page size | **REQUIRED** — RESOLVED (Play accepted v1.20.19) | Low config risk; depends on dependency versions |
+| 4 | Target Android 16 (API 36) | **REQUIRED** — DONE (`compile/targetSdk = 36`) | Low–moderate (behaviour changes on 16) |
+| 2 | Enable R8 optimization | Was "recommended", Play escalated to a scored requirement — **DONE in v1.20.32** | **HIGH** — can break the ML stack at runtime; needs on-device release test |
+| 3 | Upgrade to AGP 9.0 | Recommended — NOT done (still on 8.x line) | **HIGH** — breaking DSL/Kotlin changes |
+
+## R8 / obfuscation (item 2) — DONE in v1.20.32, verification pending
+
+Play flagged "App optimisation below threshold — Obfuscation (1%)". R8 was enabled:
+`isMinifyEnabled = true`, `isShrinkResources = true`, with explicit keep rules in
+`proguard-rules.pro` for LiteRT / TFLite / MediaPipe / ML Kit / native-method
+classes / the app's own detect+fusion classes (belt-and-suspenders on top of the
+consumer keep rules those AARs already ship). `isShrinkResources` strips only
+`res/`, never `assets/`, so bundled `.tflite` models are safe.
+
+**Still to verify on-device:** R8 breakage is RELEASE-ONLY and invisible in the
+debug build. CI builds `assembleRelease`+`bundleRelease` so build-time R8 failures
+are caught, but a stripped-at-runtime crash can only be found by testing the
+actual release build on the S24 (launch, monitoring, sign OCR, traffic-light, face
+landmarker, OBD). See OPEN-ITEMS.md item 1.
 
 ## Done in this version
 
@@ -57,16 +72,22 @@ No further action needed unless a future Play re-check flags a specific file.
 
 **Do not upload to find out.** CI runs a
 **"Check 16 KB page alignment of native libraries"** step that unzips the built
-APK and runs `readelf -lW` on every `.so`, printing:
+APK and runs `readelf -lW` on every `.so`. As of v1.20.48 it distinguishes
+KNOWN-ACCEPTED unaligned libraries (ones Play accepted live — see the table below)
+from NEW offenders: known-accepted files print as `NOTE`, and only a NEW unaligned
+library raises a warning. This stops the check crying "WILL reject" every build on
+files Play actually accepts, so the warning means something again:
 
 ```
   OK        0x4000  lib/arm64-v8a/libtensorflowlite_jni.so
-  UNALIGNED 0x1000  lib/arm64-v8a/libmlkit_google_ocr_pipeline.so
+  NOTE      0x1000  lib/arm64-v8a/libmlkit_google_ocr_pipeline.so  (accepted by Play)
+  UNALIGNED 0x1000  lib/arm64-v8a/libSOMETHING_NEW.so  (NEW — not on the allowlist)
 ```
 
-Any line marked `UNALIGNED` is the library Play will reject on. Bump the
-dependency that ships it and re-run. This turns a wasted upload cycle into a
-one-minute CI log check.
+A `NOTE` is fine; a `NEW` line is the one to act on — bump the dependency that
+ships it, and if Play later accepts it, add it to `KNOWN_ACCEPTED` in the
+workflow. (Also in v1.20.48: `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` quiets the
+transitional Node 20 deprecation warning; the actions already run on Node 24.)
 
 The Play Console error also names the file directly
 ("Library that does not support 16 KB: `base/lib/arm64-v8a/libXXX.so`") — if the
@@ -78,13 +99,12 @@ CI list and that name disagree, trust the Console.
 
 ### "No deobfuscation file associated with this App Bundle"
 
-**Expected, and not applicable.** A deobfuscation (mapping) file only exists when
-R8/ProGuard obfuscates the build. `isMinifyEnabled = false`, so nothing is
-renamed and stack traces are already readable — there is no mapping file to
-upload. Play shows this notice generically on any bundle without one.
-
-It becomes relevant only if/when R8 is enabled (item 2 above); AGP then produces
-`mapping.txt` and uploads it with the bundle automatically.
+**No longer applicable as of v1.20.32.** This notice appeared while
+`isMinifyEnabled = false`. Now that R8 is enabled, AGP produces a `mapping.txt`
+and uploads it with the bundle automatically, so this warning should clear on the
+next release build. If the Console still shows it, confirm the release build
+actually ran R8 (it does when `bundleRelease` runs with the keystore secret) and
+that the mapping file was attached to the uploaded bundle.
 
 ### "Contains native code, and you've not uploaded debug symbols"
 

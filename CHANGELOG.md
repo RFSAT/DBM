@@ -1,5 +1,19 @@
 # DBM Changelog
 
+## v1.20.49 — bring living docs current; add release checklist
+- OPEN-ITEMS.md and PLAY-COMPLIANCE.md were stale since v1.20.19 — they didn't
+  reflect R8 being enabled (v1.20.32), the Europe map pipeline, the sub-region
+  work, or the CI changes. Both are now updated to the current state:
+  * OPEN-ITEMS.md: R8 moved from "deferred recommendation" to "done, needs
+    on-device verification"; the Europe pipeline real-data run replaces the old
+    parking item; the sub-region app UI is listed under "still to build"; a
+    RESOLVED section records what's been completed since v1.20.19.
+  * PLAY-COMPLIANCE.md: item 2 (R8) marked DONE; the "No deobfuscation file"
+    section corrected (it was written for isMinifyEnabled=false and is now
+    backwards); the CI alignment-check description updated for the v1.20.48
+    known-accepted/NEW distinction and the Node 24 env.
+- Added RELEASE-CHECKLIST.md so these living docs are updated as part of every
+  release rather than forgotten. No app/tooling code change.
 ## v1.20.48 — CI: quiet Node 20 warning; smarter 16 KB check
 - Node.js 20 deprecation warning: added FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true at
   the workflow level. The actions used (checkout@v5, setup-java@v5,
