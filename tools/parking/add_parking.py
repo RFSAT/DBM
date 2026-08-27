@@ -220,6 +220,26 @@ def run(pbf, db_path):
     stats = {"curb": 0, "lot": 0, "cam": 0}
 
     import time as _time
+    import sys as _sys
+
+    # Progress lines overwrite each other on one line (carriage return) instead
+    # of scrolling. To avoid leaving tail characters when a new line is shorter
+    # than the previous one, we pad every line to the widest length seen so far.
+    # A newline is printed once when the phase ends (see _finish_line).
+    _pw = {"max": 0}
+
+    def _line(text):
+        pad = max(0, _pw["max"] - len(text))
+        _pw["max"] = max(_pw["max"], len(text))
+        _sys.stdout.write("\r" + text + " " * pad)
+        _sys.stdout.flush()
+
+    def _finish_line():
+        # Terminate the current overwriting line so following output is clean.
+        if _pw["max"] > 0:
+            _sys.stdout.write("\n")
+            _sys.stdout.flush()
+            _pw["max"] = 0
 
     # The speed-limit stage (osm_to_speedlimitdb) scanned this same .pbf first and
     # recorded the node total in the DB's meta table. We scan the SAME file, so
@@ -263,11 +283,11 @@ def run(pbf, db_path):
             pct = f"{100.0 * progress['nodes'] / progress['total_nodes']:4.0f}%"
         else:
             pct = "    "     # blank slot keeps columns aligned in the way phase
-        print(f"  [{elapsed:6.0f}s] {pct} {kind:5s}  "
+        _line(f"  [{elapsed:6.0f}s] {pct} {kind:5s}  "
               f"nodes={progress['nodes']:>10,}  ways={progress['ways']:>9,}  "
               f"| found: lots={stats['lot']:>6,} curb={stats['curb']:>6,} "
               f"cams={stats['cam']:>4,}  "
-              f"| {rate/1000:.0f}k elem/s", flush=True)
+              f"| {rate/1000:.0f}k elem/s")
         progress["last_t"] = now
         progress["last_n"] = total
 
@@ -339,6 +359,7 @@ def run(pbf, db_path):
           "index first — the first progress line may take a little while.)",
           flush=True)
     h.apply_file(pbf, locations=True)
+    _finish_line()   # end the overwriting progress line before the summary
 
     total = progress["nodes"] + progress["ways"]
     elapsed = _time.time() - progress["t0"]

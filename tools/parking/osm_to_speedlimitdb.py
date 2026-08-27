@@ -68,6 +68,27 @@ def parse_maxspeed(value):
 
 COORD_SCALE = 1e7   # degrees -> int32 (7 dp, ~1 cm; finer than GPS)
 
+
+class _ProgressLine:
+    """Prints progress on a single line that overwrites itself (carriage return)
+    instead of scrolling. Pads each line to the widest seen so far so a shorter
+    line never leaves tail characters from a longer previous one. Call finish()
+    to terminate the line with a newline before other output."""
+    def __init__(self):
+        self._max = 0
+
+    def update(self, text):
+        pad = max(0, self._max - len(text))
+        self._max = max(self._max, len(text))
+        sys.stdout.write("\r" + text + " " * pad)
+        sys.stdout.flush()
+
+    def finish(self):
+        if self._max > 0:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+            self._max = 0
+
 # Road types we never drive-monitor on: no speed limit, not driveable. Dropping
 # them removes rows and geometry with zero loss to the fusion.
 SKIP_HIGHWAY = {
@@ -149,6 +170,7 @@ def build_db(db_path, region, segments, bbox, counts=None):
     total = len(segments)
     import time as _time
     _t0 = _time.time()
+    _bpl = _ProgressLine()
     print(f"  building DB: simplifying + inserting {total:,} segments…", flush=True)
     for (maxspeed, coords) in segments:
         if len(coords) < 2:
@@ -167,8 +189,9 @@ def build_db(db_path, region, segments, bbox, counts=None):
         next_id += 1
         if next_id % 100_000 == 0:
             pct = 100.0 * next_id / total if total else 0
-            print(f"    [{_time.time() - _t0:5.0f}s] inserted {next_id:>9,} / "
-                  f"{total:,} ({pct:.0f}%)", flush=True)
+            _bpl.update(f"    [{_time.time() - _t0:5.0f}s] inserted "
+                        f"{next_id:>9,} / {total:,} ({pct:.0f}%)")
+    _bpl.finish()   # end the overwriting insert line before the next message
 
     if pts_before:
         print(f"  simplified geometry: {pts_before:,} -> {pts_after:,} points "
@@ -230,16 +253,18 @@ def read_with_osmium(osm_path, drop_untagged_minor=False):
             self.t0 = time.time()
             self.last_t = self.t0
             self.last_n = 0
+            self.pline = _ProgressLine()
 
         def _tick(self, kind):
             now = time.time()
             dt = now - self.last_t
             done = self.nodes_seen + self.ways_seen
             rate = (done - self.last_n) / dt if dt > 0 else 0
-            print(f"    [{now - self.t0:5.0f}s] {kind:5s} "
-                  f"nodes={self.nodes_seen:>10,} ways={self.ways_seen:>9,}"
-                  f"  | kept roads {len(self.segments):>8,}"
-                  f"  | {rate/1000:.0f}k/s", flush=True)
+            self.pline.update(
+                f"    [{now - self.t0:5.0f}s] {kind:5s} "
+                f"nodes={self.nodes_seen:>10,} ways={self.ways_seen:>9,}"
+                f"  | kept roads {len(self.segments):>8,}"
+                f"  | {rate/1000:.0f}k/s")
             self.last_t = now
             self.last_n = done
 
@@ -277,6 +302,7 @@ def read_with_osmium(osm_path, drop_untagged_minor=False):
     h = Handler()
     # locations=True resolves node coords for ways in one pass
     h.apply_file(osm_path, locations=True)
+    h.pline.finish()   # end the overwriting scan line before the summary
     print(f"  scan done: {h.nodes_seen:,} nodes, {h.ways_seen:,} ways seen, "
           f"{len(h.segments):,} road segments kept in "
           f"{time.time() - h.t0:.0f}s", flush=True)

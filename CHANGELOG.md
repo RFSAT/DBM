@@ -1,5 +1,14 @@
 # DBM Changelog
 
+## v1.20.40 — single-line (overwriting) progress in map processing
+- Progress lines in osm_to_speedlimitdb.py (scan + DB-build phases) and
+  add_parking.py (scan phase) now overwrite each other on ONE line using a
+  carriage return, instead of scrolling a new line each time — much cleaner in
+  the terminal.
+- Each line is padded to the widest length seen so far, so when a newer line is
+  shorter than a previous one no leftover tail characters remain. A newline is
+  emitted once when each phase ends, so the final line stays and following
+  messages start clean. Tooling only; no app change.
 ## v1.20.39 — real % progress in add_parking (reusing stage-1 node total)
 - The speed-limit stage (osm_to_speedlimitdb.py) now records the source node/way
   totals in the DB's meta table (total_nodes, total_ways) after its scan.
