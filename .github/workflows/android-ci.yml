@@ -2,6 +2,13 @@ name: Android CI
 on:
   push: { branches: [main] }
   pull_request:
+# Quiet the "Node.js 20 actions are deprecated" warning: force any action whose
+# internal manifest still declares Node 20 to run on Node 24. The actions used
+# here (checkout@v5, setup-java@v5, upload-artifact@v5) are the current majors;
+# this only silences the transitional warning until GitHub updates their bundled
+# Node target. Harmless to keep.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -68,8 +75,14 @@ jobs:
         run: |
           # Google Play rejects bundles whose native .so files have LOAD segments
           # aligned to 4 KB (0x1000) instead of 16 KB (0x4000). Every .so here comes
-          # from a third-party AAR, so the fix is always a dependency bump. This
-          # check names the offender BEFORE an upload is wasted.
+          # from a third-party AAR, so the fix is always a dependency bump.
+          #
+          # IMPORTANT: some libraries report as unaligned by readelf yet Play has
+          # ACCEPTED them in the live build (see PLAY-COMPLIANCE.md). Those are
+          # listed in KNOWN_ACCEPTED below and reported as NOTE, not as a blocker,
+          # so this check only raises a real "WILL reject" warning for a NEW
+          # offender — not the same known-benign files every build.
+          KNOWN_ACCEPTED="libmlkit_google_ocr_pipeline.so libandroidx.graphics.path.so"
           APK=$(ls app/build/outputs/apk/release/*.apk 2>/dev/null | head -1 || true)
           if [ -z "$APK" ]; then APK=$(ls app/build/outputs/apk/debug/*.apk 2>/dev/null | head -1 || true); fi
           if [ -z "$APK" ]; then echo "No APK found; skipping."; exit 0; fi
@@ -80,15 +93,24 @@ jobs:
           for so in $(find "$RUNNER_TEMP/alncheck/lib" -name '*.so' | sort); do
             AL=$(readelf -lW "$so" 2>/dev/null | awk '/LOAD/ {print $NF; exit}')
             REL=${so#"$RUNNER_TEMP/alncheck/"}
+            BASE=$(basename "$so")
             case "$AL" in
               0x4000|0x10000) echo "  OK        $AL  $REL" ;;
-              *)              echo "  UNALIGNED $AL  $REL"; BAD=1 ;;
+              *)
+                # unaligned — is it a known-accepted library, or a new offender?
+                if echo "$KNOWN_ACCEPTED" | grep -qw "$BASE"; then
+                  echo "  NOTE      $AL  $REL  (unaligned but accepted by Play — see PLAY-COMPLIANCE.md)"
+                else
+                  echo "  UNALIGNED $AL  $REL  (NEW — not on the known-accepted list)"
+                  BAD=1
+                fi
+                ;;
             esac
           done
           if [ "$BAD" = 1 ]; then
-            echo "::warning::Native libraries above marked UNALIGNED are not 16 KB aligned. Google Play WILL reject this bundle. Bump the dependency that ships each library (see PLAY-COMPLIANCE.md)."
+            echo "::warning::A NEW native library above is not 16 KB aligned and is not on the known-accepted list. Google Play may reject this bundle. Bump the dependency that ships it (see PLAY-COMPLIANCE.md). If Play later accepts it, add it to KNOWN_ACCEPTED."
           else
-            echo "All native libraries are 16 KB aligned."
+            echo "All native libraries are either 16 KB aligned or known-accepted by Play."
           fi
 
       - uses: actions/upload-artifact@v5

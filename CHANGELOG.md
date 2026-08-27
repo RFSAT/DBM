@@ -1,5 +1,18 @@
 # DBM Changelog
 
+## v1.20.48 — CI: quiet Node 20 warning; smarter 16 KB check
+- Node.js 20 deprecation warning: added FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true at
+  the workflow level. The actions used (checkout@v5, setup-java@v5,
+  upload-artifact@v5) are already the current majors and were already being forced
+  to Node 24; this silences the transitional warning until GitHub updates their
+  bundled Node target. No functional change — the warning was cosmetic.
+- 16 KB alignment check: it previously shouted "Google Play WILL reject" on EVERY
+  build for libraries that Play has actually ACCEPTED live (libmlkit_google_ocr_
+  pipeline.so, libandroidx.graphics.path.so — see PLAY-COMPLIANCE.md). The check
+  now treats those known-accepted files as a NOTE and only raises a real warning
+  for a NEW unaligned library not on the allowlist — so the warning means
+  something again instead of crying wolf. If Play later accepts a new file, add it
+  to KNOWN_ACCEPTED.
 ## v1.20.47 — tidy [1/2] banner
 - build_europe.py: the "[1/2] speed limits" banner no longer prints the full
   python command line being executed; it now reads simply "[1/2] speed limits",
