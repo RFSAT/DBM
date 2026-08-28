@@ -1,5 +1,19 @@
 # DBM Changelog
 
+## v1.20.56 — enrich_index.py clearly identifies regions needing reprocessing
+- enrich_index.py now prints a prominent, boxed "REGIONS THAT NEED RE-PROCESSING"
+  summary and writes a plain regions_to_reprocess.txt list in the map folder,
+  naming each region and WHY (no .db file, or .db has no speed-limit/segments
+  data). It also prints a ready-to-run build_europe.py --force --only command.
+- These are the only regions enrichment cannot fix (it can't invent road data
+  that step 1 never produced); everything else — including bbox and missing
+  segment counts where the .db does contain roads — is back-filled in place with
+  no reprocessing.
+- Analysis of the current run's index.json: 19 regions complete, 45 have roads
+  but need bbox (enrich fixes from the .db), and 34 full countries show no
+  segment counts in the manifest and are reprocessing CANDIDATES — but only the
+  enrich dry-run against the actual .db files confirms which truly lack road data
+  vs. merely weren't recorded.
 ## v1.20.55 — enrich_index.py: diagnose + fix partial region counts
 - Improved enrich_index.py to handle the real-world case seen in an ongoing run:
   some full-country regions had only 3 counts (parking_lot/parking_curb/

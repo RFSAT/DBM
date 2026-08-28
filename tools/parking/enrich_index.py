@@ -113,7 +113,7 @@ def main():
         sys.exit("index.json has no regions")
 
     changed = 0
-    missing_db = 0
+    missing_db_ids = []
     no_speed = []
     print(f"{'APPLYING' if a.apply else 'DRY RUN'} — enriching {len(regions)} "
           f"region(s) from their .db files:")
@@ -123,7 +123,7 @@ def main():
         db_path = os.path.join(d, db_file)
         if not os.path.exists(db_path):
             print(f"  {rid:32s} .db MISSING ({db_file}) — skipped")
-            missing_db += 1
+            missing_db_ids.append(rid)
             continue
         counts, bbox, note = extract(db_path)
         if counts is None:
@@ -156,19 +156,41 @@ def main():
                 r["bbox"] = bbox
         changed += 1
 
-    if no_speed:
-        print(f"\n  NOTE: {len(no_speed)} region(s) have NO speed-limit data in "
-              f"their .db (parking/cameras only). These were built without step 1 "
-              f"producing segments; enrichment can't invent them — they need "
-              f"reprocessing through build_europe.py to get roads + bbox:")
-        print("    " + ", ".join(no_speed))
+    # ---- Clear, actionable summary of what needs REPROCESSING ------------
+    # Two kinds of region can't be fixed by enrichment and must be rebuilt:
+    #   (a) no_speed  — .db exists but has no speed-limit (segments) data
+    #   (b) missing_db_ids — the .db file itself is absent
+    reprocess = sorted(set(no_speed) | set(missing_db_ids))
+    if reprocess:
+        print("\n" + "=" * 68)
+        print(f"REGIONS THAT NEED RE-PROCESSING: {len(reprocess)}")
+        print("=" * 68)
+        print("These cannot be fixed by enrichment — their .db has no road/"
+              "speed-limit\ndata (or is missing), so build_europe.py must rebuild "
+              "them from the .pbf.\n")
+        for rid in reprocess:
+            why = "no .db file" if rid in missing_db_ids else \
+                  "no speed-limit data in .db"
+            print(f"  {rid:34s} ({why})")
+        # Write a plain list you can act on directly.
+        out = os.path.join(d, "regions_to_reprocess.txt")
+        with open(out, "w") as f:
+            f.write("# Regions needing reprocessing through build_europe.py\n")
+            f.write("# (enrichment cannot fix these — .db has no road data or is missing)\n")
+            for rid in reprocess:
+                f.write(rid + "\n")
+        print(f"\n  -> written to {out}")
+        print("     Re-run e.g.:  python build_europe.py --dir . --force --only "
+              + ",".join(reprocess[:3]) + (",…" if len(reprocess) > 3 else ""))
+    else:
+        print("\nAll regions have road data — nothing needs reprocessing.")
 
     if a.apply and changed:
         tmp = index_path + ".tmp"
         json.dump(index, open(tmp, "w"), indent=2)
         os.replace(tmp, index_path)
         print(f"\nWrote {index_path}: enriched {changed} region(s)"
-              + (f", {missing_db} with missing .db" if missing_db else "") + ".")
+              + (f", {len(missing_db_ids)} with missing .db" if missing_db_ids else "") + ".")
     elif a.apply:
         print("\nNothing to change — index.json already enriched.")
     else:
