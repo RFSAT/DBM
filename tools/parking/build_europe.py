@@ -455,6 +455,7 @@ class _Dashboard:
         self.failed = 0
         self.t_start = time.time()
         self.active = {}       # rid -> {phase, line, elapsed, last}
+        self.slots = [None] * jobs   # slot index -> rid (stable display order)
         self._last_lines = 0
         self._spin_i = 0
         self._last_paint = 0.0
@@ -483,7 +484,15 @@ class _Dashboard:
     # ---- inbound events -----------------------------------------------------
     def update(self, rid, kind, phase, line, elapsed):
         if kind in ("start", "progress"):
-            a = self.active.setdefault(rid, {"phase": "", "line": "", "elapsed": 0})
+            if rid not in self.active:
+                # first time we see this region — give it the first free slot
+                # and keep it there until it finishes (stable row order).
+                self.active[rid] = {"phase": "", "line": "", "elapsed": 0}
+                for i in range(len(self.slots)):
+                    if self.slots[i] is None:
+                        self.slots[i] = rid
+                        break
+            a = self.active[rid]
             if phase:
                 a["phase"] = phase
             if line:
@@ -499,6 +508,11 @@ class _Dashboard:
 
     def finish(self, rid, res, ok):
         self.active.pop(rid, None)
+        # free this region's slot so a queued region can take it
+        for i in range(len(self.slots)):
+            if self.slots[i] == rid:
+                self.slots[i] = None
+                break
         if ok:
             self.done += 1
             f = res.get("findings", {})
@@ -528,6 +542,13 @@ class _Dashboard:
         s = s.strip()
         return s if len(s) <= width else s[:width - 1] + "…"
 
+    def _fit(self, s, width):
+        """Truncate-or-pad to EXACTLY width chars so columns always align."""
+        s = s.strip()
+        if len(s) > width:
+            return s[:width - 1] + "…"
+        return s + " " * (width - len(s))
+
     def _paint(self, force=False):
         now = time.time()
         if not force and (now - self._last_paint) < 0.25:
@@ -535,16 +556,21 @@ class _Dashboard:
         self._last_paint = now
         self._spin_i = (self._spin_i + 1) % len(self._SPIN)
         spin = self._SPIN[self._spin_i]
-        # fixed-height block: header + one row per worker slot
+        NAME_W = 26      # region id column (truncated/padded to this)
+        PHASE_W = 8      # phase column
+        DETAIL_W = 42    # latest-detail column
+        # fixed-height block: header + one row per worker SLOT, in stable order
         rows = ["  " + self._counts()]
-        act = sorted(self.active.items(), key=lambda kv: kv[1]["elapsed"],
-                     reverse=True)
         for i in range(self.jobs):
-            if i < len(act):
-                rid, a = act[i]
-                phase = a.get("phase", "") or "…"
-                detail = self._shorten(a.get("line", ""), 46)
-                rows.append(f"  {spin} {rid:26s} {phase:9s} {detail}")
+            rid = self.slots[i] if i < len(self.slots) else None
+            if rid and rid in self.active:
+                a = self.active[rid]
+                phase = (a.get("phase", "") or "…")
+                el = int(a.get("elapsed", 0))
+                name = self._fit(rid, NAME_W)
+                ph = self._fit(phase, PHASE_W)
+                detail = self._fit(a.get("line", ""), DETAIL_W)
+                rows.append(f"  {spin} {name} {el:4d}s {ph} {detail}")
             else:
                 rows.append("  ·")
         if self._last_lines:

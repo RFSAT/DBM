@@ -1,5 +1,19 @@
 # DBM Changelog
 
+## v1.20.69 — dashboard: stable row order + aligned columns
+- Fixed two dashboard readability problems:
+  * Rows reordered every frame (sorted by elapsed), making progress impossible to
+    follow. Each region now gets a FIXED display slot when it first appears and
+    keeps it until it finishes; the freed slot is reused by the next region. Rows
+    no longer jump around.
+  * Columns didn't line up because long region ids (e.g.
+    russia__north-caucasus-fed-district) overflowed the name column and pushed
+    everything right. Every column is now truncated/padded to an exact width
+    (name 26, elapsed, phase 8, detail 42), so the spinner/name/elapsed/phase/
+    detail columns always align regardless of id length. Over-long ids are cut
+    with an ellipsis.
+- Each row now shows: spinner · region (fixed width) · region elapsed · phase ·
+  latest detail line.
 ## v1.20.68 — parallel builds: LIVE per-region dashboard (as originally asked)
 - Delivered the live dashboard that was promised: parallel mode now shows one
   line per ACTIVE region, updated in place, with a spinner, the region name, its
