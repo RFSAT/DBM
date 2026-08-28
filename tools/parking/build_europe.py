@@ -281,25 +281,249 @@ def process_one(pbf, region_id, region_name, add_parking, skip_base):
     The two stages compose safely: osm_to_speedlimitdb creates segments+meta
     (schema 3); add_parking preserves segments and adds parking/camera tables
     (schema 5). Order is enforced here — base first, always.
+
+    ATOMICITY: when building fresh, both steps write to <region>.db.part and the
+    result is renamed to <region>.db only after BOTH steps succeed. So an
+    interrupted/killed build never leaves a partial <region>.db in place — it
+    leaves at most a .part file (ignored by the resume check), and the region is
+    cleanly rebuilt next run. (In --skip-base mode we operate on the existing
+    <region>.db directly, since its roads are already there.)
     """
-    db_path = f"{region_id}.db"
+    final_db = f"{region_id}.db"
 
-    if not skip_base:
-        if not BASE_CONVERTER:
-            sys.exit("BASE_CONVERTER not set — cannot produce speed limits.")
-        cmd = [c.format(pbf=pbf, db=db_path, region=region_name)
-               for c in BASE_CONVERTER]
-        print(f"\n  [1/2] speed limits", flush=True)
-        import subprocess
-        subprocess.run(cmd, check=True)
-    elif not os.path.exists(db_path):
-        sys.exit(f"--skip-base given but {db_path} does not exist. Run the base "
-                 f"speed-limit conversion first, or drop --skip-base.")
+    if skip_base:
+        if not os.path.exists(final_db):
+            sys.exit(f"--skip-base given but {final_db} does not exist. Run the "
+                     f"base speed-limit conversion first, or drop --skip-base.")
+        # operate in place; roads already present
+        print(f"\n  [2/2] parking + cameras", flush=True)
+        add_parking.run(pbf, final_db)
+        return final_db
 
-    # add_parking prints its own per-500k-element progress.
+    if not BASE_CONVERTER:
+        sys.exit("BASE_CONVERTER not set — cannot produce speed limits.")
+    work_db = f"{region_id}.db.part"
+    # start clean: remove any leftover .part from a previous interrupted run
+    if os.path.exists(work_db):
+        os.remove(work_db)
+    cmd = [c.format(pbf=pbf, db=work_db, region=region_name)
+           for c in BASE_CONVERTER]
+    print(f"\n  [1/2] speed limits", flush=True)
+    import subprocess
+    subprocess.run(cmd, check=True)
     print(f"\n  [2/2] parking + cameras", flush=True)
-    add_parking.run(pbf, db_path)
-    return db_path
+    add_parking.run(pbf, work_db)
+    # both steps done — atomically promote to the final name
+    os.replace(work_db, final_db)     # atomic on the same filesystem
+    return final_db
+
+
+def _worker_build_region(args):
+    """Worker process: build ONE region's .db (both steps), writing this region's
+    detailed progress to logs/<rid>.log instead of the shared console. Returns a
+    plain-dict result the parent uses to record state + manifest. Must be
+    module-level (picklable). Does NOT touch index.json / .build_state.json — the
+    parent owns all shared-state writes to keep them consistent and resumable."""
+    d, rid, name, pbf, skip_base = args
+    import io
+    import contextlib
+    # Workers may be spawned (Windows) with a fresh cwd, but process_one runs the
+    # base converter as `python osm_to_speedlimitdb.py` and writes `<rid>.db`
+    # relative to cwd — so pin cwd to the map folder, exactly where the parent and
+    # the sequential path run.
+    try:
+        os.chdir(d)
+    except OSError:
+        pass
+    logdir = os.path.join(d, "logs")
+    os.makedirs(logdir, exist_ok=True)
+    logpath = os.path.join(logdir, f"{rid}.log")
+    t0 = time.time()
+    # add_parking is imported inside the worker (each process imports its own).
+    try:
+        import add_parking
+    except Exception as e:
+        return {"rid": rid, "ok": False, "error": f"import add_parking: {e}",
+                "elapsed": 0.0, "log": logpath}
+    try:
+        with open(logpath, "w", encoding="utf-8") as lf, \
+                contextlib.redirect_stdout(lf), contextlib.redirect_stderr(lf):
+            # cwd is the map folder (parent sets it); build in place.
+            db_path = process_one(pbf, rid, name, add_parking, skip_base)
+        ok, findings = verify_db(db_path)
+        return {
+            "rid": rid, "ok": True, "db_path": db_path, "findings": findings,
+            "verify_ok": ok, "bbox": db_meta(db_path).get("bbox", ""),
+            "size": os.path.getsize(db_path), "sha": sha256_of(db_path),
+            "data_date": pbf_date(pbf), "elapsed": time.time() - t0,
+            "log": logpath,
+        }
+    except Exception as e:
+        return {"rid": rid, "ok": False,
+                "error": f"{e.__class__.__name__}: {e}",
+                "elapsed": time.time() - t0, "log": logpath}
+
+
+def _dashboard_supported():
+    """True only if stdout is a real terminal we can repaint (cursor up). Falls
+    back to a plain append-only event log when output is redirected to a file,
+    a pipe, or a terminal that doesn't report as a TTY (safest on odd consoles)."""
+    try:
+        return sys.stdout.isatty()
+    except Exception:
+        return False
+
+
+class _Reporter:
+    """Progress reporter for parallel mode. Renders a live repainting dashboard
+    when the terminal supports it, else prints a clean append-only event log.
+    Same public API either way: started(), finished(), footer()."""
+    def __init__(self, total, jobs, use_dashboard):
+        self.total = total
+        self.jobs = jobs
+        self.dash = use_dashboard
+        self.running = {}          # rid -> start time
+        self.done = 0
+        self.failed = 0
+        self.order = []            # completion order for the log
+        self._last_lines = 0
+        # enable ANSI on Windows 10+ consoles if we're going to repaint
+        if self.dash and os.name == "nt":
+            try:
+                import ctypes
+                k = ctypes.windll.kernel32
+                k.SetConsoleMode(k.GetStdHandle(-11), 7)  # ENABLE_VT_PROCESSING
+            except Exception:
+                self.dash = False
+
+    def _counts(self):
+        # running = min(workers, outstanding); the pool runs at most `jobs` at
+        # once even though all regions are submitted up front.
+        outstanding = self.total - self.done - self.failed
+        running = min(self.jobs, outstanding)
+        queued = max(0, outstanding - running)
+        return (f"[ {self.done}/{self.total} done · {running} running "
+                f"· {queued} queued · {self.failed} failed ]")
+
+    def started(self, rid):
+        # Submit-time bookkeeping only. We do NOT print a "start" line: the pool
+        # may not have actually begun this region yet (only `jobs` run at once),
+        # so a start line would overstate what's running. Accurate lines are
+        # printed when regions FINISH.
+        self.running[rid] = time.time()
+        if self.dash:
+            self._repaint()
+
+    def finished(self, res):
+        rid = res["rid"]
+        self.running.pop(rid, None)
+        if res["ok"]:
+            self.done += 1
+            f = res.get("findings", {})
+            summary = (f"{_fmt(f.get('segments'))} roads · "
+                       f"{_fmt(f.get('parking_lot'))} parking · "
+                       f"{_fmt(f.get('speed_camera'))} cams · "
+                       f"{res['elapsed']:.0f}s")
+            line = f"  \u2713 {rid:28s} {summary}"
+        else:
+            self.failed += 1
+            line = f"  \u2717 FAILED {rid:28s} {res.get('error','?')} " \
+                   f"(see {res.get('log','logs/'+rid+'.log')})"
+        self.order.append(line)
+        if not self.dash:
+            print(f"{line}   {self._counts()}", flush=True)
+        else:
+            # Print this completed result as PERMANENT scrollback above the live
+            # block: erase the current block, write the line, then repaint below.
+            if self._last_lines:
+                sys.stdout.write(f"\x1b[{self._last_lines}A\x1b[J")
+                self._last_lines = 0
+            sys.stdout.write(line + "\n")
+            self._repaint()
+
+    def _repaint(self):
+        # Build a FIXED-HEIGHT block so the cursor-up count is always correct:
+        # 1 header line + one line per worker slot (self.jobs). Completed results
+        # are printed as permanent scrollback ABOVE the block (in finished()),
+        # never inside it, so the block never grows or shrinks.
+        rows = [self._counts()]
+        running = sorted(self.running.items(), key=lambda kv: kv[1])
+        for i in range(self.jobs):
+            if i < len(running):
+                rid, t = running[i]
+                rows.append(f"  \u25B6 {rid:28s} {time.time()-t:5.0f}s")
+            else:
+                rows.append("  \u00b7")           # idle slot placeholder
+        # move up over the previous block (same height every time)
+        if self._last_lines:
+            sys.stdout.write(f"\x1b[{self._last_lines}A")
+        # write each row cleared to end-of-line; \r guards against stray columns
+        buf = []
+        for r in rows:
+            buf.append("\r" + r + "\x1b[K")
+        sys.stdout.write("\n".join(buf) + "\n")
+        sys.stdout.flush()
+        self._last_lines = len(rows)
+
+    def footer(self):
+        # when using the dashboard, drop a final plain copy of every result so
+        # the completed run leaves a readable scrollback (not just the last frame)
+        if self.dash:
+            sys.stdout.write("\n")
+            for ln in self.order:
+                print(ln)
+        print("\n" + self._counts(), flush=True)
+
+
+def _fmt(n):
+    try:
+        return f"{int(n):,}"
+    except (TypeError, ValueError):
+        return str(n)
+
+
+def _record_result(d, base_url, state, rid, name, parent, sig, res):
+    """Record one finished region into state + rewrite manifest (PARENT ONLY).
+    Shared by the sequential and parallel paths so resumability is identical."""
+    findings = res["findings"]
+    prev = state.get(rid, {})
+    version = prev.get("version", 0)
+    if prev.get("db_sha256") != res["sha"]:
+        version = version + 1 if version else 1
+    state[rid] = {
+        "src_sig": sig,
+        "name": name,
+        "parent": parent,
+        "db_sha256": res["sha"],
+        "db_size": res["size"],
+        "version": version,
+        "data_date": res["data_date"],
+        "schema": findings.get("schema_version"),
+        "counts": {k: findings.get(k) for k in
+                   ("segments", "with_maxspeed", "parking_lot",
+                    "parking_curb", "speed_camera")},
+        "bbox": res.get("bbox", ""),
+        "processed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    save_state(d, state)
+    return write_manifest(d, base_url, state)
+
+
+def _cleanup_part_files(d):
+    """Remove leftover <region>.db.part files from interrupted builds. These are
+    never valid outputs (a completed build renames .part -> .db atomically), so
+    any .part on disk is debris from a killed worker and is safe to delete."""
+    removed = 0
+    try:
+        for f in os.listdir(d):
+            if f.endswith(".db.part"):
+                try:
+                    os.remove(os.path.join(d, f)); removed += 1
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return removed
 
 
 def main():
@@ -315,12 +539,29 @@ def main():
     ap.add_argument("--skip-base", action="store_true",
                     help="skip the speed-limit stage; <region>.db must already "
                          "have a segments table (advanced/debug only)")
+    ap.add_argument("--jobs", "-j", type=int, default=max(1, (os.cpu_count() or 2) - 1),
+                    help="process this many regions in parallel (default: CPU "
+                         "cores - 1). 1 = sequential with full per-region console "
+                         "progress. >1 prints a clean append-only event log (one "
+                         "line per start/finish), with each region's detailed "
+                         "progress in logs/<region>.log.")
+    ap.add_argument("--dashboard", action="store_true",
+                    help="in parallel mode, use a live repainting dashboard instead "
+                         "of the append-only event log. Only works on a capable "
+                         "terminal; if lines overlap, don't use it.")
     a = ap.parse_args()
 
     d = os.path.abspath(a.dir)
     sys.path.insert(0, d)
     here = os.path.dirname(os.path.abspath(__file__))
     sys.path.insert(0, here)
+
+    # Clear any <region>.db.part debris left by a previous hard-killed run
+    # (SIGKILL / power loss, where the orderly Ctrl-C cleanup couldn't run).
+    _leftover = _cleanup_part_files(d)
+    if _leftover:
+        print(f"cleaned {_leftover} leftover .part file(s) from a previous "
+              f"interrupted run.", flush=True)
 
     # Both helper scripts must be present in the same folder as this one (the map
     # folder). Check them up front so a missing file fails immediately with a
@@ -472,6 +713,9 @@ def main():
     added_ids = []
     t_all = time.time()
 
+    # Build the work list: regions that actually need (re)building, after the
+    # up-to-date skip. Each entry carries everything a worker needs.
+    todo = []
     for rid in sorted(candidates):
         info = candidates[rid]
         pbf = info["pbf"]
@@ -483,65 +727,112 @@ def main():
             print(f"  {label:<40s}  up-to-date, skipping (source unchanged)")
             skipped_uptodate.append(rid)
             continue
+        todo.append((rid, info, pbf, name, sig))
 
-        is_new = rid not in state
-        print(f"\n{'='*70}\n== {name} ({rid}) — processing "
-              f"{os.path.basename(pbf)} ==\n{'='*70}", flush=True)
-        t0 = time.time()
+    jobs = max(1, a.jobs)
+    if jobs > 1 and len(todo) > 1:
+        # ---------------- PARALLEL PATH ----------------
+        import concurrent.futures as _cf
+        import signal as _signal
+        n = min(jobs, len(todo))
+        print(f"\nProcessing {len(todo)} region(s) with {n} parallel worker(s). "
+              f"Per-region detail is in logs/<region>.log.", flush=True)
+        print("  (Ctrl-C once to stop cleanly: in-progress regions are discarded, "
+              "finished ones are saved; just re-run to resume.)\n", flush=True)
+        rep = _Reporter(len(todo), n, a.dashboard and _dashboard_supported())
+        meta = {rid: (info, name, sig) for (rid, info, pbf, name, sig) in todo}
+        interrupted = False
+        # Workers should IGNORE SIGINT so a Ctrl-C goes only to the parent, which
+        # then shuts the pool down in an orderly way (no stack-trace spew from
+        # every child, no orphans).
+        def _ignore_sigint():
+            _signal.signal(_signal.SIGINT, _signal.SIG_IGN)
+        ex = _cf.ProcessPoolExecutor(max_workers=n, initializer=_ignore_sigint)
         try:
-            db_path = process_one(pbf, rid, name, add_parking, a.skip_base)
-        except Exception as e:
-            print(f"  FAILED: {e.__class__.__name__}: {e}", flush=True)
-            failed.append(rid)
-            continue
-        dt = time.time() - t0
+            futs = {}
+            for (rid, info, pbf, name, sig) in todo:
+                fut = ex.submit(_worker_build_region,
+                                (d, rid, name, pbf, a.skip_base))
+                futs[fut] = rid
+                rep.started(rid)
+            for fut in _cf.as_completed(futs):
+                res = fut.result()
+                rid = res["rid"]
+                info, name, sig = meta[rid]
+                rep.finished(res)
+                if res["ok"]:
+                    # PARENT does all shared-state writes — never the workers.
+                    if rid not in state:
+                        added_ids.append(rid)
+                    _record_result(d, a.base_url, state, rid, name,
+                                   info["parent"], sig, res)
+                    processed.append(rid)
+                else:
+                    failed.append(rid)
+        except KeyboardInterrupt:
+            interrupted = True
+            print("\n\nInterrupted — stopping. Regions already finished are saved "
+                  "in index.json; in-progress regions were discarded (no partial "
+                  ".db left behind). Re-run the same command to resume where this "
+                  "left off.", flush=True)
+            # cancel_futures=True (py3.9+) drops not-yet-started tasks; running
+            # workers ignore SIGINT and finish or are killed on shutdown. We do
+            # NOT wait for the big in-flight regions — their .part files are
+            # ignored on resume.
+            ex.shutdown(wait=False, cancel_futures=True)
+        else:
+            ex.shutdown(wait=True)
+        rep.footer()
+        if interrupted:
+            # Clean up any stray .part files from killed workers so the folder
+            # stays tidy (resume ignores them regardless).
+            _cleanup_part_files(d)
+            print(f"\nStopped after {len(processed)} region(s) this run. "
+                  f"Re-run to continue.", flush=True)
+            return
+    else:
+        # ---------------- SEQUENTIAL PATH (unchanged behaviour) ----------------
+        for (rid, info, pbf, name, sig) in todo:
+            prev = state.get(rid, {})
+            is_new = rid not in state
+            print(f"\n{'='*70}\n== {name} ({rid}) — processing "
+                  f"{os.path.basename(pbf)} ==\n{'='*70}", flush=True)
+            t0 = time.time()
+            try:
+                db_path = process_one(pbf, rid, name, add_parking, a.skip_base)
+            except Exception as e:
+                print(f"  FAILED: {e.__class__.__name__}: {e}", flush=True)
+                failed.append(rid)
+                continue
+            dt = time.time() - t0
 
-        ok, findings = verify_db(db_path)
-        # Per-file SUMMARY + VERIFICATION
-        print(f"\n  --- {name} summary ---")
-        print(f"    time            : {dt:.0f}s")
-        print(f"    schema_version  : {findings.get('schema_version')}")
-        print(f"    segments (roads): {findings.get('segments')}  "
-              f"(with maxspeed: {findings.get('with_maxspeed')})")
-        print(f"    parking_lot     : {findings.get('parking_lot')}")
-        print(f"    parking_curb    : {findings.get('parking_curb')}")
-        print(f"    speed_camera    : {findings.get('speed_camera')}")
-        oob = findings.get("cameras_out_of_bounds")
-        print(f"    cameras OOB     : {oob}  "
-              + ("(ok)" if oob in (0, None) else "(!! some cameras outside "
-                 "Europe bounds — check the source)"))
-        print(f"    VERIFICATION    : {'PASS' if ok else 'CHECK — see above'}")
+            ok, findings = verify_db(db_path)
+            print(f"\n  --- {name} summary ---")
+            print(f"    time            : {dt:.0f}s")
+            print(f"    schema_version  : {findings.get('schema_version')}")
+            print(f"    segments (roads): {findings.get('segments')}  "
+                  f"(with maxspeed: {findings.get('with_maxspeed')})")
+            print(f"    parking_lot     : {findings.get('parking_lot')}")
+            print(f"    parking_curb    : {findings.get('parking_curb')}")
+            print(f"    speed_camera    : {findings.get('speed_camera')}")
+            oob = findings.get("cameras_out_of_bounds")
+            print(f"    cameras OOB     : {oob}  "
+                  + ("(ok)" if oob in (0, None) else "(!! some cameras outside "
+                     "Europe bounds — check the source)"))
+            print(f"    VERIFICATION    : {'PASS' if ok else 'CHECK — see above'}")
 
-        # Record state with the db's sha256 + size for the manifest step.
-        size = os.path.getsize(db_path)
-        sha = sha256_of(db_path)
-        version = prev.get("version", 0)
-        if prev.get("db_sha256") != sha:
-            version = version + 1 if version else 1
-        state[rid] = {
-            "src_sig": sig,
-            "name": name,
-            "parent": info["parent"],
-            "db_sha256": sha,
-            "db_size": size,
-            "version": version,
-            "data_date": pbf_date(pbf),
-            "schema": findings.get("schema_version"),
-            "counts": {k: findings.get(k) for k in
-                       ("segments", "with_maxspeed", "parking_lot",
-                        "parking_curb", "speed_camera")},
-            "bbox": db_meta(db_path).get("bbox", ""),
-            "processed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        }
-        if is_new:
-            added_ids.append(rid)
-        save_state(d, state)     # save after each file so a crash doesn't lose progress
-        # Also refresh index.json now, so an interruption leaves a complete,
-        # deployable manifest covering every region finished so far.
-        n_listed = write_manifest(d, a.base_url, state)
-        print(f"  index.json updated: {n_listed} region(s) listed so far",
-              flush=True)
-        processed.append(rid)
+            res = {
+                "findings": findings, "sha": sha256_of(db_path),
+                "size": os.path.getsize(db_path), "data_date": pbf_date(pbf),
+                "bbox": db_meta(db_path).get("bbox", ""),
+            }
+            if is_new:
+                added_ids.append(rid)
+            n_listed = _record_result(d, a.base_url, state, rid, name,
+                                      info["parent"], sig, res)
+            print(f"  index.json updated: {n_listed} region(s) listed so far",
+                  flush=True)
+            processed.append(rid)
 
     # ----- final manifest refresh (also written after each region above) -----
     regions_listed = write_manifest(d, a.base_url, state)

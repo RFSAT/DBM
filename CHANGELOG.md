@@ -1,5 +1,48 @@
 # DBM Changelog
 
+## v1.20.63 — safe interruption/resume of parallel map builds
+- Atomic per-region output: each region is now built into <region>.db.part and
+  renamed to <region>.db ONLY after both steps (speed limits + parking/cameras)
+  succeed. So interrupting a parallel run never leaves a partial <region>.db —
+  at most a .part file, which the resume check ignores (it requires <region>.db
+  to exist). Verified: a crash mid-build leaves no .db, only a .part.
+- Resume is therefore always clean: finished regions are recorded in index.json
+  by the PARENT as each completes; unfinished ones have no state entry AND no
+  final .db, so re-running the same command rebuilds exactly those and skips the
+  rest.
+- Leftover .part files are cleaned automatically at startup (handles hard kills /
+  power loss where no handler runs) and after a Ctrl-C.
+- Ctrl-C handling: workers ignore SIGINT so it goes only to the parent, which
+  shuts the pool down (cancel_futures) and prints a clear "re-run to resume"
+  message instead of a wall of child tracebacks. NOTE: the atomic-.part guarantee
+  holds regardless of signal timing, so data stays consistent even if a Ctrl-C is
+  handled less gracefully on a given OS/terminal.
+## v1.20.62 — parallel progress: clean event log by default (fix messy output)
+- The live repainting dashboard could overlap/garble lines on many consoles. It
+  is now OPT-IN via --dashboard; parallel mode DEFAULTS to a clean append-only
+  event log that cannot overlap (one line per region as it finishes, with a
+  running done/running/queued/failed counter).
+- Removed the misleading per-region "start" lines (all regions are submitted up
+  front, but only --jobs run at once, so start lines overstated "running"). The
+  counter now reports running = min(jobs, outstanding) accurately.
+- Rewrote the (opt-in) dashboard to use a fixed-height block with proper
+  line-clearing and completed results printed as scrollback above it, so it no
+  longer drifts/overlaps when used on a capable terminal.
+## v1.20.61 — build_europe.py: parallel region processing (--jobs)
+- Added --jobs/-j to process multiple regions at once (default: CPU cores - 1;
+  --jobs 1 = the previous sequential behaviour, byte-for-byte unchanged).
+- Parallelism is per-REGION via a process pool. Workers build each <region>.db
+  (both steps) in isolation and write their detailed per-region progress to
+  logs/<region>.log — so the console stays readable instead of interleaving.
+  Only the PARENT writes index.json / .build_state.json (from worker results),
+  so state stays consistent and fully resumable, exactly as sequential.
+- Progress reporting: a live repainting DASHBOARD (running/done/queued/failed +
+  per-region elapsed) when stdout is a capable TTY, automatically falling back to
+  a clean append-only EVENT LOG when output is redirected or the console can't
+  repaint (robust on Windows/PowerShell). VT mode is enabled on Win10+ consoles;
+  a plain scrollback copy of all results is printed at the end of a dashboard run.
+- Spawn-safe (Windows): workers pin cwd to the map folder, pbf paths are absolute,
+  and main() is guarded by __main__.
 ## v1.20.60 — tapping the monitoring notification reopens the app
 - The foreground-service notification had no contentIntent, so tapping it did
   nothing — the app stayed in the background. Added a PendingIntent that brings
