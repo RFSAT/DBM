@@ -1,5 +1,11 @@
 # DBM Changelog
 
+## v1.20.60 — tapping the monitoring notification reopens the app
+- The foreground-service notification had no contentIntent, so tapping it did
+  nothing — the app stayed in the background. Added a PendingIntent that brings
+  MainActivity back to the front (FLAG_ACTIVITY_REORDER_TO_FRONT | NEW_TASK, with
+  FLAG_IMMUTABLE on API 31+). MainActivity is singleTop, so the existing instance
+  is surfaced rather than a new one created.
 ## v1.20.59 — R8 fix #2: protobuf field reflection (driver detection, cont.)
 - The v1.20.57 fix cleared the MediaPipe stack-walk crash; on-device testing then
   revealed the NEXT R8 issue one layer deeper: DriverAnalyzer init now failed with

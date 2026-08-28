@@ -3,6 +3,8 @@ package com.rfsat.dms.service
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
+import com.rfsat.dms.MainActivity
 import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
@@ -969,10 +971,22 @@ class MonitorService : Service() {
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(
             NotificationChannel(chId, "DBM monitoring", NotificationManager.IMPORTANCE_LOW))
+        // Tapping the notification must bring the app back to the foreground.
+        // REORDER_TO_FRONT surfaces the existing MainActivity (singleTop) instead
+        // of building a new one; NEW_TASK is required when launching from a
+        // service (non-activity) context. Mutability flag is required on API 31+.
+        val launch = Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                     Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val piFlags = PendingIntent.FLAG_UPDATE_CURRENT or
+            (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_IMMUTABLE else 0)
+        val contentPi = PendingIntent.getActivity(this, 0, launch, piFlags)
         val n: Notification = Notification.Builder(this, chId)
             .setContentTitle("DBM monitoring active")
             .setContentText("Driver and road monitoring in progress")
             .setSmallIcon(android.R.drawable.presence_video_online)
+            .setContentIntent(contentPi)
             .setOngoing(true)
             .build()
         when {
