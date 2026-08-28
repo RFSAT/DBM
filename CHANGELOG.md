@@ -1,5 +1,18 @@
 # DBM Changelog
 
+## v1.20.65 — fix parallel console: subprocess progress no longer leaks
+- In parallel mode the detailed per-region progress (nodes=…/scan done/wrote
+  …db.part/VACUUM) was still spilling onto the shared console from many workers
+  at once, overwriting each other. Root cause: the worker used
+  contextlib.redirect_stdout, which only captures THIS process's Python print()s.
+  Step 1 (osm_to_speedlimitdb) runs as a SUBPROCESS — a separate OS process whose
+  stdout/stderr bypass redirect_stdout entirely, so its output went straight to
+  the console.
+- Fix: process_one now accepts a log_fh and, in parallel mode, passes it to
+  subprocess.run(stdout=log_fh, stderr=STDOUT) so the base converter's output is
+  redirected at the OS level into logs/<region>.log. Sequential mode (log_fh=None)
+  still inherits the console exactly as before. Verified: console shows only the
+  clean one-line-per-region event log; all detailed progress lands in the logs.
 ## v1.20.64 — fix Windows crash when starting/interrupting parallel builds
 - Fixed an AttributeError ("Can't get local object 'main.<locals>._ignore_sigint'")
   followed by a spawn PermissionError on Windows when running --jobs > 1. The

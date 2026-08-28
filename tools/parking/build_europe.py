@@ -274,7 +274,7 @@ def verify_db(db_path):
     return ok, findings
 
 
-def process_one(pbf, region_id, region_name, add_parking, skip_base):
+def process_one(pbf, region_id, region_name, add_parking, skip_base, log_fh=None):
     """Build <region>.db with FULL features: speed limits (base converter) then
     parking + cameras (add_parking). Returns the db path.
 
@@ -288,6 +288,13 @@ def process_one(pbf, region_id, region_name, add_parking, skip_base):
     leaves at most a .part file (ignored by the resume check), and the region is
     cleanly rebuilt next run. (In --skip-base mode we operate on the existing
     <region>.db directly, since its roads are already there.)
+
+    log_fh: if given (parallel mode), the base-converter SUBPROCESS's stdout/
+    stderr are redirected to this file handle at the OS level. This is essential
+    because the subprocess is a separate OS process — Python's redirect_stdout
+    does NOT capture it, so without this its progress leaks onto the shared
+    console. When None (sequential mode), the subprocess inherits the console as
+    before.
     """
     final_db = f"{region_id}.db"
 
@@ -310,7 +317,13 @@ def process_one(pbf, region_id, region_name, add_parking, skip_base):
            for c in BASE_CONVERTER]
     print(f"\n  [1/2] speed limits", flush=True)
     import subprocess
-    subprocess.run(cmd, check=True)
+    if log_fh is not None:
+        # OS-level redirect of the subprocess: its stdout/stderr go to the log
+        # file, not the shared console. flush first so ordering is sane.
+        log_fh.flush()
+        subprocess.run(cmd, check=True, stdout=log_fh, stderr=subprocess.STDOUT)
+    else:
+        subprocess.run(cmd, check=True)
     print(f"\n  [2/2] parking + cameras", flush=True)
     add_parking.run(pbf, work_db)
     # both steps done — atomically promote to the final name
@@ -359,8 +372,12 @@ def _worker_build_region(args):
     try:
         with open(logpath, "w", encoding="utf-8") as lf, \
                 contextlib.redirect_stdout(lf), contextlib.redirect_stderr(lf):
-            # cwd is the map folder (parent sets it); build in place.
-            db_path = process_one(pbf, rid, name, add_parking, skip_base)
+            # redirect_stdout captures this process's own print()s (e.g. from
+            # add_parking, which runs in-process). The base converter is a
+            # SUBPROCESS, so we ALSO pass lf explicitly to be redirected at the
+            # OS level — otherwise its output leaks to the shared console.
+            db_path = process_one(pbf, rid, name, add_parking, skip_base,
+                                  log_fh=lf)
         ok, findings = verify_db(db_path)
         return {
             "rid": rid, "ok": True, "db_path": db_path, "findings": findings,
