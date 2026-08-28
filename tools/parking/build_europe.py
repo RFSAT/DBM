@@ -318,6 +318,17 @@ def process_one(pbf, region_id, region_name, add_parking, skip_base):
     return final_db
 
 
+def _worker_ignore_sigint():
+    """Pool-worker initializer: ignore SIGINT so Ctrl-C is handled only by the
+    parent. MUST be module-level — on Windows (spawn) the pool pickles the
+    initializer to each worker, and nested/local functions can't be pickled."""
+    import signal
+    try:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+    except Exception:
+        pass
+
+
 def _worker_build_region(args):
     """Worker process: build ONE region's .db (both steps), writing this region's
     detailed progress to logs/<rid>.log instead of the shared console. Returns a
@@ -733,7 +744,6 @@ def main():
     if jobs > 1 and len(todo) > 1:
         # ---------------- PARALLEL PATH ----------------
         import concurrent.futures as _cf
-        import signal as _signal
         n = min(jobs, len(todo))
         print(f"\nProcessing {len(todo)} region(s) with {n} parallel worker(s). "
               f"Per-region detail is in logs/<region>.log.", flush=True)
@@ -742,12 +752,13 @@ def main():
         rep = _Reporter(len(todo), n, a.dashboard and _dashboard_supported())
         meta = {rid: (info, name, sig) for (rid, info, pbf, name, sig) in todo}
         interrupted = False
-        # Workers should IGNORE SIGINT so a Ctrl-C goes only to the parent, which
-        # then shuts the pool down in an orderly way (no stack-trace spew from
-        # every child, no orphans).
-        def _ignore_sigint():
-            _signal.signal(_signal.SIGINT, _signal.SIG_IGN)
-        ex = _cf.ProcessPoolExecutor(max_workers=n, initializer=_ignore_sigint)
+        # Workers ignore SIGINT so a Ctrl-C goes only to the parent, which then
+        # shuts the pool down in an orderly way (no stack-trace spew from every
+        # child, no orphans). The initializer MUST be a module-level function:
+        # on Windows the pool spawns workers and pickles the initializer, and
+        # nested/local functions are not picklable.
+        ex = _cf.ProcessPoolExecutor(max_workers=n,
+                                     initializer=_worker_ignore_sigint)
         try:
             futs = {}
             for (rid, info, pbf, name, sig) in todo:

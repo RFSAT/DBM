@@ -1,5 +1,17 @@
 # DBM Changelog
 
+## v1.20.64 — fix Windows crash when starting/interrupting parallel builds
+- Fixed an AttributeError ("Can't get local object 'main.<locals>._ignore_sigint'")
+  followed by a spawn PermissionError on Windows when running --jobs > 1. The
+  SIGINT-ignore initializer for pool workers was defined as a nested function
+  inside main(); Windows uses spawn, which PICKLES the initializer to each worker,
+  and nested/local functions can't be pickled. Moved it to a module-level function
+  (_worker_ignore_sigint). Verified by pickling the initializer + worker exactly
+  as Windows spawn does.
+- This was a Linux-vs-Windows difference (Linux fork doesn't pickle the
+  initializer, so it was invisible in testing). Audited the worker call: all args
+  passed to workers (dir, id, name, pbf, skip_base) are plain str/bool and pickle
+  cleanly, and add_parking is imported inside the worker.
 ## v1.20.63 — safe interruption/resume of parallel map builds
 - Atomic per-region output: each region is now built into <region>.db.part and
   renamed to <region>.db ONLY after both steps (speed limits + parking/cameras)
