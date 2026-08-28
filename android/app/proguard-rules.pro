@@ -80,4 +80,16 @@
 -dontwarn org.tensorflow.lite.gpu.**
 -dontwarn com.google.ai.edge.litert.**
 # Protobuf / gRPC-style optional deps pulled transitively by the ML stack.
+# --- protobuf-lite + R8 field-reflection crash fix -----------------------------
+# MediaPipe's Graph.loadBinaryGraph serialises a protobuf (com.google.protobuf.Any
+# etc.). Protobuf-Lite finds fields by their ORIGINAL names via reflection; R8
+# renames them (typeUrl_ -> c), so at runtime it throws:
+#   RuntimeException: Field typeUrl_ for com.google.protobuf.Any not found
+# and FaceLandmarker/DriverAnalyzer init fails. The official protobuf fix is to
+# keep generated message classes and the runtime's fields from being renamed.
+-keep class * extends com.google.protobuf.GeneratedMessageLite { *; }
+-keepclassmembers class * extends com.google.protobuf.GeneratedMessageLite { <fields>; }
+-keep class com.google.protobuf.** { *; }
+-keepclassmembers class com.google.protobuf.** { <fields>; }
+-keepnames class com.google.protobuf.** { *; }
 -dontwarn com.google.protobuf.**

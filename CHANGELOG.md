@@ -1,5 +1,20 @@
 # DBM Changelog
 
+## v1.20.59 — R8 fix #2: protobuf field reflection (driver detection, cont.)
+- The v1.20.57 fix cleared the MediaPipe stack-walk crash; on-device testing then
+  revealed the NEXT R8 issue one layer deeper: DriverAnalyzer init now failed with
+  "RuntimeException: Field typeUrl_ for com.google.protobuf.Any not found (Known
+  fields are ...Any.c, ...Any.d)". MediaPipe's Graph.loadBinaryGraph serialises a
+  protobuf; protobuf-Lite resolves fields by their ORIGINAL names via reflection,
+  but R8 had renamed them (typeUrl_ -> c). Everything else was healthy in the log
+  (road + sign analyzers ready, cameras streaming, map + parking loaded) — only
+  driver init was blocked.
+- Fix (proguard-rules.pro): the protobuf-project's official keep rules —
+  -keep class * extends com.google.protobuf.GeneratedMessageLite { *; } plus keeps
+  on com.google.protobuf.** classes/fields/names so the Lite runtime's reflective
+  field lookup resolves.
+- Still release-build-only; verify on the S24 that "analyzers ready (driver=true
+  ...)" and microsleep/gaze detection now work.
 ## v1.20.58 — CI: upload R8 mapping.txt as an artifact
 - CI now uploads the R8 mapping file (DBM-mapping-release ->
   android/app/build/outputs/mapping/release/mapping.txt) alongside the release
