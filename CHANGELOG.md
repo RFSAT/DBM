@@ -1,5 +1,17 @@
 # DBM Changelog
 
+## v1.20.55 — enrich_index.py: diagnose + fix partial region counts
+- Improved enrich_index.py to handle the real-world case seen in an ongoing run:
+  some full-country regions had only 3 counts (parking_lot/parking_curb/
+  speed_camera) and no segments/with_maxspeed or bbox, because they were processed
+  by an earlier build before segment counts + bbox were reliably recorded.
+- The tool now: (a) MERGES counts read from the .db onto the existing manifest
+  entry (never dropping a figure it can't re-read); (b) adds segments +
+  with_maxspeed + a computed bbox for any region whose .db has a populated
+  segments table; and (c) clearly REPORTS regions whose .db genuinely has no
+  speed-limit data (parking/cameras only) as needing reprocessing — it can't
+  invent roads that step 1 never produced. bbox is still computed from the
+  segments table when absent from meta.
 ## v1.20.54 — build fix: region-info dialog compile error
 - Fixed the compile error introduced with the region-info dialog (v1.20.52): the
   local `fun row(...)` helper invoked @Composable functions (Row/Text), which a
