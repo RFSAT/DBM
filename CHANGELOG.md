@@ -1,5 +1,12 @@
 # DBM Changelog
 
+## v1.20.58 — CI: upload R8 mapping.txt as an artifact
+- CI now uploads the R8 mapping file (DBM-mapping-release ->
+  android/app/build/outputs/mapping/release/mapping.txt) alongside the release
+  AAB. It's generated only on the minified release build and was previously
+  discarded with the runner, so there was no way to deobfuscate release-build
+  stack traces (e.g. turn "i3.c" back into the real class name). Download it from
+  the workflow run's Artifacts to decode any future release crash precisely.
 ## v1.20.57 — CRITICAL fix: R8 broke MediaPipe driver detection at runtime
 - Root cause of "driver detection / microsleep not working": on the R8-minified
   RELEASE build, DriverAnalyzer init crashed with

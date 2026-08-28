@@ -127,6 +127,15 @@ jobs:
           name: DBM-aab-release
           path: android/app/build/outputs/bundle/release/*.aab
           if-no-files-found: ignore
+      # R8 mapping file — needed to deobfuscate release-build stack traces
+      # (turn "i3.c" back into the real class name). Generated only on the
+      # minified release build and otherwise discarded with the runner.
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: DBM-mapping-release
+          path: android/app/build/outputs/mapping/release/mapping.txt
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v5
         if: always()
         with: { name: lint-report, path: android/app/build/reports/lint-results-*.html }
