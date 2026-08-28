@@ -1,5 +1,13 @@
 # DBM Changelog
 
+## v1.20.70 — dashboard: use full terminal width (up to 128 cols) for detail
+- The live detail column was hard-capped at 42 chars, cutting off the useful tail
+  of each progress line (kept-roads count and k/s rate). It now fills the actual
+  terminal width up to 128 columns, so the full step-1 progress line is visible
+  (e.g. "[108s] nodes nodes=19,200,000 ways=0 | kept roads 195,947 | 324k/s").
+  Width is read from the terminal (os.get_terminal_size), capped at 128, floored
+  at 80, and falls back to 128 if detection fails. Columns stay aligned because
+  the name column is still a fixed 26 (long ids truncated with an ellipsis).
 ## v1.20.69 — dashboard: stable row order + aligned columns
 - Fixed two dashboard readability problems:
   * Rows reordered every frame (sorted by elapsed), making progress impossible to

@@ -558,7 +558,16 @@ class _Dashboard:
         spin = self._SPIN[self._spin_i]
         NAME_W = 26      # region id column (truncated/padded to this)
         PHASE_W = 8      # phase column
-        DETAIL_W = 42    # latest-detail column
+        # Detail fills the rest of the terminal width. Fixed overhead before the
+        # detail column is: 2 (indent) +1 (spin) +1 +NAME_W +1 +5 (" 9999s") +1
+        # +PHASE_W +1 = NAME_W + PHASE_W + 12.
+        try:
+            term_w = os.get_terminal_size().columns
+        except OSError:
+            term_w = 128
+        # Use the real width but never below a floor; target up to 128 columns.
+        total_w = max(80, min(term_w, 128))
+        DETAIL_W = max(20, total_w - (NAME_W + PHASE_W + 12))
         # fixed-height block: header + one row per worker SLOT, in stable order
         rows = ["  " + self._counts()]
         for i in range(self.jobs):
