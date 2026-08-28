@@ -17,6 +17,32 @@
 -keep class org.tensorflow.lite.** { *; }
 # MediaPipe (Face Landmarker for driver analysis).
 -keep class com.google.mediapipe.** { *; }
+# --- MediaPipe + R8 stack-walk crash fix (issue google-ai-edge/mediapipe#6138) --
+# FaceLandmarker.createFromOptions -> TaskRunner -> Graph.<clinit> runs a helper
+# that WALKS THE CALL STACK to find its caller BY ORIGINAL CLASS NAME. R8 both
+# (a) renames the classes involved and (b) — because we use the *optimizing*
+# proguard config — INLINES/MERGES the very stack frames the walk expects, so at
+# runtime on the release build (only!) it throws:
+#   NoClassDefFoundError: com.google.mediapipe.framework.Graph
+#   Caused by: IllegalStateException: no caller found on the stack for: <renamed>
+# and DriverAnalyzer init fails => NO driver / microsleep detection.
+#
+# Two-part fix. (1) Keep the framework class NAMES (not just the classes) so the
+# stack-walk's name lookup still matches:
+-keepnames class com.google.mediapipe.framework.** { *; }
+-keep class com.google.mediapipe.framework.** { *; }
+# (2) Stop R8 from inlining/merging away the frames the walk relies on. These
+# optimizations are the ones that remove caller frames; disabling them app-wide
+# is the safe choice for a safety-critical feature (tiny size cost, correctness
+# guaranteed). Class-merging and method inlining are the culprits here.
+-optimizations !method/inlining/*,!class/merging/*
+-keepattributes SourceFile,LineNumberTable,*Annotation*,Signature,InnerClasses,EnclosingMethod
+# MediaPipe's caller-identification helper lives in its shaded Guava/flogger deps,
+# which are NOT under com.google.mediapipe.* — keep those names too so the walk
+# can resolve whatever class it expects on the stack.
+-keep class com.google.common.** { *; }
+-keepnames class com.google.common.** { *; }
+-dontwarn com.google.common.**
 # ML Kit (text recognition for speed-limit OCR).
 -keep class com.google.mlkit.** { *; }
 -keep class com.google.android.gms.internal.mlkit_** { *; }
@@ -39,7 +65,7 @@
 -keep class com.rfsat.dms.fusion.** { *; }
 
 # ---- Kotlin / Compose metadata (safe, standard keeps) -----------------------
--keepattributes *Annotation*, Signature, InnerClasses, EnclosingMethod
+# (Attributes are kept above via the MediaPipe fix, which is a superset.)
 -keep class kotlin.Metadata { *; }
 -dontwarn kotlin.**
 

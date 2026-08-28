@@ -17,8 +17,13 @@ compile of both debug and release variants.
 These are the real "open issues" to close — not by writing code, but by testing
 what's already shipping and fixing only what testing reveals.
 
-1. **R8 / minification release build (NEW — highest priority to verify).** R8 was
-   enabled in v1.20.32 to meet Play's obfuscation requirement. R8 breakage is
+1. **R8 / minification release build (IN PROGRESS — one crash found + fixed).** R8
+   was enabled in v1.20.32. On-device testing found the FIRST real R8 breakage:
+   MediaPipe FaceLandmarker crashed at init (stack-walk vs R8 rename+inline),
+   disabling driver/microsleep detection — fixed in v1.20.57 via proguard keeps +
+   disabling frame-removing optimizations. Re-verify driver detection on the
+   release build, and continue exercising the other ML paths (sign OCR,
+   traffic-light, LiteRT) since R8 can hide more than one such crash. R8 breakage is
    RELEASE-ONLY and invisible in the debug build CI compiles. Must be exercised on
    a real device with the actual release AAB/APK: launch, monitoring, sign OCR,
    traffic-light, face landmarker, OBD. A stripped-at-runtime crash names the

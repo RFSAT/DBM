@@ -1,5 +1,25 @@
 # DBM Changelog
 
+## v1.20.57 — CRITICAL fix: R8 broke MediaPipe driver detection at runtime
+- Root cause of "driver detection / microsleep not working": on the R8-minified
+  RELEASE build, DriverAnalyzer init crashed with
+  NoClassDefFoundError: com.google.mediapipe.framework.Graph, caused by
+  "IllegalStateException: no caller found on the stack for: <renamed>". MediaPipe's
+  Graph static initialiser walks the call stack to find its caller BY ORIGINAL
+  CLASS NAME; R8 (using the *optimizing* proguard config) both renamed those
+  classes and inlined/merged away the stack frames the walk expects. Result:
+  driver=false, no driver/gaze/microsleep detection, and a sluggish interior
+  camera (no analyzer consuming its frames). This is the R8-on-device risk that
+  had been flagged as unverified since R8 was enabled in v1.20.32 — now confirmed
+  and fixed.
+- Fix (proguard-rules.pro): keep the MediaPipe framework class NAMES
+  (-keepnames com.google.mediapipe.framework.**), keep its shaded caller-ID deps
+  (com.google.common.**), keep SourceFile/LineNumberTable attributes, and disable
+  the two R8 optimizations that remove caller frames
+  (-optimizations !method/inlining/*,!class/merging/*). Small size cost, safety
+  feature restored.
+- NOTE: this only manifests on the signed release build (R8 active), never in the
+  CI debug build — so it must be verified on-device on the S24 after this build.
 ## v1.20.56 — enrich_index.py clearly identifies regions needing reprocessing
 - enrich_index.py now prints a prominent, boxed "REGIONS THAT NEED RE-PROCESSING"
   summary and writes a plain regions_to_reprocess.txt list in the map folder,
