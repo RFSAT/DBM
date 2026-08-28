@@ -1,5 +1,16 @@
 # DBM Changelog
 
+## v1.20.71 — dashboard: show step-2 (parking) progress + use full width
+- The live dashboard only showed progress during step 1 (speed limits). Step 2
+  (parking + cameras, add_parking.run) runs in-process with stdout redirected to
+  the log, so its progress never reached the dashboard. Added an optional
+  progress_cb to add_parking.run(); process_one now passes a callback that
+  forwards each parking/camera progress line to the dashboard queue. Parking
+  phase now shows live element counts just like the scanning phase. Sequential
+  mode is unchanged (no callback -> prints to console as before).
+- Removed the 128-column cap: the detail column now uses the FULL terminal width
+  (minus a 2-col margin), so on a 150-column window you get ~150 columns of
+  detail instead of being truncated at 128. Width still floors at 80.
 ## v1.20.70 — dashboard: use full terminal width (up to 128 cols) for detail
 - The live detail column was hard-capped at 42 chars, cutting off the useful tail
   of each progress line (kept-roads count and k/s rate). It now fills the actual

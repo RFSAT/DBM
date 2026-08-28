@@ -210,7 +210,7 @@ def set_meta(con, key, value):
 
 # --- extraction (needs osmium) ---------------------------------------------
 
-def run(pbf, db_path):
+def run(pbf, db_path, progress_cb=None):
     try:
         import osmium
     except ImportError:
@@ -233,6 +233,12 @@ def run(pbf, db_path):
         _pw["max"] = max(_pw["max"], len(text))
         _sys.stdout.write("\r" + text + " " * pad)
         _sys.stdout.flush()
+        # forward the latest progress line to a dashboard, if one is listening
+        if progress_cb is not None:
+            try:
+                progress_cb("parking", text)
+            except Exception:
+                pass
 
     def _finish_line():
         # Terminate the current overwriting line so following output is clean.

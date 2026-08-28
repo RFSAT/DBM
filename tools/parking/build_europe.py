@@ -306,7 +306,9 @@ def process_one(pbf, region_id, region_name, add_parking, skip_base, log_fh=None
                      f"base speed-limit conversion first, or drop --skip-base.")
         emit("parking")
         print(f"\n  [2/2] parking + cameras", flush=True)
-        add_parking.run(pbf, final_db)
+        add_parking.run(pbf, final_db,
+                        progress_cb=(lambda ph, ln: emit(ph, ln))
+                        if progress_cb is not None else None)
         return final_db
 
     if not BASE_CONVERTER:
@@ -351,7 +353,9 @@ def process_one(pbf, region_id, region_name, add_parking, skip_base, log_fh=None
         subprocess.run(cmd, check=True)
     emit("parking")
     print(f"\n  [2/2] parking + cameras", flush=True)
-    add_parking.run(pbf, work_db)
+    add_parking.run(pbf, work_db,
+                    progress_cb=(lambda ph, ln: emit(ph, ln))
+                    if progress_cb is not None else None)
     # both steps done — atomically promote to the final name
     os.replace(work_db, final_db)     # atomic on the same filesystem
     return final_db
@@ -565,8 +569,9 @@ class _Dashboard:
             term_w = os.get_terminal_size().columns
         except OSError:
             term_w = 128
-        # Use the real width but never below a floor; target up to 128 columns.
-        total_w = max(80, min(term_w, 128))
+        # Use the real terminal width (floor 80). Leave a 2-col safety margin so
+        # a line exactly at the edge never wraps and breaks the repaint.
+        total_w = max(80, term_w - 2)
         DETAIL_W = max(20, total_w - (NAME_W + PHASE_W + 12))
         # fixed-height block: header + one row per worker SLOT, in stable order
         rows = ["  " + self._counts()]
