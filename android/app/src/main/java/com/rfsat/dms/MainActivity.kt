@@ -13,6 +13,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -1878,15 +1881,84 @@ class MainActivity : ComponentActivity() {
      *  bounding box on a plain graticule instead). */
     @Composable
     private fun RegionPreview(bounds: FloatArray?) {
-        // Europe frame in degrees: lon -25..45 (W..E), lat 34..72 (S..N).
-        val wLon = -25f; val eLon = 45f; val sLat = 34f; val nLat = 72f
-        Canvas(Modifier.fillMaxWidth().height(150.dp)
+        // Full Europe extent (zoom = 1 shows all of this).
+        val fullWLon = -25f; val fullELon = 45f; val fullSLat = 34f; val fullNLat = 72f
+        val fullLonSpan = fullELon - fullWLon      // 70
+        val fullLatSpan = fullNLat - fullSLat      // 38
+
+        // Auto-frame: initial scale + center from the region's bbox (with margin),
+        // so a small country fills the view instead of being a speck. Falls back
+        // to whole-Europe when there's no bbox.
+        val (initScale, initCenterLon, initCenterLat) = remember(bounds) {
+            if (bounds != null) {
+                val minLat = bounds[0]; val minLon = bounds[1]
+                val maxLat = bounds[2]; val maxLon = bounds[3]
+                val cLon = (minLon + maxLon) / 2f
+                val cLat = (minLat + maxLat) / 2f
+                val bLonSpan = (maxLon - minLon).coerceAtLeast(0.5f) * 1.6f  // 60% margin
+                val bLatSpan = (maxLat - minLat).coerceAtLeast(0.5f) * 1.6f
+                // scale so the bbox+margin fits both axes; clamp to [1, 12]
+                val s = minOf(fullLonSpan / bLonSpan, fullLatSpan / bLatSpan)
+                    .coerceIn(1f, 12f)
+                Triple(s, cLon, cLat)
+            } else {
+                Triple(1f, (fullWLon + fullELon) / 2f, (fullSLat + fullNLat) / 2f)
+            }
+        }
+
+        var scale by remember(bounds) { mutableStateOf(initScale) }
+        var centerLon by remember(bounds) { mutableStateOf(initCenterLon) }
+        var centerLat by remember(bounds) { mutableStateOf(initCenterLat) }
+
+        Canvas(
+            Modifier.fillMaxWidth().height(150.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(Color(0xFF0E2233))) {   // sea
+                .background(Color(0xFF0E2233))     // sea
+                .pointerInput(bounds) {
+                    detectTransformGestures { _, pan, zoom, _ ->
+                        // pinch: multiply scale, clamp
+                        val newScale = (scale * zoom).coerceIn(1f, 40f)
+                        // visible spans at the new scale
+                        val lonSpan = fullLonSpan / newScale
+                        val latSpan = fullLatSpan / newScale
+                        // drag: pan moves the centre opposite to finger motion.
+                        // Convert pixel pan to degrees using current viewport size.
+                        val degPerPxX = lonSpan / size.width
+                        val degPerPxY = latSpan / size.height
+                        var newCenterLon = centerLon - pan.x * degPerPxX
+                        var newCenterLat = centerLat + pan.y * degPerPxY  // y inverted
+                        // keep the view within the full Europe extent
+                        val halfLon = lonSpan / 2f; val halfLat = latSpan / 2f
+                        newCenterLon = newCenterLon.coerceIn(
+                            fullWLon + halfLon, fullELon - halfLon)
+                        newCenterLat = newCenterLat.coerceIn(
+                            fullSLat + halfLat, fullNLat - halfLat)
+                        scale = newScale
+                        centerLon = newCenterLon
+                        centerLat = newCenterLat
+                    }
+                }
+                .pointerInput(bounds) {
+                    // Double-tap resets to the full Europe view (zoom out to 1x,
+                    // centred on the whole continent).
+                    detectTapGestures(onDoubleTap = {
+                        scale = 1f
+                        centerLon = (fullWLon + fullELon) / 2f
+                        centerLat = (fullSLat + fullNLat) / 2f
+                    })
+                }
+        ) {
             val w = size.width; val h = size.height
+            // visible window derived from scale + centre
+            val lonSpan = fullLonSpan / scale
+            val latSpan = fullLatSpan / scale
+            val wLon = centerLon - lonSpan / 2f
+            val eLon = centerLon + lonSpan / 2f
+            val sLat = centerLat - latSpan / 2f
+            val nLat = centerLat + latSpan / 2f
             fun xOf(lon: Float) = (lon - wLon) / (eLon - wLon) * w
             fun yOf(lat: Float) = (nLat - lat) / (nLat - sLat) * h
-            // --- draw the Europe landmass so the region has real context ------
+            // --- Europe landmass ----------------------------------------------
             val landFill = Color(0xFF24425A)
             val landEdge = Color(0xFF3C6A88)
             for (poly in EUROPE_LAND) {
@@ -1899,13 +1971,13 @@ class MainActivity : ComponentActivity() {
                 drawPath(p, landFill)
                 drawPath(p, landEdge, style = Stroke(width = 1.2f))
             }
-            // faint graticule on top of the sea/land for scale
+            // faint graticule
             val grid = EnactOnSurfaceDim.copy(alpha = 0.15f)
-            var lon = -20f
-            while (lon <= eLon) { drawLine(grid, Offset(xOf(lon), 0f), Offset(xOf(lon), h), 1f); lon += 10f }
-            var lat = 40f
-            while (lat <= nLat) { drawLine(grid, Offset(0f, yOf(lat)), Offset(w, yOf(lat)), 1f); lat += 10f }
-            // --- the region's bounding box ------------------------------------
+            var g = kotlin.math.ceil(wLon / 10f) * 10f
+            while (g <= eLon) { drawLine(grid, Offset(xOf(g), 0f), Offset(xOf(g), h), 1f); g += 10f }
+            var gl = kotlin.math.ceil(sLat / 10f) * 10f
+            while (gl <= nLat) { drawLine(grid, Offset(0f, yOf(gl)), Offset(w, yOf(gl)), 1f); gl += 10f }
+            // --- region bbox ---------------------------------------------------
             if (bounds != null) {
                 val minLat = bounds[0]; val minLon = bounds[1]
                 val maxLat = bounds[2]; val maxLon = bounds[3]
@@ -1918,10 +1990,11 @@ class MainActivity : ComponentActivity() {
                     style = Stroke(width = 2.5f))
             }
         }
-        if (bounds == null)
-            Text("(location preview needs an updated map file)",
-                color = EnactOnSurfaceDim, fontSize = 10.sp,
-                modifier = Modifier.padding(top = 2.dp))
+        Text(
+            if (bounds == null) "(location preview needs an updated map file)"
+            else "pinch to zoom · drag to pan · double-tap for full view",
+            color = EnactOnSurfaceDim, fontSize = 10.sp,
+            modifier = Modifier.padding(top = 2.dp))
     }
     @Composable
     private fun CollapsibleSection(
@@ -2064,73 +2137,112 @@ class MainActivity : ComponentActivity() {
 }
 
 // -----------------------------------------------------------------------------
-// Simplified Europe coastline for the offline region-location preview. Each inner
-// list is one landmass as a closed polygon of (lon, lat) points. This is a coarse
-// outline — enough to recognise the continent and place a region's bbox on it,
-// not a survey map. Kept deliberately low-poly so it draws instantly with no map
-// SDK, tiles, or network (offline-first).
+// Simplified Europe coastline for the offline region-location preview. Derived
+// from Natural Earth 110m land data (public domain), clipped to the display frame
+// (lon -25..45, lat 34..72) and simplified to ~350 points across 13 landmasses
+// (mainland + British Isles, Ireland, Iceland, Scandinavia via the mainland ring,
+// Denmark, Italy's islands, Cyprus, Crete, Sicily, the N. Africa coast). Each
+// inner list is one landmass as a closed polygon of (lon, lat) points. Coarse but
+// a real coastline shape — draws instantly on Canvas with no map SDK or network.
 private val EUROPE_LAND: List<List<Pair<Float, Float>>> = listOf(
-    // --- European mainland (Iberia -> France -> Low Countries -> N. Germany ->
-    //     Poland -> Baltics -> up to N. Russia, then down the east and around the
-    //     Mediterranean back to Iberia). Coarse but recognisable.
     listOf(
-        -9.5f to 43.8f,  -9.0f to 41.0f,  -9.4f to 38.7f,  -8.9f to 37.0f,
-        -6.3f to 36.9f,  -5.6f to 36.0f,  -2.9f to 36.7f,  -0.3f to 37.6f,
-         0.9f to 38.9f,   3.1f to 41.9f,   3.3f to 43.3f,   6.5f to 43.1f,
-         7.5f to 43.8f,   9.5f to 44.4f,  12.4f to 45.5f,  13.6f to 45.8f,
-        13.0f to 44.0f,  16.2f to 43.5f,  18.5f to 42.4f,  19.3f to 41.9f,
-        20.0f to 39.7f,  22.9f to 40.0f,  23.7f to 40.0f,  24.0f to 40.9f,
-        26.6f to 41.4f,  28.0f to 41.0f,  27.5f to 42.5f,  28.6f to 43.7f,
-        30.5f to 46.5f,  31.5f to 46.6f,  37.0f to 47.1f,  39.0f to 48.0f,
-        40.0f to 50.0f,  44.0f to 48.3f,  46.0f to 48.0f,  47.5f to 50.0f,
-        45.0f to 53.0f,  48.0f to 56.0f,  45.0f to 60.0f,  40.0f to 64.0f,
-        41.0f to 66.0f,  33.0f to 66.5f,  30.0f to 65.5f,  30.5f to 62.0f,
-        27.0f to 60.5f,  24.0f to 59.5f,  24.5f to 57.5f,  21.0f to 56.5f,
-        19.5f to 54.5f,  14.5f to 54.0f,  12.5f to 54.5f,   9.5f to 53.7f,
-         7.0f to 53.5f,   4.3f to 52.0f,   1.5f to 51.0f,  -1.5f to 49.3f,
-        -4.8f to 48.4f,  -1.5f to 46.0f,  -1.2f to 43.5f,  -4.0f to 43.4f,
-        -9.5f to 43.8f
+        35.8f to 36.3f, 36.2f to 36.7f, 34.7f to 36.8f, 34.0f to 36.2f, 32.5f to 36.1f,
+        31.7f to 36.6f, 30.6f to 36.7f, 29.7f to 36.1f, 28.7f to 36.7f, 27.6f to 36.7f,
+        26.3f to 38.2f, 26.8f to 39.0f, 26.2f to 39.5f, 27.3f to 40.4f, 28.8f to 40.5f,
+        29.2f to 41.2f, 31.1f to 41.1f, 33.5f to 42.0f, 35.2f to 42.0f, 38.3f to 40.9f,
+        40.4f to 41.0f, 41.6f to 41.5f, 41.5f to 42.6f, 36.7f to 45.2f, 37.4f to 45.4f,
+        38.2f to 46.2f, 37.7f to 46.6f, 39.1f to 47.3f, 35.0f to 46.3f, 35.0f to 45.7f,
+        36.5f to 45.5f, 36.3f to 45.1f, 33.9f to 44.4f, 33.3f to 44.6f, 33.5f to 45.0f,
+        32.5f to 45.3f, 33.6f to 45.9f, 33.3f to 46.1f, 31.7f to 46.3f, 31.7f to 46.7f,
+        30.7f to 46.6f, 29.6f to 45.0f, 28.8f to 44.9f, 28.6f to 43.7f, 27.7f to 42.6f,
+        28.1f to 41.6f, 29.0f to 41.3f, 28.8f to 41.1f, 27.6f to 41.0f, 26.4f to 40.2f,
+        26.1f to 40.8f, 24.9f to 40.9f, 23.7f to 40.7f, 24.4f to 40.1f, 23.9f to 40.0f,
+        22.8f to 40.5f, 22.6f to 40.3f, 23.4f to 39.2f, 23.0f to 39.0f, 24.0f to 38.2f,
+        24.0f to 37.7f, 23.1f to 37.9f, 23.4f to 37.4f, 22.8f to 37.3f, 23.2f to 36.4f,
+        21.7f to 36.8f, 21.1f to 38.3f, 19.4f to 40.3f, 19.5f to 41.7f, 16.0f to 43.5f,
+        15.2f to 44.2f, 14.9f to 45.1f, 14.3f to 45.2f, 14.0f to 44.8f, 13.7f to 45.1f,
+        13.9f to 45.6f, 12.3f to 45.4f, 12.6f to 44.1f, 15.1f to 42.0f, 15.9f to 42.0f,
+        16.2f to 41.7f, 15.9f to 41.5f, 18.5f to 40.2f, 18.3f to 39.8f, 16.9f to 40.4f,
+        16.4f to 39.8f, 17.2f to 39.4f, 17.1f to 38.9f, 16.1f to 38.0f, 15.7f to 37.9f,
+        16.1f to 39.0f, 15.4f to 40.0f, 12.1f to 41.7f, 10.5f to 42.9f, 10.2f to 43.9f,
+        8.9f to 44.4f, 6.5f to 43.1f, 4.6f to 43.4f, 3.1f to 43.1f, 3.0f to 41.9f,
+        2.1f to 41.2f, 0.8f to 41.0f, 0.1f to 40.1f, -0.3f to 39.3f, 0.1f to 38.7f,
+        -0.7f to 37.6f, -1.4f to 37.4f, -2.1f to 36.7f, -4.4f to 36.7f, -5.4f to 35.9f,
+        -5.9f to 36.0f, -6.5f to 36.9f, -8.9f to 36.9f, -8.8f to 38.3f, -9.5f to 38.7f,
+        -8.8f to 40.8f, -9.0f to 42.6f, -9.4f to 43.0f, -8.0f to 43.7f, -1.9f to 43.4f,
+        -1.4f to 44.0f, -1.2f to 46.0f, -3.0f to 47.6f, -4.5f to 48.0f, -4.6f to 48.7f,
+        -1.6f to 48.6f, -1.9f to 49.8f, -1.0f to 49.3f, 1.3f to 50.1f, 1.6f to 50.9f,
+        3.8f to 51.6f, 4.7f to 53.1f, 7.1f to 53.7f, 8.1f to 53.5f, 8.8f to 54.0f,
+        8.1f to 55.5f, 8.1f to 56.5f, 8.5f to 57.1f, 10.6f to 57.7f, 10.3f to 56.9f,
+        10.9f to 56.5f, 9.7f to 55.5f, 9.9f to 54.6f, 11.0f to 54.4f, 10.9f to 54.0f,
+        12.5f to 54.5f, 14.1f to 53.8f, 17.6f to 54.9f, 19.7f to 54.4f, 19.9f to 54.9f,
+        21.3f to 55.2f, 21.1f to 56.8f, 21.6f to 57.4f, 22.5f to 57.8f, 23.3f to 57.0f,
+        24.1f to 57.0f, 24.4f to 58.4f, 23.4f to 58.6f, 23.3f to 59.2f, 25.9f to 59.6f,
+        28.0f to 59.5f, 29.1f to 60.0f, 28.1f to 60.5f, 22.9f to 59.8f, 21.3f to 60.7f,
+        21.5f to 61.7f, 21.1f to 62.6f, 21.5f to 63.2f, 25.4f to 65.1f, 25.3f to 65.5f,
+        23.9f to 66.0f, 22.2f to 65.7f, 21.2f to 65.0f, 21.4f to 64.4f, 17.8f to 62.7f,
+        17.1f to 61.3f, 18.8f to 60.1f, 17.9f to 59.0f, 16.8f to 58.7f, 15.9f to 56.1f,
+        14.7f to 56.2f, 14.1f to 55.4f, 12.9f to 55.4f, 10.4f to 59.5f, 8.4f to 58.3f,
+        7.0f to 58.1f, 5.7f to 58.6f, 5.0f to 62.0f, 10.5f to 64.5f, 14.8f to 67.8f,
+        19.2f to 69.8f, 23.0f to 70.2f, 24.5f to 71.0f, 28.2f to 71.2f, 31.3f to 70.5f,
+        30.0f to 70.2f, 31.1f to 69.6f, 32.1f to 69.9f, 33.8f to 69.3f, 36.5f to 69.1f,
+        41.1f to 67.5f, 41.1f to 66.8f, 38.4f to 66.0f, 33.2f to 66.6f, 34.8f to 65.9f,
+        34.9f to 64.4f, 37.0f to 63.8f, 37.1f to 64.3f, 36.5f to 64.8f, 37.2f to 65.1f,
+        39.6f to 64.5f, 40.4f to 64.8f, 39.8f to 65.5f, 42.1f to 66.5f, 43.9f to 66.1f,
+        44.5f to 66.8f, 43.7f to 67.4f, 44.2f to 68.0f, 43.5f to 68.6f, 45.0f to 68.4f,
+        45.0f to 34.0f, 35.5f to 34.0f, 36.1f to 35.8f, 35.8f to 36.3f
     ),
-    // --- Great Britain
     listOf(
-        -5.7f to 50.1f,  -3.0f to 51.2f,  -5.3f to 51.6f,  -4.1f to 53.3f,
-        -3.1f to 53.4f,  -2.9f to 54.9f,  -5.0f to 55.9f,  -5.8f to 57.6f,
-        -3.0f to 58.6f,  -2.1f to 57.7f,  -1.8f to 56.0f,   0.3f to 54.7f,
-         0.6f to 52.9f,   1.7f to 52.8f,   1.0f to 51.4f,  -1.3f to 50.8f,
-        -3.5f to 50.6f,  -5.7f to 50.1f
+        -2.0f to 57.7f, -3.1f to 56.0f, -2.1f to 55.9f, -1.1f to 54.6f, -0.4f to 54.5f,
+        0.5f to 52.9f, 1.7f to 52.7f, 1.6f to 52.1f, 1.1f to 51.8f, 1.4f to 51.3f,
+        0.6f to 50.8f, -3.0f to 50.7f, -3.6f to 50.2f, -5.8f to 50.2f, -3.4f to 51.4f,
+        -5.0f to 51.6f, -5.3f to 52.0f, -4.2f to 52.3f, -4.8f to 52.8f, -4.6f to 53.5f,
+        -3.1f to 53.4f, -2.9f to 54.0f, -3.6f to 54.6f, -4.8f to 54.8f, -5.1f to 55.1f,
+        -4.7f to 55.5f, -5.0f to 55.8f, -5.6f to 55.3f, -5.6f to 56.3f, -6.1f to 56.8f,
+        -5.8f to 57.8f, -5.0f to 58.6f, -3.0f to 58.6f, -4.1f to 57.6f, -2.0f to 57.7f
     ),
-    // --- Ireland
     listOf(
-        -10.4f to 51.6f, -8.2f to 51.5f,  -6.2f to 52.2f,  -6.0f to 53.4f,
-        -6.3f to 54.1f,  -8.1f to 55.3f,  -10.0f to 54.3f, -9.9f to 53.2f,
-        -10.4f to 51.6f
+        -18.7f to 63.5f, -22.8f to 64.0f, -21.8f to 64.4f, -24.0f to 64.9f, -22.2f to 65.1f,
+        -22.2f to 65.4f, -24.3f to 65.6f, -23.7f to 66.3f, -22.1f to 66.4f, -20.6f to 65.7f,
+        -19.1f to 66.3f, -17.8f to 66.0f, -16.2f to 66.5f, -14.5f to 66.5f, -14.7f to 65.8f,
+        -13.6f to 65.1f, -14.9f to 64.4f, -18.7f to 63.5f
     ),
-    // --- Scandinavia (Norway + Sweden + Finland, one blob)
     listOf(
-         4.9f to 58.1f,   5.7f to 62.0f,  10.0f to 63.5f,  12.5f to 66.0f,
-        15.5f to 68.5f,  20.0f to 70.3f,  25.0f to 71.1f,  28.2f to 71.1f,
-        31.0f to 70.0f,  29.0f to 69.0f,  28.5f to 68.5f,  24.0f to 68.7f,
-        23.5f to 66.5f,  21.5f to 65.0f,  17.5f to 62.5f,  17.0f to 60.7f,
-        19.1f to 60.0f,  18.4f to 59.3f,  16.5f to 58.5f,  16.6f to 56.2f,
-        14.5f to 55.4f,  12.9f to 55.4f,  11.4f to 58.3f,   9.0f to 58.9f,
-         7.0f to 58.0f,   4.9f to 58.1f
+        -5.9f to 35.8f, -4.6f to 35.3f, -2.2f to 35.2f, 1.5f to 36.6f, 5.3f to 36.7f,
+        6.3f to 37.1f, 8.4f to 36.9f, 9.5f to 37.4f, 10.2f to 37.2f, 10.2f to 36.7f,
+        11.1f to 36.9f, 10.6f to 36.4f, 10.9f to 35.7f, 10.3f to 34.0f, -7.1f to 34.0f,
+        -5.9f to 35.8f
     ),
-    // --- Iceland
     listOf(
-        -24.5f to 65.5f, -22.0f to 66.5f, -18.0f to 66.3f, -14.5f to 65.7f,
-        -13.5f to 64.4f, -18.0f to 63.4f, -22.5f to 63.9f, -24.5f to 65.5f
+        -9.7f to 53.9f, -6.7f to 55.2f, -5.7f to 54.6f, -6.2f to 53.9f, -6.0f to 53.2f,
+        -6.8f to 52.3f, -8.6f to 51.7f, -10.0f to 51.8f, -9.2f to 52.9f, -9.7f to 53.9f
     ),
-    // --- Italy (boot)
     listOf(
-         7.6f to 43.8f,  10.3f to 42.9f,  12.4f to 41.3f,  15.4f to 40.0f,
-        16.5f to 38.9f,  17.2f to 40.5f,  18.5f to 40.1f,  16.9f to 41.9f,
-        15.4f to 42.0f,  14.0f to 42.6f,  13.5f to 43.6f,  12.4f to 44.1f,
-        12.3f to 45.5f,  10.5f to 44.9f,   8.8f to 44.4f,   7.6f to 43.8f
+        8.4f to 39.2f, 8.2f to 41.0f, 9.2f to 41.2f, 9.8f to 40.5f, 9.7f to 39.2f,
+        8.8f to 38.9f, 8.4f to 39.2f
     ),
-    // --- Greece / Peloponnese (very coarse)
     listOf(
-        20.0f to 39.7f,  21.0f to 38.3f,  21.9f to 37.0f,  23.1f to 36.4f,
-        23.0f to 37.9f,  24.0f to 38.2f,  23.7f to 40.0f,  22.5f to 40.1f,
-        20.0f to 39.7f
-    )
+        -23.5f to 70.5f, -25.0f to 71.2f, -25.0f to 72.0f, -23.3f to 72.0f, -22.1f to 71.5f,
+        -21.8f to 70.7f, -23.5f to 70.5f
+    ),
+    listOf(
+        32.5f to 34.7f, 32.3f to 35.1f, 34.6f to 35.7f, 33.9f to 35.2f, 34.0f to 35.0f,
+        32.5f to 34.7f
+    ),
+    listOf(
+        26.3f to 35.3f, 26.2f to 35.0f, 24.7f to 34.9f, 23.5f to 35.3f, 23.7f to 35.7f,
+        26.3f to 35.3f
+    ),
+    listOf(
+        15.1f to 36.6f, 12.4f to 37.6f, 12.6f to 38.1f, 15.5f to 38.2f, 15.1f to 36.6f
+    ),
+    listOf(
+        9.4f to 43.0f, 9.6f to 42.2f, 9.2f to 41.4f, 8.5f to 42.3f, 9.4f to 43.0f
+    ),
+    listOf(
+        12.7f to 55.6f, 12.1f to 54.8f, 10.9f to 55.8f, 12.4f to 56.1f, 12.7f to 55.6f
+    ),
+    listOf(
+        -25.0f to 70.2f, -22.3f to 70.1f, -25.0f to 69.3f, -25.0f to 70.2f
+    ),
 )

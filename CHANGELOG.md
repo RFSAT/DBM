@@ -1,11 +1,19 @@
 # DBM Changelog
 
 ## v1.20.72 — region info: Europe map background + clearer info button
-- Region location preview now draws a simplified EUROPE LANDMASS behind the
-  bounding box (sea, land polygons for the mainland, British Isles, Ireland,
-  Scandinavia, Iceland, Italy, Greece), so a region's rectangle is shown in real
-  geographic context instead of on a bare grid. Fully offline — a coarse vector
-  coastline drawn on Canvas, no map SDK, tiles, or network.
+- Region location preview now draws the EUROPE LANDMASS behind the bounding box,
+  so a region's rectangle is shown in real geographic context instead of on a bare
+  grid. The coastline is derived from Natural Earth 110m land data (public domain),
+  clipped to the display frame and simplified to ~350 points across 13 landmasses
+  (mainland with proper Mediterranean/Black/Baltic Sea coasts, British Isles,
+  Ireland, Iceland, Scandinavia, Denmark, Sicily/Sardinia/Corsica, Cyprus, Crete,
+  N. Africa coast). Fully offline — a real (if coarse) coastline drawn on Canvas,
+  no map SDK, tiles, or network.
+- The preview is now ZOOMABLE: it auto-frames to the selected region on open (a
+  small country fills the view instead of being a speck), and you can pinch to
+  zoom and drag to pan to explore, clamped to the Europe extent. Big regions
+  auto-frame with less zoom, small ones with more. Double-tap the
+  preview to reset to the full Europe view.
 - Made the info affordance obvious: the tiny grey ⓘ appended to the region name is
   replaced by a clearly tappable 28dp circular button (circled "i" in the accent
   colour on a tinted background) at the end of each region row.
