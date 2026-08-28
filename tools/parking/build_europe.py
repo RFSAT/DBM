@@ -274,7 +274,8 @@ def verify_db(db_path):
     return ok, findings
 
 
-def process_one(pbf, region_id, region_name, add_parking, skip_base, log_fh=None):
+def process_one(pbf, region_id, region_name, add_parking, skip_base, log_fh=None,
+                progress_cb=None):
     """Build <region>.db with FULL features: speed limits (base converter) then
     parking + cameras (add_parking). Returns the db path.
 
@@ -283,26 +284,27 @@ def process_one(pbf, region_id, region_name, add_parking, skip_base, log_fh=None
     (schema 5). Order is enforced here — base first, always.
 
     ATOMICITY: when building fresh, both steps write to <region>.db.part and the
-    result is renamed to <region>.db only after BOTH steps succeed. So an
-    interrupted/killed build never leaves a partial <region>.db in place — it
-    leaves at most a .part file (ignored by the resume check), and the region is
-    cleanly rebuilt next run. (In --skip-base mode we operate on the existing
-    <region>.db directly, since its roads are already there.)
+    result is renamed to <region>.db only after BOTH steps succeed.
 
-    log_fh: if given (parallel mode), the base-converter SUBPROCESS's stdout/
-    stderr are redirected to this file handle at the OS level. This is essential
-    because the subprocess is a separate OS process — Python's redirect_stdout
-    does NOT capture it, so without this its progress leaks onto the shared
-    console. When None (sequential mode), the subprocess inherits the console as
-    before.
+    log_fh: if given, the base-converter SUBPROCESS's output is written there.
+    progress_cb: if given, called with (phase, latest_line) as work proceeds so a
+    parent dashboard can show live per-region progress. Both can be set together
+    (parallel mode): full detail to the log, latest line to the dashboard.
     """
     final_db = f"{region_id}.db"
+
+    def emit(phase, line=""):
+        if progress_cb is not None:
+            try:
+                progress_cb(phase, line)
+            except Exception:
+                pass
 
     if skip_base:
         if not os.path.exists(final_db):
             sys.exit(f"--skip-base given but {final_db} does not exist. Run the "
                      f"base speed-limit conversion first, or drop --skip-base.")
-        # operate in place; roads already present
+        emit("parking")
         print(f"\n  [2/2] parking + cameras", flush=True)
         add_parking.run(pbf, final_db)
         return final_db
@@ -316,14 +318,38 @@ def process_one(pbf, region_id, region_name, add_parking, skip_base, log_fh=None
     cmd = [c.format(pbf=pbf, db=work_db, region=region_name)
            for c in BASE_CONVERTER]
     print(f"\n  [1/2] speed limits", flush=True)
+    emit("scanning")
     import subprocess
-    if log_fh is not None:
-        # OS-level redirect of the subprocess: its stdout/stderr go to the log
-        # file, not the shared console. flush first so ordering is sane.
+    if progress_cb is not None:
+        # Stream the subprocess output so we can forward the latest progress line
+        # to the dashboard AND write the full detail to the log. We read combined
+        # stdout+stderr line by line. \r-updated counter lines are split on \r so
+        # we forward the most recent counter, not a whole buffered blob.
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, bufsize=1,
+                                universal_newlines=True)
+        buf = ""
+        for chunk in iter(lambda: proc.stdout.read(1), ""):
+            if chunk in ("\n", "\r"):
+                line = buf.strip()
+                buf = ""
+                if line:
+                    if log_fh is not None:
+                        log_fh.write(line + "\n"); log_fh.flush()
+                    # forward a compact version as the live line
+                    emit("scanning", line)
+            else:
+                buf += chunk
+        proc.stdout.close()
+        rc = proc.wait()
+        if rc != 0:
+            raise subprocess.CalledProcessError(rc, cmd)
+    elif log_fh is not None:
         log_fh.flush()
         subprocess.run(cmd, check=True, stdout=log_fh, stderr=subprocess.STDOUT)
     else:
         subprocess.run(cmd, check=True)
+    emit("parking")
     print(f"\n  [2/2] parking + cameras", flush=True)
     add_parking.run(pbf, work_db)
     # both steps done — atomically promote to the final name
@@ -343,18 +369,13 @@ def _worker_ignore_sigint():
 
 
 def _worker_build_region(args):
-    """Worker process: build ONE region's .db (both steps), writing this region's
-    detailed progress to logs/<rid>.log instead of the shared console. Returns a
-    plain-dict result the parent uses to record state + manifest. Must be
-    module-level (picklable). Does NOT touch index.json / .build_state.json — the
-    parent owns all shared-state writes to keep them consistent and resumable."""
-    d, rid, name, pbf, skip_base = args
-    import io
+    """Worker process: build ONE region's .db (both steps). Sends live progress
+    to the parent via a shared queue (rid, kind, phase, line, elapsed) so the
+    parent can paint a per-region dashboard, AND writes full detail to
+    logs/<rid>.log. Returns a plain-dict result the parent uses to record state.
+    Must be module-level (picklable). Never touches index.json/.build_state.json."""
+    d, rid, name, pbf, skip_base, q = args
     import contextlib
-    # Workers may be spawned (Windows) with a fresh cwd, but process_one runs the
-    # base converter as `python osm_to_speedlimitdb.py` and writes `<rid>.db`
-    # relative to cwd — so pin cwd to the map folder, exactly where the parent and
-    # the sequential path run.
     try:
         os.chdir(d)
     except OSError:
@@ -363,30 +384,42 @@ def _worker_build_region(args):
     os.makedirs(logdir, exist_ok=True)
     logpath = os.path.join(logdir, f"{rid}.log")
     t0 = time.time()
-    # add_parking is imported inside the worker (each process imports its own).
+
+    def send(kind, phase="", line=""):
+        if q is not None:
+            try:
+                q.put((rid, kind, phase, line, time.time() - t0))
+            except Exception:
+                pass
+
+    def progress_cb(phase, line=""):
+        send("progress", phase, line)
+
     try:
         import add_parking
     except Exception as e:
+        send("error", "", f"import add_parking: {e}")
         return {"rid": rid, "ok": False, "error": f"import add_parking: {e}",
                 "elapsed": 0.0, "log": logpath}
+    send("start")
     try:
-        with open(logpath, "w", encoding="utf-8") as lf, \
-                contextlib.redirect_stdout(lf), contextlib.redirect_stderr(lf):
-            # redirect_stdout captures this process's own print()s (e.g. from
-            # add_parking, which runs in-process). The base converter is a
-            # SUBPROCESS, so we ALSO pass lf explicitly to be redirected at the
-            # OS level — otherwise its output leaks to the shared console.
-            db_path = process_one(pbf, rid, name, add_parking, skip_base,
-                                  log_fh=lf)
+        with open(logpath, "w", encoding="utf-8") as lf:
+            # add_parking runs in-process; capture its prints into the log too.
+            with contextlib.redirect_stdout(lf), contextlib.redirect_stderr(lf):
+                db_path = process_one(pbf, rid, name, add_parking, skip_base,
+                                      log_fh=lf, progress_cb=progress_cb)
         ok, findings = verify_db(db_path)
-        return {
+        res = {
             "rid": rid, "ok": True, "db_path": db_path, "findings": findings,
             "verify_ok": ok, "bbox": db_meta(db_path).get("bbox", ""),
             "size": os.path.getsize(db_path), "sha": sha256_of(db_path),
             "data_date": pbf_date(pbf), "elapsed": time.time() - t0,
             "log": logpath,
         }
+        send("done", "done")
+        return res
     except Exception as e:
+        send("error", "", f"{e.__class__.__name__}: {e}")
         return {"rid": rid, "ok": False,
                 "error": f"{e.__class__.__name__}: {e}",
                 "elapsed": time.time() - t0, "log": logpath}
@@ -402,66 +435,71 @@ def _dashboard_supported():
         return False
 
 
-class _Reporter:
-    """Progress reporter for parallel mode. Renders a live repainting dashboard
-    when the terminal supports it, else prints a clean append-only event log.
-    Same public API either way: started(), finished(), footer()."""
-    def __init__(self, total, jobs, use_dashboard):
+class _Dashboard:
+    """Live per-region progress display for parallel mode. Shows one line per
+    ACTIVE region with its current phase and latest progress detail, repainted in
+    place, plus a header counter. Completed regions scroll above as permanent
+    lines. Falls back to plain append-only output when the terminal can't repaint
+    (redirected to a file, dumb console, or --no-dashboard).
+
+    Fed by worker queue messages via update(); completions via finish(); the
+    parent calls tick() regularly to repaint on a steady cadence."""
+
+    _SPIN = "|/-\\"
+
+    def __init__(self, total, jobs, use_live):
         self.total = total
         self.jobs = jobs
-        self.dash = use_dashboard
-        self.running = {}          # rid -> start time
+        self.live = use_live
         self.done = 0
         self.failed = 0
-        self.order = []            # completion order for the log
-        self._last_lines = 0
         self.t_start = time.time()
-        # enable ANSI on Windows 10+ consoles if we're going to repaint
-        if self.dash and os.name == "nt":
+        self.active = {}       # rid -> {phase, line, elapsed, last}
+        self._last_lines = 0
+        self._spin_i = 0
+        self._last_paint = 0.0
+        self._fallback_last = {}   # rid -> last phase we printed (fallback mode)
+        if self.live and os.name == "nt":
+            # enable ANSI/VT on Windows 10+ consoles
             try:
                 import ctypes
                 k = ctypes.windll.kernel32
-                k.SetConsoleMode(k.GetStdHandle(-11), 7)  # ENABLE_VT_PROCESSING
+                mode = ctypes.c_uint32()
+                h = k.GetStdHandle(-11)
+                k.GetConsoleMode(h, ctypes.byref(mode))
+                k.SetConsoleMode(h, mode.value | 0x0004)  # ENABLE_VT_PROCESSING
             except Exception:
-                self.dash = False
+                self.live = False
 
     def _counts(self):
-        # running = min(workers, outstanding); the pool runs at most `jobs` at
-        # once even though all regions are submitted up front.
         outstanding = self.total - self.done - self.failed
-        running = min(self.jobs, outstanding)
+        running = min(self.jobs, max(0, outstanding))
         queued = max(0, outstanding - running)
-        return (f"[ {self.done}/{self.total} done · {running} running "
-                f"· {queued} queued · {self.failed} failed ]")
+        el = int(time.time() - self.t_start)
+        m, s = divmod(el, 60)
+        return (f"[ {self.done}/{self.total} done · {running} running · "
+                f"{queued} queued · {self.failed} failed ]  {m}m{s:02d}s")
 
-    def started(self, rid):
-        # Submit-time bookkeeping only. We do NOT print a "start" line: the pool
-        # may not have actually begun this region yet (only `jobs` run at once),
-        # so a start line would overstate what's running. Accurate lines are
-        # printed when regions FINISH.
-        self.running[rid] = time.time()
-        if self.dash:
-            self._repaint()
+    # ---- inbound events -----------------------------------------------------
+    def update(self, rid, kind, phase, line, elapsed):
+        if kind in ("start", "progress"):
+            a = self.active.setdefault(rid, {"phase": "", "line": "", "elapsed": 0})
+            if phase:
+                a["phase"] = phase
+            if line:
+                a["line"] = line
+            a["elapsed"] = elapsed
+            # fallback mode: print a line only when the PHASE changes, so we
+            # don't spam, but still show meaningful movement per region.
+            if not self.live:
+                ph = a["phase"]
+                if self._fallback_last.get(rid) != ph and ph:
+                    self._fallback_last[rid] = ph
+                    print(f"  · {rid:28s} {ph}", flush=True)
 
-    def heartbeat(self):
-        """Periodic 'still working' line for event-log mode, so a long run with
-        big regions doesn't look hung between completions. Reports only what's
-        reliably known: overall counts and how long since the batch started.
-        (We can't reliably know which specific regions the pool is executing at
-        any instant, so we don't claim per-region timings here — the per-region
-        logs/<region>.log files show that live.)"""
-        if self.dash:
-            self._repaint()
-            return
-        elapsed = time.time() - self.t_start
-        m, s = divmod(int(elapsed), 60)
-        print(f"  … still working — {self._counts()}  elapsed {m}m{s:02d}s "
-              f"(live detail in logs/)", flush=True)
-
-    def finished(self, res):
-        rid = res["rid"]
-        self.running.pop(rid, None)
-        if res["ok"]:
+    def finish(self, rid, res, ok):
+        self.active.pop(rid, None)
+        if ok:
             self.done += 1
             f = res.get("findings", {})
             summary = (f"{_fmt(f.get('segments'))} roads · "
@@ -471,52 +509,58 @@ class _Reporter:
             line = f"  \u2713 {rid:28s} {summary}"
         else:
             self.failed += 1
-            line = f"  \u2717 FAILED {rid:28s} {res.get('error','?')} " \
-                   f"(see {res.get('log','logs/'+rid+'.log')})"
-        self.order.append(line)
-        if not self.dash:
-            print(f"{line}   {self._counts()}", flush=True)
-        else:
-            # Print this completed result as PERMANENT scrollback above the live
-            # block: erase the current block, write the line, then repaint below.
-            if self._last_lines:
-                sys.stdout.write(f"\x1b[{self._last_lines}A\x1b[J")
-                self._last_lines = 0
-            sys.stdout.write(line + "\n")
-            self._repaint()
+            line = (f"  \u2717 FAILED {rid:28s} {res.get('error','?')} "
+                    f"(see {res.get('log','logs/'+rid+'.log')})")
+        # print the completed line as permanent scrollback above the live block
+        if self.live and self._last_lines:
+            sys.stdout.write(f"\x1b[{self._last_lines}A\x1b[J")
+            self._last_lines = 0
+        print(line, flush=True)
+        if self.live:
+            self._paint(force=True)
 
-    def _repaint(self):
-        # Build a FIXED-HEIGHT block so the cursor-up count is always correct:
-        # 1 header line + one line per worker slot (self.jobs). Completed results
-        # are printed as permanent scrollback ABOVE the block (in finished()),
-        # never inside it, so the block never grows or shrinks.
-        rows = [self._counts()]
-        running = sorted(self.running.items(), key=lambda kv: kv[1])
+    # ---- painting -----------------------------------------------------------
+    def tick(self):
+        if self.live:
+            self._paint()
+
+    def _shorten(self, s, width):
+        s = s.strip()
+        return s if len(s) <= width else s[:width - 1] + "…"
+
+    def _paint(self, force=False):
+        now = time.time()
+        if not force and (now - self._last_paint) < 0.25:
+            return
+        self._last_paint = now
+        self._spin_i = (self._spin_i + 1) % len(self._SPIN)
+        spin = self._SPIN[self._spin_i]
+        # fixed-height block: header + one row per worker slot
+        rows = ["  " + self._counts()]
+        act = sorted(self.active.items(), key=lambda kv: kv[1]["elapsed"],
+                     reverse=True)
         for i in range(self.jobs):
-            if i < len(running):
-                rid, t = running[i]
-                rows.append(f"  \u25B6 {rid:28s} {time.time()-t:5.0f}s")
+            if i < len(act):
+                rid, a = act[i]
+                phase = a.get("phase", "") or "…"
+                detail = self._shorten(a.get("line", ""), 46)
+                rows.append(f"  {spin} {rid:26s} {phase:9s} {detail}")
             else:
-                rows.append("  \u00b7")           # idle slot placeholder
-        # move up over the previous block (same height every time)
+                rows.append("  ·")
         if self._last_lines:
             sys.stdout.write(f"\x1b[{self._last_lines}A")
-        # write each row cleared to end-of-line; \r guards against stray columns
-        buf = []
-        for r in rows:
-            buf.append("\r" + r + "\x1b[K")
-        sys.stdout.write("\n".join(buf) + "\n")
+        out = [("\r" + r + "\x1b[K") for r in rows]
+        sys.stdout.write("\n".join(out) + "\n")
         sys.stdout.flush()
         self._last_lines = len(rows)
 
-    def footer(self):
-        # when using the dashboard, drop a final plain copy of every result so
-        # the completed run leaves a readable scrollback (not just the last frame)
-        if self.dash:
-            sys.stdout.write("\n")
-            for ln in self.order:
-                print(ln)
-        print("\n" + self._counts(), flush=True)
+    def stop(self):
+        # clear the live block; the completed scrollback lines remain above
+        if self.live and self._last_lines:
+            sys.stdout.write(f"\x1b[{self._last_lines}A\x1b[J")
+            self._last_lines = 0
+            sys.stdout.flush()
+        print("  " + self._counts(), flush=True)
 
 
 def _fmt(n):
@@ -589,10 +633,11 @@ def main():
                          "progress. >1 prints a clean append-only event log (one "
                          "line per start/finish), with each region's detailed "
                          "progress in logs/<region>.log.")
-    ap.add_argument("--dashboard", action="store_true",
-                    help="in parallel mode, use a live repainting dashboard instead "
-                         "of the append-only event log. Only works on a capable "
-                         "terminal; if lines overlap, don't use it.")
+    ap.add_argument("--no-dashboard", action="store_true",
+                    help="in parallel mode, disable the live per-region dashboard "
+                         "and print plain phase-change lines instead. Use this if "
+                         "your terminal can't repaint cleanly. (The dashboard also "
+                         "auto-disables when output is redirected to a file.)")
     a = ap.parse_args()
 
     d = os.path.abspath(a.dir)
@@ -775,71 +820,76 @@ def main():
 
     jobs = max(1, a.jobs)
     if jobs > 1 and len(todo) > 1:
-        # ---------------- PARALLEL PATH ----------------
+        # ---------------- PARALLEL PATH (live per-region dashboard) ----------
         import concurrent.futures as _cf
+        import multiprocessing as _mp
+        import queue as _queue
         n = min(jobs, len(todo))
-        print(f"\nProcessing {len(todo)} region(s) with {n} parallel worker(s). "
-              f"Per-region detail is in logs/<region>.log.", flush=True)
+        print(f"\nProcessing {len(todo)} region(s) with {n} parallel worker(s).",
+              flush=True)
         print("  (Ctrl-C once to stop cleanly: in-progress regions are discarded, "
               "finished ones are saved; just re-run to resume.)\n", flush=True)
-        rep = _Reporter(len(todo), n, a.dashboard and _dashboard_supported())
         meta = {rid: (info, name, sig) for (rid, info, pbf, name, sig) in todo}
         interrupted = False
-        # Workers ignore SIGINT so a Ctrl-C goes only to the parent, which then
-        # shuts the pool down in an orderly way (no stack-trace spew from every
-        # child, no orphans). The initializer MUST be a module-level function:
-        # on Windows the pool spawns workers and pickles the initializer, and
-        # nested/local functions are not picklable.
+        # Shared queue: workers push live (rid, kind, phase, line, elapsed); the
+        # parent drains it to paint a per-region dashboard.
+        mgr = _mp.Manager()
+        q = mgr.Queue()
+        dash = _Dashboard(len(todo), n,
+                          use_live=(not a.no_dashboard) and _dashboard_supported())
         ex = _cf.ProcessPoolExecutor(max_workers=n,
                                      initializer=_worker_ignore_sigint)
         try:
             futs = {}
             for (rid, info, pbf, name, sig) in todo:
                 fut = ex.submit(_worker_build_region,
-                                (d, rid, name, pbf, a.skip_base))
+                                (d, rid, name, pbf, a.skip_base, q))
                 futs[fut] = rid
-                rep.started(rid)
-            # Poll for completions with a timeout so we can print a periodic
-            # heartbeat — otherwise a long run looks hung between finishes.
-            HEARTBEAT_SEC = 15
             pending = set(futs.keys())
-            last_beat = time.time()
             while pending:
-                done, pending = _cf.wait(
-                    pending, timeout=HEARTBEAT_SEC,
-                    return_when=_cf.FIRST_COMPLETED)
+                # 1) drain all queued progress messages (non-blocking)
+                drained = False
+                try:
+                    while True:
+                        rid, kind, phase, line, elapsed = q.get_nowait()
+                        dash.update(rid, kind, phase, line, elapsed)
+                        drained = True
+                except _queue.Empty:
+                    pass
+                # 2) reap any finished futures (short timeout so we keep the
+                #    dashboard ticking even when nothing is finishing)
+                done, pending = _cf.wait(pending, timeout=0.4,
+                                         return_when=_cf.FIRST_COMPLETED)
                 for fut in done:
                     res = fut.result()
                     rid = res["rid"]
                     info, name, sig = meta[rid]
-                    rep.finished(res)
                     if res["ok"]:
-                        # PARENT does all shared-state writes — never the workers.
                         if rid not in state:
                             added_ids.append(rid)
                         _record_result(d, a.base_url, state, rid, name,
                                        info["parent"], sig, res)
                         processed.append(rid)
+                        dash.finish(rid, res, ok=True)
                     else:
                         failed.append(rid)
-                # heartbeat if nothing finished this interval (or periodically)
-                if pending and (time.time() - last_beat) >= HEARTBEAT_SEC:
-                    rep.heartbeat()
-                    last_beat = time.time()
+                        dash.finish(rid, res, ok=False)
+                # 3) repaint on a steady cadence
+                dash.tick()
         except KeyboardInterrupt:
             interrupted = True
+            dash.stop()
             print("\n\nInterrupted — stopping. Regions already finished are saved "
                   "in index.json; in-progress regions were discarded (no partial "
-                  ".db left behind). Re-run the same command to resume where this "
-                  "left off.", flush=True)
-            # cancel_futures=True (py3.9+) drops not-yet-started tasks; running
-            # workers ignore SIGINT and finish or are killed on shutdown. We do
-            # NOT wait for the big in-flight regions — their .part files are
-            # ignored on resume.
+                  ".db left behind). Re-run the same command to resume.", flush=True)
             ex.shutdown(wait=False, cancel_futures=True)
         else:
             ex.shutdown(wait=True)
-        rep.footer()
+            dash.stop()
+        try:
+            mgr.shutdown()
+        except Exception:
+            pass
         if interrupted:
             # Clean up any stray .part files from killed workers so the folder
             # stays tidy (resume ignores them regardless).

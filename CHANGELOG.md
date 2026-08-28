@@ -1,5 +1,21 @@
 # DBM Changelog
 
+## v1.20.68 — parallel builds: LIVE per-region dashboard (as originally asked)
+- Delivered the live dashboard that was promised: parallel mode now shows one
+  line per ACTIVE region, updated in place, with a spinner, the region name, its
+  current phase (scanning / parking), and the LATEST detail line streamed live
+  from that region's step-1 subprocess (e.g. "[82s] nodes nodes=13,000,000 …
+  kept roads 195,947"). A header shows done/running/queued/failed + elapsed.
+  Completed regions scroll above as permanent ✓ lines. No more staring at a
+  silent console or digging through logs/.
+- How it works: each worker forwards structured progress (rid, phase, latest
+  line) to the parent via a shared multiprocessing queue; the parent paints a
+  FIXED-HEIGHT block (header + one row per worker slot) so the cursor math can't
+  drift/overlap. Full per-region detail is still written to logs/<region>.log too.
+- The dashboard is now the DEFAULT (was mistakenly an opt-in that never worked
+  right). It auto-disables when stdout is redirected to a file, and can be turned
+  off with --no-dashboard (prints plain phase-change lines instead). VT/ANSI is
+  enabled on Windows 10+ consoles.
 ## v1.20.67 — explain logs/ file count (was confusing vs regions processed)
 - logs/ can hold MORE .log files than a run processed, because log files persist
   across runs: each run only (over)writes logs for the regions it actually
