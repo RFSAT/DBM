@@ -1615,11 +1615,25 @@ class MainActivity : ComponentActivity() {
                     val nameColor = if (installed) EnactOnSurfaceDim else EnactOnSurface
                     Row(Modifier.fillMaxWidth().padding(top = 6.dp, start = 10.dp),
                         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f).clickable { info = r }) {
-                            Text(r.name + "  \u24D8", color = nameColor, fontSize = 12.sp)
+                        Column(Modifier.weight(1f)) {
+                            Text(r.name, color = nameColor, fontSize = 12.sp)
                             Text(if (isDownloadingThis) "Downloading…" else label,
                                 color = if (isDownloadingThis) EnactLime else labelColor,
                                 fontSize = 10.sp)
+                        }
+                        // Visible, clearly tappable info affordance: a circled "i"
+                        // in the accent colour with a subtle tinted background, so
+                        // it reads as a button rather than decoration.
+                        Box(
+                            Modifier
+                                .padding(end = 6.dp)
+                                .size(28.dp)
+                                .clip(androidx.compose.foundation.shape.CircleShape)
+                                .background(EnactGreen.copy(alpha = 0.18f))
+                                .clickable { info = r },
+                            contentAlignment = androidx.compose.ui.Alignment.Center
+                        ) {
+                            Text("\u24D8", color = EnactGreen, fontSize = 18.sp)
                         }
                         when (st.state) {
                             com.rfsat.dms.maps.MapState.NOT_INSTALLED,
@@ -1868,29 +1882,40 @@ class MainActivity : ComponentActivity() {
         val wLon = -25f; val eLon = 45f; val sLat = 34f; val nLat = 72f
         Canvas(Modifier.fillMaxWidth().height(150.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(Color(0xFF10232E))) {
+                .background(Color(0xFF0E2233))) {   // sea
             val w = size.width; val h = size.height
             fun xOf(lon: Float) = (lon - wLon) / (eLon - wLon) * w
-            // latitude grows upward, screen y grows downward -> invert
             fun yOf(lat: Float) = (nLat - lat) / (nLat - sLat) * h
-            // graticule every 10°, faint
-            val grid = EnactOnSurfaceDim.copy(alpha = 0.25f)
+            // --- draw the Europe landmass so the region has real context ------
+            val landFill = Color(0xFF24425A)
+            val landEdge = Color(0xFF3C6A88)
+            for (poly in EUROPE_LAND) {
+                if (poly.size < 3) continue
+                val p = androidx.compose.ui.graphics.Path()
+                p.moveTo(xOf(poly[0].first), yOf(poly[0].second))
+                for (i in 1 until poly.size)
+                    p.lineTo(xOf(poly[i].first), yOf(poly[i].second))
+                p.close()
+                drawPath(p, landFill)
+                drawPath(p, landEdge, style = Stroke(width = 1.2f))
+            }
+            // faint graticule on top of the sea/land for scale
+            val grid = EnactOnSurfaceDim.copy(alpha = 0.15f)
             var lon = -20f
             while (lon <= eLon) { drawLine(grid, Offset(xOf(lon), 0f), Offset(xOf(lon), h), 1f); lon += 10f }
             var lat = 40f
             while (lat <= nLat) { drawLine(grid, Offset(0f, yOf(lat)), Offset(w, yOf(lat)), 1f); lat += 10f }
-            // the region box
+            // --- the region's bounding box ------------------------------------
             if (bounds != null) {
                 val minLat = bounds[0]; val minLon = bounds[1]
                 val maxLat = bounds[2]; val maxLon = bounds[3]
                 val l = xOf(minLon).coerceIn(0f, w); val rt = xOf(maxLon).coerceIn(0f, w)
                 val tp = yOf(maxLat).coerceIn(0f, h); val bt = yOf(minLat).coerceIn(0f, h)
-                // filled highlight + outline
-                drawRect(EnactGreen.copy(alpha = 0.35f),
+                drawRect(EnactGreen.copy(alpha = 0.30f),
                     topLeft = Offset(l, tp), size = Size((rt - l).coerceAtLeast(2f), (bt - tp).coerceAtLeast(2f)))
                 drawRect(EnactGreen, topLeft = Offset(l, tp),
                     size = Size((rt - l).coerceAtLeast(2f), (bt - tp).coerceAtLeast(2f)),
-                    style = Stroke(width = 2f))
+                    style = Stroke(width = 2.5f))
             }
         }
         if (bounds == null)
@@ -2037,3 +2062,75 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 }
+
+// -----------------------------------------------------------------------------
+// Simplified Europe coastline for the offline region-location preview. Each inner
+// list is one landmass as a closed polygon of (lon, lat) points. This is a coarse
+// outline — enough to recognise the continent and place a region's bbox on it,
+// not a survey map. Kept deliberately low-poly so it draws instantly with no map
+// SDK, tiles, or network (offline-first).
+private val EUROPE_LAND: List<List<Pair<Float, Float>>> = listOf(
+    // --- European mainland (Iberia -> France -> Low Countries -> N. Germany ->
+    //     Poland -> Baltics -> up to N. Russia, then down the east and around the
+    //     Mediterranean back to Iberia). Coarse but recognisable.
+    listOf(
+        -9.5f to 43.8f,  -9.0f to 41.0f,  -9.4f to 38.7f,  -8.9f to 37.0f,
+        -6.3f to 36.9f,  -5.6f to 36.0f,  -2.9f to 36.7f,  -0.3f to 37.6f,
+         0.9f to 38.9f,   3.1f to 41.9f,   3.3f to 43.3f,   6.5f to 43.1f,
+         7.5f to 43.8f,   9.5f to 44.4f,  12.4f to 45.5f,  13.6f to 45.8f,
+        13.0f to 44.0f,  16.2f to 43.5f,  18.5f to 42.4f,  19.3f to 41.9f,
+        20.0f to 39.7f,  22.9f to 40.0f,  23.7f to 40.0f,  24.0f to 40.9f,
+        26.6f to 41.4f,  28.0f to 41.0f,  27.5f to 42.5f,  28.6f to 43.7f,
+        30.5f to 46.5f,  31.5f to 46.6f,  37.0f to 47.1f,  39.0f to 48.0f,
+        40.0f to 50.0f,  44.0f to 48.3f,  46.0f to 48.0f,  47.5f to 50.0f,
+        45.0f to 53.0f,  48.0f to 56.0f,  45.0f to 60.0f,  40.0f to 64.0f,
+        41.0f to 66.0f,  33.0f to 66.5f,  30.0f to 65.5f,  30.5f to 62.0f,
+        27.0f to 60.5f,  24.0f to 59.5f,  24.5f to 57.5f,  21.0f to 56.5f,
+        19.5f to 54.5f,  14.5f to 54.0f,  12.5f to 54.5f,   9.5f to 53.7f,
+         7.0f to 53.5f,   4.3f to 52.0f,   1.5f to 51.0f,  -1.5f to 49.3f,
+        -4.8f to 48.4f,  -1.5f to 46.0f,  -1.2f to 43.5f,  -4.0f to 43.4f,
+        -9.5f to 43.8f
+    ),
+    // --- Great Britain
+    listOf(
+        -5.7f to 50.1f,  -3.0f to 51.2f,  -5.3f to 51.6f,  -4.1f to 53.3f,
+        -3.1f to 53.4f,  -2.9f to 54.9f,  -5.0f to 55.9f,  -5.8f to 57.6f,
+        -3.0f to 58.6f,  -2.1f to 57.7f,  -1.8f to 56.0f,   0.3f to 54.7f,
+         0.6f to 52.9f,   1.7f to 52.8f,   1.0f to 51.4f,  -1.3f to 50.8f,
+        -3.5f to 50.6f,  -5.7f to 50.1f
+    ),
+    // --- Ireland
+    listOf(
+        -10.4f to 51.6f, -8.2f to 51.5f,  -6.2f to 52.2f,  -6.0f to 53.4f,
+        -6.3f to 54.1f,  -8.1f to 55.3f,  -10.0f to 54.3f, -9.9f to 53.2f,
+        -10.4f to 51.6f
+    ),
+    // --- Scandinavia (Norway + Sweden + Finland, one blob)
+    listOf(
+         4.9f to 58.1f,   5.7f to 62.0f,  10.0f to 63.5f,  12.5f to 66.0f,
+        15.5f to 68.5f,  20.0f to 70.3f,  25.0f to 71.1f,  28.2f to 71.1f,
+        31.0f to 70.0f,  29.0f to 69.0f,  28.5f to 68.5f,  24.0f to 68.7f,
+        23.5f to 66.5f,  21.5f to 65.0f,  17.5f to 62.5f,  17.0f to 60.7f,
+        19.1f to 60.0f,  18.4f to 59.3f,  16.5f to 58.5f,  16.6f to 56.2f,
+        14.5f to 55.4f,  12.9f to 55.4f,  11.4f to 58.3f,   9.0f to 58.9f,
+         7.0f to 58.0f,   4.9f to 58.1f
+    ),
+    // --- Iceland
+    listOf(
+        -24.5f to 65.5f, -22.0f to 66.5f, -18.0f to 66.3f, -14.5f to 65.7f,
+        -13.5f to 64.4f, -18.0f to 63.4f, -22.5f to 63.9f, -24.5f to 65.5f
+    ),
+    // --- Italy (boot)
+    listOf(
+         7.6f to 43.8f,  10.3f to 42.9f,  12.4f to 41.3f,  15.4f to 40.0f,
+        16.5f to 38.9f,  17.2f to 40.5f,  18.5f to 40.1f,  16.9f to 41.9f,
+        15.4f to 42.0f,  14.0f to 42.6f,  13.5f to 43.6f,  12.4f to 44.1f,
+        12.3f to 45.5f,  10.5f to 44.9f,   8.8f to 44.4f,   7.6f to 43.8f
+    ),
+    // --- Greece / Peloponnese (very coarse)
+    listOf(
+        20.0f to 39.7f,  21.0f to 38.3f,  21.9f to 37.0f,  23.1f to 36.4f,
+        23.0f to 37.9f,  24.0f to 38.2f,  23.7f to 40.0f,  22.5f to 40.1f,
+        20.0f to 39.7f
+    )
+)

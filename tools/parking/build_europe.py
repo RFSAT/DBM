@@ -569,9 +569,9 @@ class _Dashboard:
             term_w = os.get_terminal_size().columns
         except OSError:
             term_w = 128
-        # Use the real terminal width (floor 80). Leave a 2-col safety margin so
-        # a line exactly at the edge never wraps and breaks the repaint.
-        total_w = max(80, term_w - 2)
+        # Use the FULL terminal width. (Floor of 80 only applies if detection
+        # gave something unusable.)
+        total_w = max(80, term_w)
         DETAIL_W = max(20, total_w - (NAME_W + PHASE_W + 12))
         # fixed-height block: header + one row per worker SLOT, in stable order
         rows = ["  " + self._counts()]

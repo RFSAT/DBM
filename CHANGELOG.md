@@ -1,5 +1,14 @@
 # DBM Changelog
 
+## v1.20.72 — region info: Europe map background + clearer info button
+- Region location preview now draws a simplified EUROPE LANDMASS behind the
+  bounding box (sea, land polygons for the mainland, British Isles, Ireland,
+  Scandinavia, Iceland, Italy, Greece), so a region's rectangle is shown in real
+  geographic context instead of on a bare grid. Fully offline — a coarse vector
+  coastline drawn on Canvas, no map SDK, tiles, or network.
+- Made the info affordance obvious: the tiny grey ⓘ appended to the region name is
+  replaced by a clearly tappable 28dp circular button (circled "i" in the accent
+  colour on a tinted background) at the end of each region row.
 ## v1.20.71 — dashboard: show step-2 (parking) progress + use full width
 - The live dashboard only showed progress during step 1 (speed limits). Step 2
   (parking + cameras, add_parking.run) runs in-process with stdout redirected to
