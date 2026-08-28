@@ -415,6 +415,7 @@ class _Reporter:
         self.failed = 0
         self.order = []            # completion order for the log
         self._last_lines = 0
+        self.t_start = time.time()
         # enable ANSI on Windows 10+ consoles if we're going to repaint
         if self.dash and os.name == "nt":
             try:
@@ -441,6 +442,21 @@ class _Reporter:
         self.running[rid] = time.time()
         if self.dash:
             self._repaint()
+
+    def heartbeat(self):
+        """Periodic 'still working' line for event-log mode, so a long run with
+        big regions doesn't look hung between completions. Reports only what's
+        reliably known: overall counts and how long since the batch started.
+        (We can't reliably know which specific regions the pool is executing at
+        any instant, so we don't claim per-region timings here — the per-region
+        logs/<region>.log files show that live.)"""
+        if self.dash:
+            self._repaint()
+            return
+        elapsed = time.time() - self.t_start
+        m, s = divmod(int(elapsed), 60)
+        print(f"  … still working — {self._counts()}  elapsed {m}m{s:02d}s "
+              f"(live detail in logs/)", flush=True)
 
     def finished(self, res):
         rid = res["rid"]
@@ -783,20 +799,33 @@ def main():
                                 (d, rid, name, pbf, a.skip_base))
                 futs[fut] = rid
                 rep.started(rid)
-            for fut in _cf.as_completed(futs):
-                res = fut.result()
-                rid = res["rid"]
-                info, name, sig = meta[rid]
-                rep.finished(res)
-                if res["ok"]:
-                    # PARENT does all shared-state writes — never the workers.
-                    if rid not in state:
-                        added_ids.append(rid)
-                    _record_result(d, a.base_url, state, rid, name,
-                                   info["parent"], sig, res)
-                    processed.append(rid)
-                else:
-                    failed.append(rid)
+            # Poll for completions with a timeout so we can print a periodic
+            # heartbeat — otherwise a long run looks hung between finishes.
+            HEARTBEAT_SEC = 15
+            pending = set(futs.keys())
+            last_beat = time.time()
+            while pending:
+                done, pending = _cf.wait(
+                    pending, timeout=HEARTBEAT_SEC,
+                    return_when=_cf.FIRST_COMPLETED)
+                for fut in done:
+                    res = fut.result()
+                    rid = res["rid"]
+                    info, name, sig = meta[rid]
+                    rep.finished(res)
+                    if res["ok"]:
+                        # PARENT does all shared-state writes — never the workers.
+                        if rid not in state:
+                            added_ids.append(rid)
+                        _record_result(d, a.base_url, state, rid, name,
+                                       info["parent"], sig, res)
+                        processed.append(rid)
+                    else:
+                        failed.append(rid)
+                # heartbeat if nothing finished this interval (or periodically)
+                if pending and (time.time() - last_beat) >= HEARTBEAT_SEC:
+                    rep.heartbeat()
+                    last_beat = time.time()
         except KeyboardInterrupt:
             interrupted = True
             print("\n\nInterrupted — stopping. Regions already finished are saved "
@@ -867,6 +896,21 @@ def main():
 
     # ----- comprehensive final summary -----
     print(f"\n{'='*70}\nBATCH COMPLETE in {time.time()-t_all:.0f}s\n{'='*70}")
+
+    # Explain the logs/ folder count. Log files accumulate across runs (each run
+    # only rewrites logs for the regions IT processed), so logs/ can legitimately
+    # hold more files than this run processed — the extras are from earlier runs.
+    # Point this out so the count isn't mistaken for a mismatch.
+    logdir = os.path.join(d, "logs")
+    if os.path.isdir(logdir):
+        nlogs = len([f for f in os.listdir(logdir) if f.endswith(".log")])
+        nproc = len(processed) + len(failed)
+        if nlogs != nproc:
+            print(f"note: logs/ holds {nlogs} .log file(s) but this run processed "
+                  f"{nproc} region(s). Log files are kept across runs (one per "
+                  f"region, overwritten only when that region is reprocessed), so "
+                  f"the extra {nlogs - nproc} are from earlier runs — harmless. "
+                  f"Delete logs/ anytime to reset.")
 
     # Changes to the JSON files this run.
     print("JSON changes this run:")

@@ -1,5 +1,23 @@
 # DBM Changelog
 
+## v1.20.67 — explain logs/ file count (was confusing vs regions processed)
+- logs/ can hold MORE .log files than a run processed, because log files persist
+  across runs: each run only (over)writes logs for the regions it actually
+  processes, so regions skipped as up-to-date keep their log from a previous run.
+  This looked like a mismatch (e.g. "49 processed but 51 logs").
+- The run now prints a short note at the end when logs/ holds more files than were
+  processed, explaining the extras are harmless leftovers from earlier runs and
+  that logs/ can be deleted anytime to reset. No behavioural change — just clarity.
+## v1.20.66 — parallel build: periodic heartbeat so it never looks hung
+- After v1.20.65 correctly moved all per-region detail into logs/<region>.log, the
+  console could sit silent for minutes between completions on big regions (Poland,
+  Russia), looking hung. Added a heartbeat: every 15s the parent prints a "still
+  working" line with the done/running/queued/failed counter and elapsed time, so
+  there is always visible progress. Completion (✓) lines still print as each
+  region finishes; live per-region detail remains in logs/.
+- Implemented by polling concurrent.futures.wait(timeout=15) instead of a blocking
+  as_completed, so completions are handled promptly AND the heartbeat fires during
+  quiet stretches. Parent-only; workers stay silent (console stays clean).
 ## v1.20.65 — fix parallel console: subprocess progress no longer leaks
 - In parallel mode the detailed per-region progress (nodes=…/scan done/wrote
   …db.part/VACUUM) was still spilling onto the shared console from many workers
