@@ -17,12 +17,21 @@ plugins {
 // ---------------------------------------------------------------------------
 val dmsVersionEpoch = 1
 val dmsVersionMajor = 20
-val dmsVersionMinor = 82
+val dmsVersionMinor = 83
 val dmsVersionName = "$dmsVersionEpoch.$dmsVersionMajor.$dmsVersionMinor"
 
 android {
     namespace = "com.rfsat.dms"
     compileSdk = 36
+    // Pin the NDK to the version preinstalled on the CI runner (GitHub
+    // ubuntu-latest ships 27.3.13750724 as of 2026). AGP needs a usable NDK to
+    // (a) strip the prebuilt ML .so libraries and (b) extract their native debug
+    // symbols into the bundle for `ndk.debugSymbolLevel = "FULL"`. Without a
+    // pinned/available NDK, AGP silently skips both — shipping unstripped libs
+    // AND omitting the symbol file, which is what triggered Play's "upload debug
+    // symbols" warning. If the runner image drops this version, update it (see
+    // the runner-images Android NDK release notes).
+    ndkVersion = "27.3.13750724"
 
     defaultConfig {
         // Play Store package ID (permanent once published). Kotlin namespace stays

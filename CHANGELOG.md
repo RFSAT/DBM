@@ -1,5 +1,14 @@
 # DBM Changelog
 
+## v1.20.83 — fix Play "upload debug symbols" warning
+- The release bundle now includes native debug symbols, so native crashes/ANRs
+  in the ML .so libraries (TFLite, MediaPipe, ML Kit) show readable function
+  names in the Play Console. Root cause: the build already requested
+  ndk.debugSymbolLevel=FULL, but CI had no usable NDK, so AGP silently skipped
+  symbol extraction (and lib stripping). Pinned ndkVersion=27.3.13750724 (present
+  on the CI runner) so AGP extracts the symbols; also archive the symbol zip as a
+  CI artifact as a manual-upload fallback. Bonus: stripping now runs, so the .so
+  libraries (and the bundle) get smaller too.
 ## v1.20.82 — tighter map list rows
 - Reduced the vertical space between rows in the Offline maps list: smaller
   top padding per row, a slightly smaller info icon, and — the main gain —

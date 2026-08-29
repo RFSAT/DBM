@@ -136,6 +136,16 @@ jobs:
           name: DBM-mapping-release
           path: android/app/build/outputs/mapping/release/mapping.txt
           if-no-files-found: ignore
+      # Native debug symbols — AGP (with ndk.debugSymbolLevel=FULL and a usable
+      # NDK) embeds these in the .aab automatically, so Play reads them from the
+      # bundle. We also archive the standalone symbol zip as a fallback in case
+      # you ever need to upload it to the Play Console manually.
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: DBM-native-debug-symbols
+          path: android/app/build/outputs/native-debug-symbols/release/native-debug-symbols.zip
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v5
         if: always()
         with: { name: lint-report, path: android/app/build/reports/lint-results-*.html }
