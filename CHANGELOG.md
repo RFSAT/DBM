@@ -1,5 +1,34 @@
 # DBM Changelog
 
+## v1.20.74 — map list loads instantly from cache; refreshes in the background
+- The map list no longer requires a manual refresh to appear. index.json is now
+  CACHED to disk after each successful fetch, so on opening the maps section the
+  last-known list shows instantly with no network wait.
+- After showing the cached list, the app refreshes the catalogue in the BACKGROUND.
+  If the server has a newer index.json the list updates silently and a small
+  "Map list updated" toast appears — no prompt, no action needed, not disruptive.
+- Fresh install (no cache yet): a one-time foreground fetch runs with a brief
+  "Loading map list…" indicator. If offline, it says so and the manual refresh can
+  be used to retry.
+- The manual "Check rfsat.com" refresh button is kept as an optional way to force
+  an update. Background refresh failures are silent and never discard the cached
+  list, so the maps stay visible offline.
+## v1.20.74 — maps: own Settings section, aligned info icons, zoom-out fixes
+- "Speed limit maps" is now its own top-level Settings section (was mistakenly
+  nested inside "Following distance").
+- The info (ⓘ) icon now stays in the SAME horizontal position across all row
+  states — not-downloaded, downloaded, and downloading. The trailing action
+  button (Download / Update / … / Delete) is wrapped in a fixed-width box so its
+  varying label width no longer shifts the icon.
+- Fixed the location-preview auto-refocus bug: zooming out on a downloaded map
+  snapped straight back to the bounding box. Cause was keying the view state on
+  the bounds FloatArray, which MapRegion recomputes fresh on every access, so any
+  recomposition reset the zoom. The view state is now keyed on the stable region
+  id, so pan/zoom stick.
+- Smarter double-tap zoom-out target: a SUB-REGION (id "parent__sub") now zooms
+  out to its parent-country area (computed by unioning sibling sub-region bboxes),
+  while a standalone map zooms out to the full Europe extent. Falls back to Europe
+  when sibling bboxes aren't available yet.
 ## v1.20.73 — concurrent map downloads with per-map progress bars
 - Multiple maps can now download at the same time. Starting a download no longer
   disables the other regions' Download buttons — only the one you started shows

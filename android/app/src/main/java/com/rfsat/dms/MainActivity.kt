@@ -90,6 +90,7 @@ import com.rfsat.dms.ui.theme.EnactWarning
 import com.rfsat.dms.util.DLog
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.rememberCoroutineScope
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -1117,6 +1118,9 @@ class MainActivity : ComponentActivity() {
                     "Read lead-vehicle plate on serious hazard (stored locally only)",
                     "capture_plate", default = false)
             }
+            CollapsibleSection("Speed limit maps") {
+                MapManagerSection()
+            }
             CollapsibleSection("Self-calibration") {
                 Text("DBM adapts to the driver and mount during use: eye-closure " +
                     "baseline, straight-ahead head pose, the visual speed scale and " +
@@ -1137,7 +1141,6 @@ class MainActivity : ComponentActivity() {
                 StoppingDistanceSlider()
                 CacheEvictionSlider()
                 MirrorIntervalSliders()
-                MapManagerSection()
                 LaneCalibrationSliders()
                 DriverViewZoomSlider()
             }
@@ -1401,17 +1404,55 @@ class MainActivity : ComponentActivity() {
         val progressMsg by mapImportStatus.collectAsState()
         val indexUrl = "https://www.rfsat.com/products/maps/index.json"
 
+        fun applyCatalog(cat: com.rfsat.dms.maps.MapCatalog) {
+            statuses = repo.statusFor(cat)
+            note = "${statuses.size} regions • updated ${cat.updated}"
+            currentCatalog = cat
+        }
+
+        // Manual refresh (the "Check rfsat.com" button): shows progress, fetches
+        // and caches, and reports if it couldn't reach the server.
         fun refresh() {
             busy = true; note = "Checking rfsat.com…"
             scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                val cat = downloader.fetchCatalog(indexUrl)
+                val cat = downloader.fetchAndCacheCatalog(indexUrl)
                 runOnUiThread {
                     busy = false
                     if (cat == null) note = "Could not reach the map server."
-                    else { statuses = repo.statusFor(cat); note =
-                        "${statuses.size} regions • updated ${cat.updated}"
-                        currentCatalog = cat }
+                    else applyCatalog(cat)
                 }
+            }
+        }
+
+        // On open: show the cached list instantly (no waiting on the network),
+        // then refresh in the BACKGROUND. If the server has a newer catalogue the
+        // list updates silently and a small toast notes it. On a fresh install
+        // with no cache, do a one-time foreground fetch (brief load).
+        LaunchedEffect(Unit) {
+            val cached = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                downloader.loadCachedCatalog()
+            }
+            if (cached != null) {
+                applyCatalog(cached)                     // instant, from cache
+                // silent background refresh
+                val fresh = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    downloader.fetchAndCacheCatalog(indexUrl)
+                }
+                if (fresh != null && fresh.updated != cached.updated) {
+                    applyCatalog(fresh)
+                    android.widget.Toast.makeText(
+                        this@MainActivity, "Map list updated",
+                        android.widget.Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                // fresh install: one-time foreground fetch with a brief indicator
+                busy = true; note = "Loading map list…"
+                val fresh = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    downloader.fetchAndCacheCatalog(indexUrl)
+                }
+                busy = false
+                if (fresh != null) applyCatalog(fresh)
+                else note = "Could not reach the map server. Pull to retry."
             }
         }
 
@@ -1505,7 +1546,9 @@ class MainActivity : ComponentActivity() {
                 text = {
                     Column {
                         // Location preview: the region's bounding box on Europe.
-                        RegionPreview(r.bounds)
+                        // Zoom-out target: parent-country extent for a sub-region,
+                        // or null (full Europe) for a standalone map.
+                        RegionPreview(r.id, r.bounds, parentExtentFor(r.id))
                         Spacer(Modifier.height(10.dp))
                         val row: @Composable (String, String) -> Unit = { k, v ->
                             Row(Modifier.fillMaxWidth().padding(vertical = 1.dp),
@@ -1652,6 +1695,11 @@ class MainActivity : ComponentActivity() {
                         ) {
                             Text("\u24D8", color = EnactGreen, fontSize = 18.sp)
                         }
+                        // Fixed-width action area so the info icon to its left
+                        // keeps the SAME horizontal position across all states
+                        // (Download / Update / … / Delete have different widths).
+                        Box(Modifier.width(96.dp),
+                            contentAlignment = androidx.compose.ui.Alignment.CenterEnd) {
                         when (st.state) {
                             com.rfsat.dms.maps.MapState.NOT_INSTALLED,
                             com.rfsat.dms.maps.MapState.UPDATE_AVAILABLE ->
@@ -1671,6 +1719,7 @@ class MainActivity : ComponentActivity() {
                                     Text("Delete", color = Color(0xFFE57373))
                                 }
                             else -> {}
+                        }
                         }
                     }
                     // Per-region download progress bar — visible for THIS region
@@ -1697,6 +1746,33 @@ class MainActivity : ComponentActivity() {
     }
 
     private var currentCatalog: com.rfsat.dms.maps.MapCatalog? = null
+
+    /**
+     * For a sub-region id like "czech-republic__jihocesky", returns the bounding
+     * box of the whole parent ("czech-republic") by unioning the bboxes of every
+     * sibling sub-region sharing that prefix — so zooming out on a sub-region
+     * settles on the parent-country area. Returns null for a standalone map (no
+     * "__" in the id) or when no sibling bboxes are available, meaning "zoom out
+     * to the full Europe extent". Bounds order matches MapRegion.bounds:
+     * [minLat, minLon, maxLat, maxLon].
+     */
+    private fun parentExtentFor(regionId: String): FloatArray? {
+        if (!regionId.contains("__")) return null      // standalone -> full Europe
+        val parent = regionId.substringBefore("__")
+        val cat = currentCatalog ?: return null
+        var minLat = Float.MAX_VALUE; var minLon = Float.MAX_VALUE
+        var maxLat = -Float.MAX_VALUE; var maxLon = -Float.MAX_VALUE
+        var found = false
+        for (reg in cat.regions) {
+            if (reg.id == parent || reg.id.startsWith("$parent__")) {
+                val b = reg.bounds ?: continue
+                minLat = minOf(minLat, b[0]); minLon = minOf(minLon, b[1])
+                maxLat = maxOf(maxLat, b[2]); maxLon = maxOf(maxLon, b[3])
+                found = true
+            }
+        }
+        return if (found) floatArrayOf(minLat, minLon, maxLat, maxLon) else null
+    }
 
     @Composable
     private fun MirrorIntervalSliders() {
@@ -1912,16 +1988,23 @@ class MainActivity : ComponentActivity() {
      *  a rendered thumbnail; we can't reproduce that offline, so this shows the
      *  bounding box on a plain graticule instead). */
     @Composable
-    private fun RegionPreview(bounds: FloatArray?) {
+    private fun RegionPreview(
+        regionId: String,
+        bounds: FloatArray?,
+        zoomOutBounds: FloatArray?    // parent extent for sub-regions, else null=Europe
+    ) {
         // Full Europe extent (zoom = 1 shows all of this).
         val fullWLon = -25f; val fullELon = 45f; val fullSLat = 34f; val fullNLat = 72f
         val fullLonSpan = fullELon - fullWLon      // 70
         val fullLatSpan = fullNLat - fullSLat      // 38
 
         // Auto-frame: initial scale + center from the region's bbox (with margin),
-        // so a small country fills the view instead of being a speck. Falls back
-        // to whole-Europe when there's no bbox.
-        val (initScale, initCenterLon, initCenterLat) = remember(bounds) {
+        // so a small country fills the view instead of being a speck. Keyed on the
+        // STABLE region id — NOT the bounds array. (bounds is a computed property
+        // that returns a fresh FloatArray each access, so keying remember on it
+        // would re-init scale/center on every recomposition and snap the view back
+        // to the bbox — which is the "auto-refocus on zoom-out" bug.)
+        val (initScale, initCenterLon, initCenterLat) = remember(regionId) {
             if (bounds != null) {
                 val minLat = bounds[0]; val minLon = bounds[1]
                 val maxLat = bounds[2]; val maxLon = bounds[3]
@@ -1938,15 +2021,32 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        var scale by remember(bounds) { mutableStateOf(initScale) }
-        var centerLon by remember(bounds) { mutableStateOf(initCenterLon) }
-        var centerLat by remember(bounds) { mutableStateOf(initCenterLat) }
+        // The zoom-OUT target (double-tap / minimum zoom): for a sub-region this is
+        // the parent-country extent; for a standalone map it's the full Europe view.
+        val (minScale, outCenterLon, outCenterLat) = remember(regionId) {
+            if (zoomOutBounds != null) {
+                val minLat = zoomOutBounds[0]; val minLon = zoomOutBounds[1]
+                val maxLat = zoomOutBounds[2]; val maxLon = zoomOutBounds[3]
+                val cLon = (minLon + maxLon) / 2f
+                val cLat = (minLat + maxLat) / 2f
+                val span = maxOf((maxLon - minLon), 0.5f) * 1.2f
+                val spanY = maxOf((maxLat - minLat), 0.5f) * 1.2f
+                val s = minOf(fullLonSpan / span, fullLatSpan / spanY).coerceIn(1f, 12f)
+                Triple(s, cLon, cLat)
+            } else {
+                Triple(1f, (fullWLon + fullELon) / 2f, (fullSLat + fullNLat) / 2f)
+            }
+        }
+
+        var scale by remember(regionId) { mutableStateOf(initScale) }
+        var centerLon by remember(regionId) { mutableStateOf(initCenterLon) }
+        var centerLat by remember(regionId) { mutableStateOf(initCenterLat) }
 
         Canvas(
             Modifier.fillMaxWidth().height(150.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .background(Color(0xFF0E2233))     // sea
-                .pointerInput(bounds) {
+                .pointerInput(regionId) {
                     detectTransformGestures { _, pan, zoom, _ ->
                         // pinch: multiply scale, clamp
                         val newScale = (scale * zoom).coerceIn(1f, 40f)
@@ -1970,13 +2070,14 @@ class MainActivity : ComponentActivity() {
                         centerLat = newCenterLat
                     }
                 }
-                .pointerInput(bounds) {
-                    // Double-tap resets to the full Europe view (zoom out to 1x,
-                    // centred on the whole continent).
+                .pointerInput(regionId) {
+                    // Double-tap zooms OUT to the sensible default: the parent-
+                    // country area for a sub-region, or the full Europe view for a
+                    // standalone map.
                     detectTapGestures(onDoubleTap = {
-                        scale = 1f
-                        centerLon = (fullWLon + fullELon) / 2f
-                        centerLat = (fullSLat + fullNLat) / 2f
+                        scale = minScale
+                        centerLon = outCenterLon
+                        centerLat = outCenterLat
                     })
                 }
         ) {
@@ -2024,6 +2125,8 @@ class MainActivity : ComponentActivity() {
         }
         Text(
             if (bounds == null) "(location preview needs an updated map file)"
+            else if (zoomOutBounds != null)
+                "pinch to zoom · drag to pan · double-tap for country view"
             else "pinch to zoom · drag to pan · double-tap for full view",
             color = EnactOnSurfaceDim, fontSize = 10.sp,
             modifier = Modifier.padding(top = 2.dp))

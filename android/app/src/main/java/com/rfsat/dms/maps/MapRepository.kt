@@ -178,4 +178,39 @@ class MapDownloader(private val repo: MapRepository) {
             MapCatalog.parse(conn.inputStream.bufferedReader().readText())
         } finally { conn.disconnect() }
     }.onFailure { DLog.e(TAG, "fetch catalog failed", it) }.getOrNull()
+
+    /** Local cache file for the catalog JSON (kept beside the maps). */
+    private fun cacheFile(): File = File(repo.mapsDir(), "index.cache.json")
+
+    /**
+     * Fetch the catalog and, on success, cache the raw JSON to disk so the list
+     * can be shown instantly next time without a network round-trip. Returns the
+     * parsed catalog (or null on any network/parse failure — the cache is left
+     * untouched so we never lose a good copy).
+     */
+    fun fetchAndCacheCatalog(indexUrl: String): MapCatalog? = runCatching {
+        val conn = (URL(indexUrl).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 15000; readTimeout = 15000
+        }
+        val raw = try {
+            if (conn.responseCode != 200) return null
+            conn.inputStream.bufferedReader().readText()
+        } finally { conn.disconnect() }
+        val cat = MapCatalog.parse(raw)           // parse first; only cache if valid
+        runCatching {
+            val f = cacheFile()
+            val tmp = File(f.parentFile, f.name + ".part")
+            tmp.writeText(raw)
+            if (f.exists()) f.delete()
+            tmp.renameTo(f)                        // atomic-ish replace
+        }.onFailure { DLog.e(TAG, "cache write failed", it) }
+        cat
+    }.onFailure { DLog.e(TAG, "fetch+cache catalog failed", it) }.getOrNull()
+
+    /** Load the last cached catalog from disk, or null if none/parse fails. */
+    fun loadCachedCatalog(): MapCatalog? = runCatching {
+        val f = cacheFile()
+        if (!f.exists()) return null
+        MapCatalog.parse(f.readText())
+    }.onFailure { DLog.e(TAG, "cache read failed", it) }.getOrNull()
 }
