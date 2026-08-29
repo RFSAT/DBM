@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -1736,10 +1737,14 @@ class MainActivity : ComponentActivity() {
                     // with sub-regions it downloads ALL of them.
                     Box(Modifier.width(76.dp),
                         contentAlignment = androidx.compose.ui.Alignment.CenterEnd) {
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        androidx.compose.material3.LocalMinimumInteractiveComponentSize
+                            provides androidx.compose.ui.unit.Dp.Unspecified) {
                     androidx.compose.material3.TextButton(
                         enabled = !anyDownloadingHere,
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(
                             horizontal = 8.dp, vertical = 0.dp),
+                        modifier = Modifier.heightIn(min = 32.dp),
                         onClick = {
                             val sa = standalone
                             if (sa != null) pending = sa.region
@@ -1748,6 +1753,7 @@ class MainActivity : ComponentActivity() {
                         Text(if (anyDownloadingHere) "…"
                              else if (standalone != null) "Get" else "Get all",
                             fontSize = 12.sp)
+                    }
                     }
                     }
                 }
@@ -1773,7 +1779,7 @@ class MainActivity : ComponentActivity() {
                     val nameColor = if (installed) EnactOnSurfaceDim else EnactOnSurface
                     // Each region is a Column so a per-region progress bar can sit
                     // under its row while it downloads — many can download at once.
-                    Column(Modifier.fillMaxWidth().padding(top = 6.dp, start = 10.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(top = 2.dp, start = 10.dp)) {
                     Row(Modifier.fillMaxWidth(),
                         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
@@ -1796,13 +1802,13 @@ class MainActivity : ComponentActivity() {
                         Box(
                             Modifier
                                 .padding(end = 6.dp)
-                                .size(28.dp)
+                                .size(24.dp)
                                 .clip(androidx.compose.foundation.shape.CircleShape)
                                 .background(EnactGreen.copy(alpha = 0.18f))
                                 .clickable { info = r },
                             contentAlignment = androidx.compose.ui.Alignment.Center
                         ) {
-                            Text("\u24D8", color = EnactGreen, fontSize = 18.sp)
+                            Text("\u24D8", color = EnactGreen, fontSize = 16.sp)
                         }
                         // Fixed-width action area so the info icon to its left
                         // keeps the SAME horizontal position across all states
@@ -1811,6 +1817,9 @@ class MainActivity : ComponentActivity() {
                         // in a column down the list and the info icon stays put.
                         Box(Modifier.width(76.dp),
                             contentAlignment = androidx.compose.ui.Alignment.CenterEnd) {
+                        androidx.compose.runtime.CompositionLocalProvider(
+                            androidx.compose.material3.LocalMinimumInteractiveComponentSize
+                                provides androidx.compose.ui.unit.Dp.Unspecified) {
                         val tightPad = androidx.compose.foundation.layout.PaddingValues(
                             horizontal = 8.dp, vertical = 0.dp)
                         when (st.state) {
@@ -1822,6 +1831,7 @@ class MainActivity : ComponentActivity() {
                                     // so multiple downloads run concurrently.
                                     enabled = !isDownloadingThis,
                                     contentPadding = tightPad,
+                                    modifier = Modifier.heightIn(min = 32.dp),
                                     onClick = { pending = r }) {
                                     Text(if (isDownloadingThis) "…"
                                         else if (st.state == com.rfsat.dms.maps.MapState.UPDATE_AVAILABLE)
@@ -1830,11 +1840,13 @@ class MainActivity : ComponentActivity() {
                             com.rfsat.dms.maps.MapState.INSTALLED ->
                                 androidx.compose.material3.TextButton(
                                     contentPadding = tightPad,
+                                    modifier = Modifier.heightIn(min = 32.dp),
                                     onClick = { toDelete = r }) {
                                     Text("Delete", color = Color(0xFFE57373),
                                         fontSize = 12.sp)
                                 }
                             else -> {}
+                        }
                         }
                         }
                     }

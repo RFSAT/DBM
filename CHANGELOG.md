@@ -1,5 +1,12 @@
 # DBM Changelog
 
+## v1.20.82 — tighter map list rows
+- Reduced the vertical space between rows in the Offline maps list: smaller
+  top padding per row, a slightly smaller info icon, and — the main gain —
+  removed the 48dp minimum-interactive-size floor Material imposes on the
+  Get/Update/Delete/Get all buttons (via LocalMinimumInteractiveComponentSize),
+  so rows are only as tall as their content needs. The buttons remain easily
+  tappable.
 ## v1.20.81 — dissolved sub-region borders + higher-res Europe coastline
 - Grouped sub-region borders (UK England/Scotland/Wales, French old-regions, Italian
   macro-regions) are now DISSOLVED into a single outline instead of many overlapping
