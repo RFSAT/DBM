@@ -1388,6 +1388,7 @@ class MainActivity : ComponentActivity() {
         var busy by remember { mutableStateOf(false) }
         var pending by remember {
             mutableStateOf<com.rfsat.dms.maps.MapRegion?>(null) }
+        var pendingCountry by remember { mutableStateOf<String?>(null) }
         var toDelete by remember {
             mutableStateOf<com.rfsat.dms.maps.MapRegion?>(null) }
         var info by remember {
@@ -1403,6 +1404,9 @@ class MainActivity : ComponentActivity() {
         val downloadMsgs = remember { androidx.compose.runtime.mutableStateMapOf<String, String>() }
         val progressMsg by mapImportStatus.collectAsState()
         val indexUrl = "https://www.rfsat.com/products/maps/index.json"
+        val bordersUrl = "https://www.rfsat.com/products/maps/borders.json"
+        var borders by remember {
+            mutableStateOf<com.rfsat.dms.maps.RegionBorders?>(null) }
 
         fun applyCatalog(cat: com.rfsat.dms.maps.MapCatalog) {
             statuses = repo.statusFor(cat)
@@ -1454,6 +1458,16 @@ class MainActivity : ComponentActivity() {
                 if (fresh != null) applyCatalog(fresh)
                 else note = "Could not reach the map server. Pull to retry."
             }
+            // Region borders (borders.json): show cached instantly, then refresh
+            // silently in the background. Purely for the location preview, so a
+            // failure is invisible — regions without a border use their bbox.
+            borders = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                downloader.loadCachedBorders()
+            }
+            val freshBorders = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                downloader.fetchAndCacheBorders(bordersUrl)
+            }
+            if (freshBorders != null) borders = freshBorders
         }
 
         fun startDownload(r: com.rfsat.dms.maps.MapRegion) {
@@ -1501,6 +1515,18 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // Download every not-yet-installed region for a country (all sub-regions,
+        // and/or the whole-country file if the catalogue has one). Each starts its
+        // own concurrent download via startDownload, so they progress in parallel
+        // with individual progress bars.
+        fun startDownloadCountry(country: String) {
+            statuses.filter {
+                it.region.country == country &&
+                it.state != com.rfsat.dms.maps.MapState.INSTALLED &&
+                it.state != com.rfsat.dms.maps.MapState.UNSUPPORTED_SCHEMA
+            }.forEach { startDownload(it.region) }
+        }
+
         // confirmation dialog for a (possibly large) download / update
         pending?.let { r ->
             androidx.compose.material3.AlertDialog(
@@ -1516,6 +1542,32 @@ class MainActivity : ComponentActivity() {
                 dismissButton = {
                     androidx.compose.material3.TextButton(onClick = {
                         pending = null }) { Text("Cancel") }
+                })
+        }
+
+        // confirmation for downloading a whole country (all its sub-regions)
+        pendingCountry?.let { country ->
+            val group = statuses.filter {
+                it.region.country == country &&
+                it.state != com.rfsat.dms.maps.MapState.INSTALLED &&
+                it.state != com.rfsat.dms.maps.MapState.UNSUPPORTED_SCHEMA }
+            val n = group.size
+            val mb = group.sumOf { it.region.sizeBytes } / 1e6
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { pendingCountry = null },
+                title = { Text("Download all of $country?") },
+                text = { Text("$n map${if (n == 1) "" else "s"}, about %.0f MB total. "
+                    .format(mb) +
+                    "They download together, each with its own progress bar. " +
+                    "Use Wi-Fi to avoid mobile data charges.") },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        startDownloadCountry(country); pendingCountry = null }) {
+                        Text("Download all") }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        pendingCountry = null }) { Text("Cancel") }
                 })
         }
 
@@ -1548,7 +1600,7 @@ class MainActivity : ComponentActivity() {
                         // Location preview: the region's bounding box on Europe.
                         // Zoom-out target: parent-country extent for a sub-region,
                         // or null (full Europe) for a standalone map.
-                        RegionPreview(r.id, r.bounds, parentExtentFor(r.id))
+                        RegionPreview(r.id, r.bounds, borders?.border(r.id))
                         Spacer(Modifier.height(10.dp))
                         val row: @Composable (String, String) -> Unit = { k, v ->
                             Row(Modifier.fillMaxWidth().padding(vertical = 1.dp),
@@ -1628,25 +1680,67 @@ class MainActivity : ComponentActivity() {
                 val installedCount = regionStatuses.count {
                     it.state == com.rfsat.dms.maps.MapState.INSTALLED ||
                     it.state == com.rfsat.dms.maps.MapState.UPDATE_AVAILABLE }
+                // A country "has sub-regions" when its entries use the id__sub form.
+                // Standalone countries (e.g. Greece) have a single entry whose id
+                // has no "__": tapping the header opens its info window directly
+                // instead of expanding a (non-existent) sub-list.
+                val hasSubRegions = regionStatuses.any { it.region.id.contains("__") }
+                val standalone = if (!hasSubRegions) regionStatuses.firstOrNull() else null
                 val expanded = expandedCountries.contains(country)
+                // total download size across the whole country (all sub-regions,
+                // or the single whole-country file), and whether any is downloading.
+                val totalBytes = regionStatuses.sumOf { it.region.sizeBytes }
+                val anyDownloadingHere = regionStatuses.any {
+                    downloadFracs.containsKey(it.region.id) }
                 Row(Modifier.fillMaxWidth()
                         .clickable {
-                            expandedCountries = if (expanded)
-                                expandedCountries - country else expandedCountries + country
+                            val sa = standalone
+                            if (sa != null) {
+                                info = sa.region                // open info directly
+                            } else {
+                                expandedCountries = if (expanded)
+                                    expandedCountries - country
+                                else expandedCountries + country
+                            }
                         }
                         .padding(top = 10.dp, bottom = 2.dp),
                     verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    Text(if (expanded) "▾ $country" else "▸ $country",
-                        color = EnactLime, fontSize = 12.sp,
-                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
-                        modifier = Modifier.weight(1f))
-                    // Clear marker: how many of this country's regions are on the
-                    // phone (green check), or nothing if none are.
-                    if (installedCount > 0)
-                        Text("\u2713 $installedCount downloaded",
-                            color = EnactGreen, fontSize = 10.sp)
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            when {
+                                standalone != null -> country
+                                expanded -> "\u25BE $country  (regions)"
+                                else -> "\u25B8 $country  (regions)"
+                            },
+                            color = EnactLime, fontSize = 12.sp,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+                        // size + downloaded marker
+                        val sizeTxt = if (totalBytes > 0)
+                            "%.0f MB".format(totalBytes / 1e6) else ""
+                        val marker = if (installedCount > 0)
+                            "  \u2713 $installedCount downloaded" else ""
+                        if (sizeTxt.isNotEmpty() || marker.isNotEmpty())
+                            Text(sizeTxt + marker, color = EnactOnSurfaceDim,
+                                fontSize = 10.sp)
+                    }
+                    // Country-level download control. For a standalone country it
+                    // downloads that one map; for a country with sub-regions it
+                    // downloads ALL of them (and the whole-country file if present).
+                    androidx.compose.material3.TextButton(
+                        enabled = !anyDownloadingHere,
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                            horizontal = 10.dp, vertical = 0.dp),
+                        onClick = {
+                            val sa = standalone
+                            if (sa != null) pending = sa.region
+                            else pendingCountry = country
+                        }) {
+                        Text(if (anyDownloadingHere) "…"
+                             else if (standalone != null) "Get" else "Get all",
+                            fontSize = 12.sp)
+                    }
                 }
-                if (!expanded) continue
+                if (standalone != null || !expanded) continue
                 for (st in regionStatuses) {
                     val r = st.region
                     val installed = st.state == com.rfsat.dms.maps.MapState.INSTALLED
@@ -1698,8 +1792,12 @@ class MainActivity : ComponentActivity() {
                         // Fixed-width action area so the info icon to its left
                         // keeps the SAME horizontal position across all states
                         // (Download / Update / … / Delete have different widths).
-                        Box(Modifier.width(96.dp),
+                        // Narrow fixed-width action area so rows stay compact and
+                        // the info icon keeps the same position across states.
+                        Box(Modifier.width(64.dp),
                             contentAlignment = androidx.compose.ui.Alignment.CenterEnd) {
+                        val tightPad = androidx.compose.foundation.layout.PaddingValues(
+                            horizontal = 8.dp, vertical = 0.dp)
                         when (st.state) {
                             com.rfsat.dms.maps.MapState.NOT_INSTALLED,
                             com.rfsat.dms.maps.MapState.UPDATE_AVAILABLE ->
@@ -1708,15 +1806,18 @@ class MainActivity : ComponentActivity() {
                                     // downloads; other regions can still be started,
                                     // so multiple downloads run concurrently.
                                     enabled = !isDownloadingThis,
+                                    contentPadding = tightPad,
                                     onClick = { pending = r }) {
                                     Text(if (isDownloadingThis) "…"
                                         else if (st.state == com.rfsat.dms.maps.MapState.UPDATE_AVAILABLE)
-                                            "Update" else "Download")
+                                            "Upd" else "Get", fontSize = 12.sp)
                                 }
                             com.rfsat.dms.maps.MapState.INSTALLED ->
                                 androidx.compose.material3.TextButton(
+                                    contentPadding = tightPad,
                                     onClick = { toDelete = r }) {
-                                    Text("Delete", color = Color(0xFFE57373))
+                                    Text("Del", color = Color(0xFFE57373),
+                                        fontSize = 12.sp)
                                 }
                             else -> {}
                         }
@@ -1756,24 +1857,6 @@ class MainActivity : ComponentActivity() {
      * to the full Europe extent". Bounds order matches MapRegion.bounds:
      * [minLat, minLon, maxLat, maxLon].
      */
-    private fun parentExtentFor(regionId: String): FloatArray? {
-        if (!regionId.contains("__")) return null      // standalone -> full Europe
-        val parent = regionId.substringBefore("__")
-        val cat = currentCatalog ?: return null
-        var minLat = Float.MAX_VALUE; var minLon = Float.MAX_VALUE
-        var maxLat = -Float.MAX_VALUE; var maxLon = -Float.MAX_VALUE
-        var found = false
-        for (reg in cat.regions) {
-            if (reg.id == parent || reg.id.startsWith("${parent}__")) {
-                val b = reg.bounds ?: continue
-                minLat = minOf(minLat, b[0]); minLon = minOf(minLon, b[1])
-                maxLat = maxOf(maxLat, b[2]); maxLon = maxOf(maxLon, b[3])
-                found = true
-            }
-        }
-        return if (found) floatArrayOf(minLat, minLon, maxLat, maxLon) else null
-    }
-
     @Composable
     private fun MirrorIntervalSliders() {
         val prefs = remember { getSharedPreferences("dbm", MODE_PRIVATE) }
@@ -1991,7 +2074,7 @@ class MainActivity : ComponentActivity() {
     private fun RegionPreview(
         regionId: String,
         bounds: FloatArray?,
-        zoomOutBounds: FloatArray?    // parent extent for sub-regions, else null=Europe
+        border: List<List<Pair<Float, Float>>>?   // region border rings, or null=use bbox
     ) {
         // Full Europe extent (zoom = 1 shows all of this).
         val fullWLon = -25f; val fullELon = 45f; val fullSLat = 34f; val fullNLat = 72f
@@ -2021,22 +2104,12 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // The zoom-OUT target (double-tap / minimum zoom): for a sub-region this is
-        // the parent-country extent; for a standalone map it's the full Europe view.
-        val (minScale, outCenterLon, outCenterLat) = remember(regionId) {
-            if (zoomOutBounds != null) {
-                val minLat = zoomOutBounds[0]; val minLon = zoomOutBounds[1]
-                val maxLat = zoomOutBounds[2]; val maxLon = zoomOutBounds[3]
-                val cLon = (minLon + maxLon) / 2f
-                val cLat = (minLat + maxLat) / 2f
-                val span = maxOf((maxLon - minLon), 0.5f) * 1.2f
-                val spanY = maxOf((maxLat - minLat), 0.5f) * 1.2f
-                val s = minOf(fullLonSpan / span, fullLatSpan / spanY).coerceIn(1f, 12f)
-                Triple(s, cLon, cLat)
-            } else {
-                Triple(1f, (fullWLon + fullELon) / 2f, (fullSLat + fullNLat) / 2f)
-            }
-        }
+        // Zoom-OUT target (double-tap / minimum zoom) is ALWAYS the full Europe
+        // view, for every region and sub-region — so you can always pull back to
+        // see where it sits in Europe.
+        val minScale = 1f
+        val outCenterLon = (fullWLon + fullELon) / 2f
+        val outCenterLat = (fullSLat + fullNLat) / 2f
 
         var scale by remember(regionId) { mutableStateOf(initScale) }
         var centerLon by remember(regionId) { mutableStateOf(initCenterLon) }
@@ -2113,8 +2186,19 @@ class MainActivity : ComponentActivity() {
             while (g <= eLon) { drawLine(grid, Offset(xOf(g), 0f), Offset(xOf(g), h), 1f); g += 10f }
             var gl = kotlin.math.ceil(sLat / 10f) * 10f
             while (gl <= nLat) { drawLine(grid, Offset(0f, yOf(gl)), Offset(w, yOf(gl)), 1f); gl += 10f }
-            // --- region bbox ---------------------------------------------------
-            if (bounds != null) {
+            // --- region highlight: border polygon if we have one, else bbox ---
+            if (border != null && border.isNotEmpty()) {
+                for (ring in border) {
+                    if (ring.size < 3) continue
+                    val bp = androidx.compose.ui.graphics.Path()
+                    bp.moveTo(xOf(ring[0].first), yOf(ring[0].second))
+                    for (i in 1 until ring.size)
+                        bp.lineTo(xOf(ring[i].first), yOf(ring[i].second))
+                    bp.close()
+                    drawPath(bp, EnactGreen.copy(alpha = 0.30f))
+                    drawPath(bp, EnactGreen, style = Stroke(width = 2.5f))
+                }
+            } else if (bounds != null) {
                 val minLat = bounds[0]; val minLon = bounds[1]
                 val maxLat = bounds[2]; val maxLon = bounds[3]
                 val l = xOf(minLon).coerceIn(0f, w); val rt = xOf(maxLon).coerceIn(0f, w)
@@ -2127,9 +2211,8 @@ class MainActivity : ComponentActivity() {
             }
         }
         Text(
-            if (bounds == null) "(location preview needs an updated map file)"
-            else if (zoomOutBounds != null)
-                "pinch to zoom · drag to pan · double-tap for country view"
+            if (bounds == null && border == null)
+                "(location preview needs an updated map file)"
             else "pinch to zoom · drag to pan · double-tap for full view",
             color = EnactOnSurfaceDim, fontSize = 10.sp,
             modifier = Modifier.padding(top = 2.dp))

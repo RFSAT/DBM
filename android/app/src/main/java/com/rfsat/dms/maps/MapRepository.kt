@@ -213,4 +213,70 @@ class MapDownloader(private val repo: MapRepository) {
         if (!f.exists()) return null
         MapCatalog.parse(f.readText())
     }.onFailure { DLog.e(TAG, "cache read failed", it) }.getOrNull()
+
+    // ---- region border polygons (borders.json, served like index.json) ------
+    private fun bordersCacheFile(): File = File(repo.mapsDir(), "borders.cache.json")
+
+    /** Fetch borders.json and cache it; returns parsed borders or null. */
+    fun fetchAndCacheBorders(bordersUrl: String): RegionBorders? = runCatching {
+        val conn = (URL(bordersUrl).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 15000; readTimeout = 15000
+        }
+        val raw = try {
+            if (conn.responseCode != 200) return null
+            conn.inputStream.bufferedReader().readText()
+        } finally { conn.disconnect() }
+        val parsed = RegionBorders.parse(raw)     // validate before caching
+        runCatching {
+            val f = bordersCacheFile()
+            val tmp = File(f.parentFile, f.name + ".part")
+            tmp.writeText(raw)
+            if (f.exists()) f.delete()
+            tmp.renameTo(f)
+        }.onFailure { DLog.e(TAG, "borders cache write failed", it) }
+        parsed
+    }.onFailure { DLog.e(TAG, "fetch+cache borders failed", it) }.getOrNull()
+
+    /** Load cached borders from disk, or null if none/parse fails. */
+    fun loadCachedBorders(): RegionBorders? = runCatching {
+        val f = bordersCacheFile()
+        if (!f.exists()) return null
+        RegionBorders.parse(f.readText())
+    }.onFailure { DLog.e(TAG, "borders cache read failed", it) }.getOrNull()
+}
+
+/**
+ * Simplified border polygons per region id, loaded from borders.json
+ * (served on rfsat.com beside index.json). Format:
+ *   { "regionId": [ [ [lon,lat], [lon,lat], ... ] (ring), ...more rings ], ... }
+ * A region may have several rings (islands / multi-part). Regions absent here
+ * simply have no border and the UI falls back to their bbox.
+ */
+class RegionBorders(private val map: Map<String, List<List<Pair<Float, Float>>>>) {
+    fun border(id: String): List<List<Pair<Float, Float>>>? = map[id]
+    val size: Int get() = map.size
+
+    companion object {
+        fun parse(json: String): RegionBorders {
+            val o = org.json.JSONObject(json)
+            val out = HashMap<String, List<List<Pair<Float, Float>>>>()
+            val ids = o.keys()
+            while (ids.hasNext()) {
+                val id = ids.next()
+                val ringsJson = o.getJSONArray(id)
+                val rings = ArrayList<List<Pair<Float, Float>>>(ringsJson.length())
+                for (i in 0 until ringsJson.length()) {
+                    val ringJson = ringsJson.getJSONArray(i)
+                    val ring = ArrayList<Pair<Float, Float>>(ringJson.length())
+                    for (j in 0 until ringJson.length()) {
+                        val pt = ringJson.getJSONArray(j)   // [lon, lat]
+                        ring.add(pt.getDouble(0).toFloat() to pt.getDouble(1).toFloat())
+                    }
+                    if (ring.size >= 3) rings.add(ring)
+                }
+                if (rings.isNotEmpty()) out[id] = rings
+            }
+            return RegionBorders(out)
+        }
+    }
 }
