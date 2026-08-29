@@ -1,5 +1,23 @@
 # DBM Changelog
 
+## v1.20.84 — Navigation (skeleton) + tab bar polish
+- New "Navigation" top-bar tab (added at the end so all existing tab indices,
+  incl. the OBD special-casing, are untouched). Self-contained in a new
+  com.rfsat.dms.nav package; the only integration points are one tabs entry and
+  one dispatch line, so it barely touches existing code.
+- Navigation is designed as a BASE VIEW plus freely-combinable OVERLAYS:
+  bases = 2D map / 2D perspective / 3D map / camera-AR / arrow-text; overlays =
+  turn arrow, speed & limit, lane guidance, junction view, ribbon HUD, voice,
+  haptic; plus a windshield-mirror display transform and day/night/auto theme.
+  This v1 ships the full selection UI, the state model, the online/offline
+  provider abstraction (NavProvider), the routing/guidance engine, and a working
+  arrow/text renderer driven by a demo route — with NO map SDK dependency yet.
+  Map bases and camera-AR show labelled placeholders until MapLibre (v2) and the
+  camera integration (v4) land; the online provider will be MapLibre + OSM
+  routing, and an offline provider (using downloaded maps) plugs into the same
+  interface later with no UI changes. See docs/NAVIGATION-DESIGN.md.
+- Tab bar: items are now shaded rounded pills (selected = accent-tinted) so
+  they're clearly distinguishable, and spacing between them was reduced.
 ## v1.20.83 — fix Play "upload debug symbols" warning
 - The release bundle now includes native debug symbols, so native crashes/ANRs
   in the ML .so libraries (TFLite, MediaPipe, ML Kit) show readable function

@@ -264,7 +264,7 @@ class MainActivity : ComponentActivity() {
 
     // ------------------------------------------------------------------ UI
 
-    private val tabs = listOf("About", "Detector", "Summary", "History", "OBD", "Log", "Settings")
+    private val tabs = listOf("About", "Detector", "Summary", "History", "OBD", "Log", "Settings", "Navigation")
 
     @Composable
     private fun Root() {
@@ -287,7 +287,7 @@ class MainActivity : ComponentActivity() {
                 selectedTabIndex = tab,
                 containerColor = EnactDarkMid,
                 contentColor = EnactGreen,
-                edgePadding = 8.dp,
+                edgePadding = 4.dp,
                 indicator = { pos ->
                     // When the OBD tab is hidden, the rendered position list is
                     // shorter than the tab index space; map the selected logical
@@ -303,10 +303,26 @@ class MainActivity : ComponentActivity() {
                 tabs.forEachIndexed { i, name ->
                     // Skip the OBD tab (index 4) when OBD is disabled.
                     if (i == 4 && !obdOn) return@forEachIndexed
-                    Tab(selected = tab == i, onClick = { tab = i },
+                    val sel = tab == i
+                    Tab(selected = sel, onClick = { tab = i },
                         selectedContentColor = EnactGreen,
                         unselectedContentColor = EnactOnSurfaceDim,
-                        text = { Text(name, fontSize = 13.sp) })
+                        text = {
+                            // Each tab sits in its own shaded, rounded pill so
+                            // items are clearly distinguishable and can sit closer
+                            // together. The selected pill is tinted with the accent.
+                            Box(Modifier
+                                    .padding(horizontal = 2.dp, vertical = 4.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (sel) EnactGreen.copy(alpha = 0.20f)
+                                                else EnactSurface)
+                                    .padding(horizontal = 10.dp, vertical = 5.dp)) {
+                                Text(name, fontSize = 13.sp,
+                                    color = if (sel) EnactGreen else EnactOnSurfaceDim,
+                                    fontWeight = if (sel) FontWeight.Bold
+                                                 else FontWeight.Normal)
+                            }
+                        })
                 }
                 // Exit: an action, not a screen. Never "selected"; tapping it
                 // fully shuts the app down (stops the foreground service and
@@ -315,8 +331,16 @@ class MainActivity : ComponentActivity() {
                 Tab(selected = false, onClick = { exitApp() },
                     selectedContentColor = EnactWarning,
                     unselectedContentColor = EnactWarning,
-                    text = { Text("Exit", fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold) })
+                    text = {
+                        Box(Modifier
+                                .padding(horizontal = 2.dp, vertical = 4.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(EnactWarning.copy(alpha = 0.16f))
+                                .padding(horizontal = 10.dp, vertical = 5.dp)) {
+                            Text("Exit", fontSize = 13.sp, color = EnactWarning,
+                                fontWeight = FontWeight.Bold)
+                        }
+                    })
             }
             when (tab) {
                 0 -> AboutScreen()
@@ -331,6 +355,7 @@ class MainActivity : ComponentActivity() {
                 4 -> ObdScreen()
                 5 -> LogScreen()
                 6 -> SettingsScreen()
+                7 -> com.rfsat.dms.nav.NavScreen()
             }
             // Auto-dim only while on the Detector tab and actively monitoring.
             val monitoring by (service?.analysing
