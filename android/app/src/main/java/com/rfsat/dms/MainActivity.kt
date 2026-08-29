@@ -2048,8 +2048,11 @@ class MainActivity : ComponentActivity() {
                 .background(Color(0xFF0E2233))     // sea
                 .pointerInput(regionId) {
                     detectTransformGestures { _, pan, zoom, _ ->
-                        // pinch: multiply scale, clamp
-                        val newScale = (scale * zoom).coerceIn(1f, 40f)
+                        // pinch: multiply scale, clamp. Lower bound is minScale so
+                        // zooming OUT stops at the sensible default — the parent-
+                        // country area for a sub-region, or full Europe (minScale=1)
+                        // for a standalone map — rather than always going to Europe.
+                        val newScale = (scale * zoom).coerceIn(minScale, 40f)
                         // visible spans at the new scale
                         val lonSpan = fullLonSpan / newScale
                         val latSpan = fullLatSpan / newScale

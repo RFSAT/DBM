@@ -1,5 +1,20 @@
 # DBM Changelog
 
+## v1.20.75 — map manager: section move, icon alignment, smarter zoom
+- "Speed limit maps" is now its own top-level Settings section instead of being
+  nested inside "Following distance", so it's easy to find.
+- The info (ⓘ) icon now stays in the SAME horizontal position across all region
+  states (not downloaded / downloaded / downloading). The trailing action button
+  (Download/Update/…/Delete) sits in a fixed-width box, so its varying label width
+  no longer shifts the icon.
+- Fixed the location preview auto-refocusing on the bounding box when you tried to
+  zoom out on a downloaded map. The zoom/pan state is now keyed on the stable
+  region id rather than the bounds array (a computed property that returned a new
+  instance each recomposition, which reset the view every time the row refreshed).
+- Smarter zoom-out target: for a SUB-REGION the map zooms out only to its parent
+  country's area (union of that country's sub-region extents); for a standalone
+  map it zooms out to the full Europe extent. Enforced on both pinch and
+  double-tap, so you can't overshoot past the parent area for a sub-region.
 ## v1.20.74 — map list loads instantly from cache; refreshes in the background
 - The map list no longer requires a manual refresh to appear. index.json is now
   CACHED to disk after each successful fetch, so on opening the maps section the
