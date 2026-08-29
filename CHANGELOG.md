@@ -1,5 +1,19 @@
 # DBM Changelog
 
+## v1.20.78 — sub-region parent context, clearer Delete, aligned rows
+- The location preview now draws the PARENT COUNTRY outline (dim, behind) for a
+  sub-region, so when zoomed out you can see where the sub-region sits within its
+  country. borders.json now includes a border for every parent country (e.g.
+  "germany") even when the catalogue only lists its sub-regions.
+- Border coverage greatly improved (build_borders.py): France old-regions now map
+  to their départements, UK England/Scotland/Wales are built by unioning their
+  councils (NE 'geonunit'), and several country name mismatches fixed. Coverage is
+  now 153/155 catalogue regions (only Azores and Monaco fall back to bbox) plus
+  all parent-country borders.
+- Renamed the map delete button "Del" -> "Delete" for clarity.
+- Map size is now shown on the same line as the (sub-)region name, right-aligned,
+  and the Get / Get all / Delete buttons are placed in a fixed-width column so they
+  line up vertically down the list.
 ## v1.20.77 — country borders in preview, region list overhaul
 - The location preview now draws the region's actual (simplified) BORDER instead
   of a bounding box, for both countries and sub-regions, making the location far
