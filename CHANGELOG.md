@@ -1,5 +1,17 @@
 # DBM Changelog
 
+## v1.20.73 — concurrent map downloads with per-map progress bars
+- Multiple maps can now download at the same time. Starting a download no longer
+  disables the other regions' Download buttons — only the one you started shows
+  "…"; the rest stay available, so you can queue up several large maps at once.
+- Each downloading region shows its OWN progress bar and byte counter (e.g.
+  "142 / 380 MB") right in its row, plus an indeterminate bar while connecting or
+  verifying. Essential for large-country maps where a single shared bar couldn't
+  show which map was where.
+- Backend was already concurrency-safe (each download uses its own
+  <file>.part path, connection and hash), so this is a UI/state change:
+  per-region progress is tracked in snapshot state maps keyed by region id rather
+  than a single shared value.
 ## v1.20.72 — region info: Europe map background + clearer info button
 - Region location preview now draws the EUROPE LANDMASS behind the bounding box,
   so a region's rectangle is shown in real geographic context instead of on a bare
