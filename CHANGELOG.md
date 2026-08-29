@@ -1,5 +1,16 @@
 # DBM Changelog
 
+## v1.20.81 — dissolved sub-region borders + higher-res Europe coastline
+- Grouped sub-region borders (UK England/Scotland/Wales, French old-regions, Italian
+  macro-regions) are now DISSOLVED into a single outline instead of many overlapping
+  sub-polygons: build_borders.py merges the member pieces (via shapely) and keeps
+  only the outer boundary. E.g. England went from 152 council polygons to one clean
+  outline. Genuinely multi-part areas (Scotland's isles, Italy's "isole") correctly
+  keep several rings. Requires shapely when generating (pip install shapely); without
+  it the tool falls back to separate rings and says so.
+- The Europe coastline behind the location preview is now higher resolution (~1500
+  points from Natural Earth 50m, up from ~350 at 110m), so region borders line up
+  with the continent outline much more closely.
 ## v1.20.80 — clearer separation between settings sections
 - Settings sections are now easier to tell apart when several are expanded at
   once: each section header has a divider line above it and sits in a subtly
