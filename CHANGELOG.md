@@ -1,5 +1,14 @@
 # DBM Changelog
 
+## v1.20.80 — clearer separation between settings sections
+- Settings sections are now easier to tell apart when several are expanded at
+  once: each section header has a divider line above it and sits in a subtly
+  tinted band, giving every section a clear top boundary so its content no longer
+  blends into the next header.
+## v1.20.79 — rename map settings section to "Offline maps"
+- Renamed the settings section "Speed limit maps" to "Offline maps". The maps
+  carry speed limits, speed cameras and parking areas (and may gain more data in
+  future), so a generic name fits better than one tied to a single feature.
 ## v1.20.78 — sub-region parent context, clearer Delete, aligned rows
 - The location preview now draws the PARENT COUNTRY outline (dim, behind) for a
   sub-region, so when zoomed out you can see where the sub-region sits within its

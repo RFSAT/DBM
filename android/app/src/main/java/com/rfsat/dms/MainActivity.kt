@@ -86,6 +86,7 @@ import com.rfsat.dms.ui.theme.EnactLime
 import com.rfsat.dms.ui.theme.EnactOnSurface
 import com.rfsat.dms.ui.theme.EnactOnSurfaceDim
 import com.rfsat.dms.ui.theme.EnactSurface
+import com.rfsat.dms.ui.theme.EnactSurfaceVar
 import com.rfsat.dms.ui.theme.EnactWarning
 import com.rfsat.dms.util.DLog
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -1118,7 +1119,7 @@ class MainActivity : ComponentActivity() {
                     "Read lead-vehicle plate on serious hazard (stored locally only)",
                     "capture_plate", default = false)
             }
-            CollapsibleSection("Speed limit maps") {
+            CollapsibleSection("Offline maps") {
                 MapManagerSection()
             }
             CollapsibleSection("Self-calibration") {
@@ -2254,10 +2255,18 @@ class MainActivity : ComponentActivity() {
         content: @Composable () -> Unit
     ) {
         var expanded by rememberSaveable(title) { mutableStateOf(startExpanded) }
-        Spacer(Modifier.height(14.dp))
+        // Separator above every section header so that, when several sections are
+        // expanded at once, each one has a clear top boundary and its content
+        // doesn't blend into the next header.
+        Spacer(Modifier.height(10.dp))
+        androidx.compose.material3.HorizontalDivider(
+            color = EnactSurfaceVar, thickness = 1.dp)
+        // Header row sits in a subtly tinted band so it reads as a distinct
+        // section start, not just another line of content.
         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                .background(EnactDarkMid)
                 .clickable { expanded = !expanded }
-                .padding(vertical = 4.dp),
+                .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Text(if (expanded) "\u25BE  $title" else "\u25B8  $title",
                 color = EnactGreen, fontSize = 15.sp, fontWeight = FontWeight.Bold)
@@ -2265,6 +2274,7 @@ class MainActivity : ComponentActivity() {
         if (expanded) {
             Spacer(Modifier.height(8.dp))
             content()
+            Spacer(Modifier.height(6.dp))
         }
     }
 
