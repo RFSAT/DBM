@@ -1,5 +1,10 @@
 # DBM Changelog
 
+## v1.20.76 — fix build break in parentExtentFor (string interpolation)
+- v1.20.75 failed to compile: in parentExtentFor, "$parent__" was parsed by Kotlin
+  as the identifier `parent__` (underscores are valid in identifiers) rather than
+  the variable `parent` followed by literal "__". Fixed to "${parent}__". No
+  behavioural change — the sub-region parent-extent lookup now compiles.
 ## v1.20.75 — map manager: section move, icon alignment, smarter zoom
 - "Speed limit maps" is now its own top-level Settings section instead of being
   nested inside "Following distance", so it's easy to find.

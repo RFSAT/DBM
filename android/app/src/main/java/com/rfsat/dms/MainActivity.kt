@@ -1764,7 +1764,7 @@ class MainActivity : ComponentActivity() {
         var maxLat = -Float.MAX_VALUE; var maxLon = -Float.MAX_VALUE
         var found = false
         for (reg in cat.regions) {
-            if (reg.id == parent || reg.id.startsWith("$parent__")) {
+            if (reg.id == parent || reg.id.startsWith("${parent}__")) {
                 val b = reg.bounds ?: continue
                 minLat = minOf(minLat, b[0]); minLon = minOf(minLon, b[1])
                 maxLat = maxOf(maxLat, b[2]); maxLon = maxOf(maxLon, b[3])
