@@ -31,6 +31,10 @@ class SpeedMonitor(context: Context) {
     private val _position = MutableStateFlow<Pair<Double, Double>?>(null)
     val position: StateFlow<Pair<Double, Double>?> = _position
 
+    private val _heading = MutableStateFlow(0f)
+    /** Course over ground in degrees (0=N, 90=E), updated when moving. */
+    val heading: StateFlow<Float> = _heading
+
     /** When true, each GNSS fix is written to the diagnostic log as a
      *  machine-parseable line. Off by default (it records a precise location
      *  trace — personal data — so it is opt-in for development use). */
@@ -52,6 +56,12 @@ class SpeedMonitor(context: Context) {
                 }
                 // Position is present on every fix (independent of speed).
                 _position.value = it.latitude to it.longitude
+                // Heading (course over ground) when moving — used for heading-up
+                // map orientation in navigation. Only trust it above a small speed,
+                // since bearing is noisy at a standstill.
+                if (it.hasBearing() && it.hasSpeed() && it.speed > 1.0f) {
+                    _heading.value = it.bearing
+                }
                 if (logTrace) {
                     val spd = if (it.hasSpeed()) (it.speed * 3.6f).toInt() else -1
                     DLog.i(TAG, "GPS lat=%.6f lon=%.6f spd=%d acc=%.0f".format(

@@ -17,6 +17,7 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -355,9 +356,16 @@ class MainActivity : ComponentActivity() {
                 4 -> ObdScreen()
                 5 -> LogScreen()
                 6 -> SettingsScreen()
-                7 -> com.rfsat.dms.nav.NavScreen(
+                7 -> {
+                    val prefs0 = getSharedPreferences("dbm", MODE_PRIVATE)
+                    val gKey = prefs0.getString("google_maps_key", null)
+                    com.rfsat.dms.nav.NavScreen(
                         positionFlow = service?.speed?.position,
-                        speedKmhFlow = service?.speed?.speedKmh)
+                        speedKmhFlow = service?.speed?.speedKmh,
+                        headingFlow = service?.speed?.heading,
+                        googleApiKey = gKey,
+                        cameraArContent = { mod -> NavCameraAr(mod) })
+                }
             }
             // Auto-dim only while on the Detector tab and actively monitoring.
             val monitoring by (service?.analysing
@@ -530,6 +538,59 @@ class MainActivity : ComponentActivity() {
             val modeLabel = if (mode.contains("multiplex")) "single-cam" else ""
             if (modeLabel.isNotEmpty())
                 Text(modeLabel, fontSize = 11.sp, color = EnactOnSurfaceDim)
+        }
+    }
+
+    /**
+     * Road-camera feed for the navigation camera-AR view. Reuses the SAME
+     * roadView PreviewView and detection stream as the Detector's CameraCard, but
+     * renders the detections COMPACTLY — small labelled chips docked along the
+     * TOP edge — so they don't cover the road, the route, or the AR arrow drawn
+     * over the lower part of the frame. Signs/lights/vehicles are summarised as
+     * little coloured tags rather than full-size boxes.
+     */
+    @Composable
+    private fun NavCameraAr(modifier: Modifier) {
+        val analysing by (service?.analysing
+            ?: MutableStateFlow(true)).collectAsState()
+        val liveResult by (service?.results?.get(CameraRole.ROAD)
+            ?: MutableStateFlow(AnalysisResult())).collectAsState()
+        val result = if (analysing) liveResult else AnalysisResult()
+        Box(modifier) {
+            AndroidView(
+                factory = {
+                    (roadView.parent as? android.view.ViewGroup)?.removeView(roadView)
+                    roadView
+                },
+                modifier = Modifier.fillMaxSize())
+            // Compact detection chips docked top-centre, wrapping horizontally, so
+            // the road and route stay clear. Cap the count to avoid clutter.
+            val tags = result.detections
+                .filter { it.detClass == DetClass.SIGN || it.detClass == DetClass.LIGHT ||
+                          it.risky }
+                .take(6)
+            if (tags.isNotEmpty()) {
+                Row(Modifier.align(androidx.compose.ui.Alignment.TopCenter)
+                        .padding(top = 132.dp)
+                        .horizontalScroll(rememberScrollState())) {
+                    tags.forEach { d ->
+                        val col = when {
+                            d.risky -> Color(0xFFE57373)
+                            d.detClass == DetClass.SIGN -> Color(0xFF26C6DA)
+                            d.detClass == DetClass.LIGHT -> Color(0xFFEF5350)
+                            else -> EnactGreen
+                        }
+                        Box(Modifier.padding(horizontal = 3.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(col.copy(alpha = 0.85f))
+                                .padding(horizontal = 6.dp, vertical = 3.dp)) {
+                            Text(if (d.detClass == DetClass.OTHER) d.labelText
+                                 else d.detClass.display,
+                                color = Color.White, fontSize = 10.sp)
+                        }
+                    }
+                }
+            }
         }
     }
 

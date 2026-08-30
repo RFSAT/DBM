@@ -22,6 +22,8 @@ interface NavProvider {
     val isOnline: Boolean
     /** Compute a route between two points. May return null if unavailable. */
     suspend fun route(from: GeoPoint, to: GeoPoint): Route?
+    /** Compute a route through an ordered list of points (start, vias…, end). */
+    suspend fun routeVia(points: List<GeoPoint>): Route?
     /** Free-text place search -> candidate destinations. */
     suspend fun search(query: String): List<Pair<String, GeoPoint>>
     /** Whether this provider can currently serve (network up for online, etc.). */
@@ -60,6 +62,11 @@ class StubProvider : NavProvider {
 
     override suspend fun route(from: GeoPoint, to: GeoPoint): Route =
         demoRoute(from, to)
+
+    override suspend fun routeVia(points: List<GeoPoint>): Route? {
+        if (points.size < 2) return null
+        return demoRoute(points.first(), points.last())
+    }
 
     override suspend fun search(query: String): List<Pair<String, GeoPoint>> =
         emptyList()   // no geocoding in the stub

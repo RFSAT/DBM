@@ -14,7 +14,12 @@ data class RoutingState(
     val startLabel: String = "Current location",
     val destination: GeoPoint? = null,
     val destinationLabel: String = "",
+    // Intermediate waypoints (in order) the route must pass through, between the
+    // start and the destination.
+    val waypoints: List<Pair<String, GeoPoint>> = emptyList(),
     val searchResults: List<Pair<String, GeoPoint>> = emptyList(),
+    // What a picked search result becomes: the destination, or a new waypoint.
+    val addingWaypoint: Boolean = false,
     val route: Route? = null,
     val guidance: Guidance? = null,
     val error: String? = null
@@ -47,11 +52,31 @@ class NavRouter(@Volatile var provider: NavProvider) {
     }
 
     fun chooseDestination(label: String, point: GeoPoint) {
-        _state.value = _state.value.copy(
-            destination = point, destinationLabel = label, searchResults = emptyList())
+        val s = _state.value
+        if (s.addingWaypoint) {
+            // add as an intermediate waypoint instead of the destination
+            _state.value = s.copy(
+                waypoints = s.waypoints + (label to point),
+                searchResults = emptyList(), addingWaypoint = false)
+        } else {
+            _state.value = s.copy(
+                destination = point, destinationLabel = label, searchResults = emptyList())
+        }
     }
 
-    /** Calculate the route from start (or the given live position) to destination. */
+    /** Next picked search result will be added as a waypoint, not the destination. */
+    fun beginAddWaypoint() {
+        _state.value = _state.value.copy(addingWaypoint = true)
+    }
+
+    fun removeWaypoint(index: Int) {
+        val s = _state.value
+        if (index in s.waypoints.indices)
+            _state.value = s.copy(waypoints = s.waypoints.toMutableList()
+                .also { it.removeAt(index) })
+    }
+
+    /** Calculate the route from start through waypoints to destination. */
     suspend fun calculateRoute(livePosition: GeoPoint?) {
         val s = _state.value
         val from = s.start ?: livePosition
@@ -62,8 +87,12 @@ class NavRouter(@Volatile var provider: NavProvider) {
             return
         }
         _state.value = s.copy(phase = RoutingPhase.ROUTING, error = null)
+        // Ordered points: start, each waypoint, destination.
+        val pts = buildList {
+            add(from); addAll(s.waypoints.map { it.second }); add(to)
+        }
         val route = withContext(Dispatchers.IO) {
-            runCatching { provider.route(from, to) }.getOrNull() }
+            runCatching { provider.routeVia(pts) }.getOrNull() }
         if (route == null) {
             _state.value = _state.value.copy(phase = RoutingPhase.ERROR,
                 error = "Could not calculate a route (service unreachable?).")

@@ -1,5 +1,23 @@
 # DBM Changelog
 
+## v1.20.88 — Navigation: road network, zoom/orientation, waypoints, live camera
+- Maps now render the full surrounding OSM road network (raster street tiles, no
+  API key), with the route drawn on top — not just the route line.
+- Maps are zoomable (pinch/rotate/tilt gestures on) and their orientation is
+  toggleable between North-up and Heading-up (rotates to the vehicle's GNSS
+  course); added a heading flow to SpeedMonitor for this.
+- Map source is user-selectable: OpenStreetMap (streets), OSM lite (demo vector),
+  and a Google Maps slot. Google needs the user's own Google Maps API key (their
+  tiles/SDK aren't free) — set "google_maps_key" in prefs; without it the app
+  stays on OSM. Toggle via the on-map source chip.
+- Routing supports intermediate WAYPOINTS: after choosing a destination, add one
+  or more stops ("+ Stop"); the route (OSRM) passes through them in order. Each
+  waypoint can be removed; the navigating header shows the stop count.
+- Camera-AR now shows the REAL road-camera feed, reusing the Detector's roadView
+  and detection stream. Detections are rendered COMPACTLY as small labelled chips
+  docked along the top edge (signs/lights/risky items) so they don't cover the
+  road, route, or the AR arrow. The geometric AR path/arrow is drawn over the
+  live feed.
 ## v1.20.87 — fix MapLibre/Kotlin build failure
 - Fixed the CI build failure introduced with MapLibre in v1.20.86: MapLibre 13.5.1
   is compiled with Kotlin 2.2.0 and pulled kotlin-stdlib 2.2.10, whose metadata the

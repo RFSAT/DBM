@@ -48,11 +48,20 @@ import kotlinx.coroutines.launch
 fun NavScreen(
     positionFlow: StateFlow<Pair<Double, Double>?>? = null,
     speedKmhFlow: StateFlow<Int>? = null,
-    speedLimitProvider: (() -> Int?)? = null
+    headingFlow: StateFlow<Float>? = null,          // vehicle heading (deg, GNSS course)
+    speedLimitProvider: (() -> Int?)? = null,
+    googleApiKey: String? = null,                   // user's Google Maps key, if any
+    // Renders the live road-camera feed with compact detection overlays, reusing
+    // the Detector's camera. Provided by MainActivity (which owns the camera);
+    // null when unavailable (e.g. camera off) — then camera-AR uses the
+    // geometric projection over a dark backdrop instead.
+    cameraArContent: (@Composable (androidx.compose.ui.Modifier) -> Unit)? = null
 ) {
     val scope = rememberCoroutineScope()
     var state by remember { mutableStateOf(NavState()) }
     var showModes by remember { mutableStateOf(false) }
+    var mapSource by remember { mutableStateOf(MapSource.OSM_STREETS) }
+    var headingUp by remember { mutableStateOf(false) }   // false = north-up
 
     // Real router on the online OSM provider. (Swap provider for offline later.)
     val router = remember { NavRouter(OnlineOsmProvider()) }
@@ -61,6 +70,7 @@ fun NavScreen(
     val livePos: Pair<Double, Double>? =
         positionFlow?.collectAsState()?.value
     val liveSpeedKmh: Int = speedKmhFlow?.collectAsState()?.value ?: 0
+    val heading: Float = headingFlow?.collectAsState()?.value ?: 0f
 
     // Feed live position into the router while navigating.
     LaunchedEffect(livePos, routing.phase) {
@@ -81,18 +91,41 @@ fun NavScreen(
         val routePts = routing.route?.points
         val centerPt = livePos?.let { GeoPoint(it.first, it.second) }
             ?: routePts?.firstOrNull()
+        val styleSpec = MapStyles.styleFor(mapSource, googleApiKey)
         when (state.base) {
             BaseView.ARROW_ONLY -> ArrowView(guidance, big = true)
-            BaseView.CAMERA_AR -> CameraArBase(guidance)
+            BaseView.CAMERA_AR -> CameraArBase(guidance, cameraArContent)
             BaseView.MAP_2D_TOPDOWN ->
                 MapLibreBase(routePts, centerPt, tiltDegrees = 0.0,
-                    modifier = Modifier.fillMaxSize())
+                    styleSpec = styleSpec, headingUp = headingUp,
+                    bearingDeg = heading.toDouble(), modifier = Modifier.fillMaxSize())
             BaseView.MAP_2D_PERSPECTIVE ->
                 MapLibreBase(routePts, centerPt, tiltDegrees = 45.0,
-                    modifier = Modifier.fillMaxSize())
+                    styleSpec = styleSpec, headingUp = headingUp,
+                    bearingDeg = heading.toDouble(), modifier = Modifier.fillMaxSize())
             BaseView.MAP_3D ->
                 MapLibreBase(routePts, centerPt, tiltDegrees = 62.0,
-                    modifier = Modifier.fillMaxSize())
+                    styleSpec = styleSpec, headingUp = headingUp,
+                    bearingDeg = heading.toDouble(), modifier = Modifier.fillMaxSize())
+        }
+        // North/heading + map-source quick toggles (only over map bases)
+        val onMap = state.base == BaseView.MAP_2D_TOPDOWN ||
+                state.base == BaseView.MAP_2D_PERSPECTIVE || state.base == BaseView.MAP_3D
+        if (onMap) {
+            Row(Modifier.align(Alignment.TopEnd).padding(top = 96.dp, end = 8.dp)) {
+                Chip(if (headingUp) "Heading-up" else "North-up") {
+                    headingUp = !headingUp }
+                Spacer(Modifier.width(6.dp))
+                Chip(mapSource.label) {
+                    mapSource = when (mapSource) {
+                        MapSource.OSM_STREETS -> MapSource.OSM_DEMO
+                        MapSource.OSM_DEMO ->
+                            if (!googleApiKey.isNullOrBlank()) MapSource.GOOGLE
+                            else MapSource.OSM_STREETS
+                        MapSource.GOOGLE -> MapSource.OSM_STREETS
+                    }
+                }
+            }
         }
 
         // ---- VISUAL OVERLAYS (any combination) ------------------------------
@@ -107,6 +140,8 @@ fun NavScreen(
         Column(Modifier.align(Alignment.TopCenter).fillMaxWidth()) {
             RoutePanel(routing, onSearch = { q -> scope.launch { router.search(q) } },
                 onPick = { label, pt -> router.chooseDestination(label, pt) },
+                onAddWaypoint = { router.beginAddWaypoint() },
+                onRemoveWaypoint = { i -> router.removeWaypoint(i) },
                 onGo = {
                     scope.launch {
                         router.calculateRoute(livePos?.let { GeoPoint(it.first, it.second) })
@@ -133,6 +168,8 @@ private fun RoutePanel(
     routing: RoutingState,
     onSearch: (String) -> Unit,
     onPick: (String, GeoPoint) -> Unit,
+    onAddWaypoint: () -> Unit,
+    onRemoveWaypoint: (Int) -> Unit,
     onGo: () -> Unit,
     onStop: () -> Unit
 ) {
@@ -141,7 +178,6 @@ private fun RoutePanel(
             .clip(RoundedCornerShape(12.dp)).background(EnactDarkMid.copy(alpha = 0.95f))
             .padding(10.dp)) {
         if (routing.phase == RoutingPhase.NAVIGATING) {
-            // Compact navigating header with a stop button.
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Navigating to", color = EnactOnSurfaceDim, fontSize = 11.sp)
@@ -149,8 +185,10 @@ private fun RoutePanel(
                         color = EnactGreen, fontSize = 14.sp,
                         fontWeight = FontWeight.Bold, maxLines = 1)
                     routing.route?.let {
+                        val via = if (routing.waypoints.isNotEmpty())
+                            " · ${routing.waypoints.size} stop(s)" else ""
                         Text("%.1f km · ~%d min".format(
-                            it.totalMeters / 1000, (it.totalSeconds / 60).toInt()),
+                            it.totalMeters / 1000, (it.totalSeconds / 60).toInt()) + via,
                             color = EnactOnSurfaceDim, fontSize = 11.sp)
                     }
                 }
@@ -159,8 +197,8 @@ private fun RoutePanel(
             return@Column
         }
 
-        Text("Where to?", color = EnactLime, fontSize = 12.sp,
-            fontWeight = FontWeight.Bold)
+        Text(if (routing.addingWaypoint) "Add a stop" else "Where to?",
+            color = EnactLime, fontSize = 12.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(6.dp))
         TextField(
             value = query, onValueChange = { query = it },
@@ -175,7 +213,6 @@ private fun RoutePanel(
             Text("Searching…", color = EnactOnSurfaceDim, fontSize = 12.sp,
                 modifier = Modifier.padding(top = 4.dp))
 
-        // search results
         routing.searchResults.take(6).forEach { (label, pt) ->
             Text(label, color = EnactOnSurface, fontSize = 13.sp, maxLines = 2,
                 modifier = Modifier.fillMaxWidth()
@@ -183,12 +220,25 @@ private fun RoutePanel(
                     .padding(vertical = 6.dp))
         }
 
-        // chosen destination + Go
+        // waypoints (intermediate stops), in order
+        routing.waypoints.forEachIndexed { i, (label, _) ->
+            Row(Modifier.fillMaxWidth().padding(top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("↳ $label", color = EnactOnSurfaceDim, fontSize = 12.sp,
+                    maxLines = 1, modifier = Modifier.weight(1f))
+                Text("✕", color = EnactError, fontSize = 14.sp,
+                    modifier = Modifier.clickable { onRemoveWaypoint(i) }
+                        .padding(horizontal = 6.dp))
+            }
+        }
+
         if (routing.destination != null && routing.searchResults.isEmpty()) {
             Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(routing.destinationLabel, color = EnactGreen, fontSize = 13.sp,
                     maxLines = 1, modifier = Modifier.weight(1f))
+                Chip("+ Stop") { onAddWaypoint() }
+                Spacer(Modifier.width(6.dp))
                 Chip(if (routing.phase == RoutingPhase.ROUTING) "…" else "Go") { onGo() }
             }
         }
@@ -254,22 +304,28 @@ private fun ArrowView(g: Guidance?, big: Boolean) {
  * out non-road areas.
  */
 @Composable
-private fun CameraArBase(g: Guidance?) {
+private fun CameraArBase(
+    g: Guidance?,
+    cameraContent: (@Composable (Modifier) -> Unit)?
+) {
     val proj = remember { ArProjection() }
-    // Bend the projected path toward the upcoming maneuver so the carpet leads
-    // into the turn (sign only; magnitude is a gentle visual lead for the demo).
     val bend = when (g?.nextStep?.maneuver) {
         Maneuver.TURN_LEFT, Maneuver.SLIGHT_LEFT, Maneuver.SHARP_LEFT -> -0.25
         Maneuver.TURN_RIGHT, Maneuver.SLIGHT_RIGHT, Maneuver.SHARP_RIGHT -> 0.25
         else -> 0.0
     }
     Box(Modifier.fillMaxSize().background(EnactDark)) {
+        // Live road-camera feed (with the Detector's detection overlays, rendered
+        // compact by MainActivity) behind the AR path. Falls back to a dark
+        // backdrop when the camera isn't available.
+        if (cameraContent != null) cameraContent(Modifier.fillMaxSize())
+
+        // AR route "carpet" + arrow projected onto the road plane.
         androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
             val dists = (3..60 step 3).map { it.toDouble() }
             val pts = proj.projectPath(dists, bendDegPerM = bend)
                 .map { Offset(it.first * size.width, it.second * size.height) }
             if (pts.size >= 2) {
-                // road "carpet": a thick tapering line from near to far
                 for (i in 0 until pts.size - 1) {
                     val t = i.toFloat() / (pts.size - 1)
                     drawPath(Path().apply {
@@ -277,7 +333,6 @@ private fun CameraArBase(g: Guidance?) {
                     }, EnactGreen.copy(alpha = 0.85f - t * 0.5f),
                         style = Stroke(width = (34f * (1f - t)) + 6f))
                 }
-                // arrowhead at the far end pointing along the last segment
                 val a = pts[pts.size - 2]; val b = pts[pts.size - 1]
                 val ang = kotlin.math.atan2(b.y - a.y, b.x - a.x)
                 val hl = 26f
@@ -291,9 +346,6 @@ private fun CameraArBase(g: Guidance?) {
                 }, EnactGreen)
             }
         }
-        Text("Camera-AR (geometric projection) — live camera composites behind next",
-            color = EnactOnSurfaceDim, fontSize = 11.sp,
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = 92.dp))
         if (g?.nextStep != null)
             Text(g.nextStep.instruction, color = EnactOnSurface, fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,

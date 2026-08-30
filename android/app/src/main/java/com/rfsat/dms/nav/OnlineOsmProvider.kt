@@ -31,10 +31,14 @@ class OnlineOsmProvider(
     override val isOnline = true
     override fun available() = true      // caller checks connectivity separately
 
-    override suspend fun route(from: GeoPoint, to: GeoPoint): Route? {
-        // OSRM expects lon,lat order.
-        val url = "$osrmBase/route/v1/driving/" +
-                "${from.lon},${from.lat};${to.lon},${to.lat}" +
+    override suspend fun route(from: GeoPoint, to: GeoPoint): Route? =
+        routeVia(listOf(from, to))
+
+    override suspend fun routeVia(points: List<GeoPoint>): Route? {
+        if (points.size < 2) return null
+        // OSRM expects lon,lat pairs separated by ';', in order.
+        val coords = points.joinToString(";") { "${it.lon},${it.lat}" }
+        val url = "$osrmBase/route/v1/driving/$coords" +
                 "?overview=full&geometries=geojson&steps=true&annotations=false"
         val json = httpGetJson(url) ?: return null
         val routes = json.optJSONArray("routes") ?: return null
@@ -42,14 +46,14 @@ class OnlineOsmProvider(
         val r0 = routes.getJSONObject(0)
 
         // full polyline
-        val coords = r0.getJSONObject("geometry").getJSONArray("coordinates")
-        val points = ArrayList<GeoPoint>(coords.length())
-        for (i in 0 until coords.length()) {
-            val c = coords.getJSONArray(i)
-            points.add(GeoPoint(c.getDouble(1), c.getDouble(0)))   // [lon,lat]->lat,lon
+        val gcoords = r0.getJSONObject("geometry").getJSONArray("coordinates")
+        val polyline = ArrayList<GeoPoint>(gcoords.length())
+        for (i in 0 until gcoords.length()) {
+            val c = gcoords.getJSONArray(i)
+            polyline.add(GeoPoint(c.getDouble(1), c.getDouble(0)))
         }
 
-        // steps across all legs
+        // steps across all legs (one leg per waypoint pair)
         val steps = ArrayList<RouteStep>()
         val legs = r0.optJSONArray("legs") ?: JSONArray()
         for (li in 0 until legs.length()) {
@@ -57,7 +61,7 @@ class OnlineOsmProvider(
             for (si in 0 until legSteps.length()) {
                 val st = legSteps.getJSONObject(si)
                 val man = st.getJSONObject("maneuver")
-                val loc = man.getJSONArray("location")   // [lon,lat]
+                val loc = man.getJSONArray("location")
                 val at = GeoPoint(loc.getDouble(1), loc.getDouble(0))
                 val road = st.optString("name", "")
                 steps.add(RouteStep(
@@ -70,7 +74,7 @@ class OnlineOsmProvider(
                 ))
             }
         }
-        return Route(points, steps,
+        return Route(polyline, steps,
             r0.optDouble("distance", 0.0), r0.optDouble("duration", 0.0))
     }
 

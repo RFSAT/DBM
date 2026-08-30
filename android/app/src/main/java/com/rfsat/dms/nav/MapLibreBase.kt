@@ -7,9 +7,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.geometry.LatLng
@@ -25,37 +25,37 @@ import org.maplibre.geojson.LineString
 import org.maplibre.geojson.Point
 
 /**
- * MapLibre-backed base view for navigation. Renders real OSM vector tiles (free
- * demotiles style — no API key, no billing) and draws the active route as a
- * line. `tiltDegrees` selects the three map bases from one engine:
- *   0    -> flat 2D top-down
- *   ~45  -> 2D perspective (tilted bird's-eye)
- *   ~62  -> steep 3D-style view (true terrain/buildings need a 3D vector style;
- *           the demotiles style is flat, so this is a steep tilt for now)
+ * MapLibre-backed base view for navigation. Renders the real OSM road network
+ * (raster street tiles by default — the whole surrounding network, not just the
+ * route) and draws the active route line on top.
  *
- * Lifecycle is forwarded from the Compose LifecycleOwner to the MapView (MapLibre
- * requires this). The route source/layer are created once and then updated in
- * place, so recomposition never re-adds a duplicate source.
+ * - Zoom: pinch/double-tap are enabled by default (MapLibre UiSettings).
+ * - Orientation: `headingUp`=false -> north-up (bearing 0); true -> the map
+ *   rotates to the vehicle heading (bearingDeg), so "up" is where the car points.
+ * - `tiltDegrees`: 0 flat 2D, ~45 perspective, ~62 steep 3D-style.
+ * - `styleSpec`: either a full style JSON (inline object) or a style URL.
  */
 @Composable
 fun MapLibreBase(
     route: List<GeoPoint>?,
     center: GeoPoint?,
     tiltDegrees: Double,
-    styleUrl: String = "https://demotiles.maplibre.org/style.json",
+    styleSpec: String,
+    headingUp: Boolean,
+    bearingDeg: Double,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    // getInstance() must run before constructing a MapView. onCreate(null) here
-    // (rather than via the lifecycle observer) guarantees it precedes onStart.
     val mapView = remember {
         MapLibre.getInstance(context)
         MapView(context).apply { onCreate(null) }
     }
     val mapHolder = remember { mutableStateOf<MapLibreMap?>(null) }
     val styleHolder = remember { mutableStateOf<Style?>(null) }
+    // Remember which style is currently loaded so we only reload on change.
+    val loadedStyle = remember { mutableStateOf<String?>(null) }
 
     DisposableEffect(lifecycleOwner) {
         val obs = LifecycleEventObserver { _, e ->
@@ -76,26 +76,34 @@ fun MapLibreBase(
     }
 
     AndroidView(factory = { mapView }, modifier = modifier) { mv ->
-        val existing = mapHolder.value
-        if (existing == null) {
-            mv.getMapAsync { map ->
-                mapHolder.value = map
-                map.setStyle(Style.Builder().fromUri(styleUrl)) { style ->
+        val map = mapHolder.value
+        if (map == null) {
+            mv.getMapAsync { m ->
+                mapHolder.value = m
+                // Zoom + rotate gestures on; keep it simple and drivable.
+                m.uiSettings.isZoomGesturesEnabled = true
+                m.uiSettings.isRotateGesturesEnabled = true
+                m.uiSettings.isTiltGesturesEnabled = true
+                m.uiSettings.isCompassEnabled = true
+                loadStyle(m, styleSpec) { style ->
                     styleHolder.value = style
-                    if (style.getSource(ROUTE_SRC) == null) {
-                        style.addSource(GeoJsonSource(ROUTE_SRC))
-                        style.addLayer(LineLayer(ROUTE_LYR, ROUTE_SRC).withProperties(
-                            PropertyFactory.lineColor("#4DC494"),
-                            PropertyFactory.lineWidth(6f)
-                        ))
-                    }
+                    loadedStyle.value = styleSpec
+                    ensureRouteLayer(style)
                     pushRoute(style, route)
-                    applyCamera(map, center, route, tiltDegrees)
+                    applyCamera(m, center, route, tiltDegrees, headingUp, bearingDeg)
                 }
             }
         } else {
-            // recomposition: update camera + route in place
-            applyCamera(existing, center, route, tiltDegrees)
+            // style changed? reload it (and re-add the route layer afterwards)
+            if (loadedStyle.value != styleSpec) {
+                loadStyle(map, styleSpec) { style ->
+                    styleHolder.value = style
+                    loadedStyle.value = styleSpec
+                    ensureRouteLayer(style)
+                    pushRoute(style, route)
+                }
+            }
+            applyCamera(map, center, route, tiltDegrees, headingUp, bearingDeg)
             styleHolder.value?.let { pushRoute(it, route) }
         }
     }
@@ -103,15 +111,41 @@ fun MapLibreBase(
 
 private const val ROUTE_SRC = "dbm-route-src"
 private const val ROUTE_LYR = "dbm-route-lyr"
+private const val ROUTE_CASING_LYR = "dbm-route-casing"
+
+private fun loadStyle(map: MapLibreMap, spec: String, onLoaded: (Style) -> Unit) {
+    val builder = if (MapStyles.isInlineJson(spec))
+        Style.Builder().fromJson(spec)
+    else
+        Style.Builder().fromUri(spec)
+    map.setStyle(builder) { style -> onLoaded(style) }
+}
+
+private fun ensureRouteLayer(style: Style) {
+    if (style.getSource(ROUTE_SRC) == null) {
+        style.addSource(GeoJsonSource(ROUTE_SRC))
+        // casing (dark, wider) under the coloured line for contrast over the map
+        style.addLayer(LineLayer(ROUTE_CASING_LYR, ROUTE_SRC).withProperties(
+            PropertyFactory.lineColor("#0C2E28"),
+            PropertyFactory.lineWidth(9f)
+        ))
+        style.addLayer(LineLayer(ROUTE_LYR, ROUTE_SRC).withProperties(
+            PropertyFactory.lineColor("#4DC494"),
+            PropertyFactory.lineWidth(5f)
+        ))
+    }
+}
 
 private fun applyCamera(
-    map: MapLibreMap, center: GeoPoint?, route: List<GeoPoint>?, tilt: Double
+    map: MapLibreMap, center: GeoPoint?, route: List<GeoPoint>?,
+    tilt: Double, headingUp: Boolean, bearingDeg: Double
 ) {
     val c = center ?: route?.firstOrNull() ?: return
     map.cameraPosition = CameraPosition.Builder()
         .target(LatLng(c.lat, c.lon))
-        .zoom(14.0)
+        .zoom(15.0)
         .tilt(tilt)
+        .bearing(if (headingUp) bearingDeg else 0.0)   // north-up vs heading-up
         .build()
 }
 
