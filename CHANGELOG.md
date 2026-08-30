@@ -1,5 +1,23 @@
 # DBM Changelog
 
+## v1.20.90 — Navigation: persistent settings, better map behaviour, map data
+- Nav mode settings (default view, overlays, map layer, my-location icon,
+  windshield, show-map-data) moved into Settings > Navigation and now PERSIST
+  across app runs (NavSettings). Route/destination/waypoint/navigating status is
+  retained across tab switches (NavRouter held by the Activity).
+- Map no longer resets when you pan/zoom/rotate it: the camera is set once on
+  load and thereafter only when you tap Recenter or change orientation mode. A
+  Recenter button (◎) returns to your current location.
+- Always shows your own-location marker (icon/colour selectable in Settings) and,
+  when navigating, a marker at the destination — not just the route line.
+- Orientation button cycles North-up / Heading-up / Free-rotate; free rotation by
+  the user is preserved.
+- Map layer button switches Street / Satellite / Terrain (all free raster tiles).
+- Speed limits, parking and speed cameras from the offline map are drawn on the
+  navigation map (yellow limit lines, blue parking dots, red camera dots), toggle
+  in Settings. Uses a new OsmMap.overlayNear() spatial query.
+- Camera-AR arrowhead is now larger and clearer (scales with the view).
+- On why 3D looked like perspective, and the vector-tile path, see the notes.
 ## v1.20.89 — fix nav camera build error
 - Fixed the compile error in v1.20.88: NavCameraAr referenced CameraRole.ROAD,
   which doesn't exist — the road-facing camera role is FRONT (as used everywhere

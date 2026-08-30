@@ -109,6 +109,14 @@ class MainActivity : ComponentActivity() {
     private var driverViewZoom by mutableStateOf(1f)
 
     private var service: MonitorService? = null
+    // Retained across tab switches so the Navigation screen keeps its route,
+    // destination, waypoints and navigating status when the user visits other
+    // tabs and returns. Created lazily on first use.
+    private val navRouter by lazy {
+        com.rfsat.dms.nav.NavRouter(com.rfsat.dms.nav.OnlineOsmProvider()) }
+    private val navSettings by lazy { com.rfsat.dms.nav.NavSettings(this) }
+    // Recenter requests: bumping this asks the map to recenter on the user once.
+    private val navRecenter = androidx.compose.runtime.mutableStateOf(0)
     private var cameras: PhoneCameraManager? = null
     private lateinit var interiorView: PreviewView
     private lateinit var roadView: PreviewView
@@ -357,13 +365,24 @@ class MainActivity : ComponentActivity() {
                 5 -> LogScreen()
                 6 -> SettingsScreen()
                 7 -> {
-                    val prefs0 = getSharedPreferences("dbm", MODE_PRIVATE)
-                    val gKey = prefs0.getString("google_maps_key", null)
                     com.rfsat.dms.nav.NavScreen(
+                        router = navRouter,
+                        settings = navSettings,
+                        recenterState = navRecenter,
                         positionFlow = service?.speed?.position,
                         speedKmhFlow = service?.speed?.speedKmh,
                         headingFlow = service?.speed?.heading,
-                        googleApiKey = gKey,
+                        mapOverlayProvider = { lat, lon ->
+                            service?.mapOverlayNear(lat, lon)?.let { o ->
+                                com.rfsat.dms.nav.MapOverlayData(
+                                    speedLimitLines = o.speedLimitLines.map { seg ->
+                                        seg.map { com.rfsat.dms.nav.GeoPoint(it.lat, it.lon) } },
+                                    parking = o.parking.map {
+                                        com.rfsat.dms.nav.GeoPoint(it.lat, it.lon) },
+                                    cameras = o.cameras.map {
+                                        com.rfsat.dms.nav.GeoPoint(it.lat, it.lon) })
+                            }
+                        },
                         cameraArContent = { mod -> NavCameraAr(mod) })
                 }
             }
@@ -1211,6 +1230,9 @@ class MainActivity : ComponentActivity() {
             CollapsibleSection("Offline maps") {
                 MapManagerSection()
             }
+            CollapsibleSection("Navigation") {
+                NavigationSettingsSection()
+            }
             CollapsibleSection("Self-calibration") {
                 Text("DBM adapts to the driver and mount during use: eye-closure " +
                     "baseline, straight-ahead head pose, the visual speed scale and " +
@@ -1465,6 +1487,76 @@ class MainActivity : ComponentActivity() {
         19 -> R.drawable.sign_curve_right
         20 -> R.drawable.sign_slippery_road
         else -> 0
+    }
+
+    /** Navigation mode settings — persisted to NavSettings, applied on the
+     *  Navigation screen. Moved here from the nav view per request. */
+    @Composable
+    private fun NavigationSettingsSection() {
+        val s = remember { com.rfsat.dms.nav.NavSettings(this) }
+        var base by remember { mutableStateOf(s.base) }
+        var overlays by remember { mutableStateOf(s.overlays) }
+        var layer by remember { mutableStateOf(s.mapLayer) }
+        var icon by remember { mutableStateOf(s.ownIcon) }
+        var mirror by remember { mutableStateOf(s.windshieldMirror) }
+        var mapData by remember { mutableStateOf(s.showMapData) }
+
+        @Composable
+        fun pill(label: String, sel: Boolean, onClick: () -> Unit) {
+            Box(Modifier.padding(3.dp).clip(RoundedCornerShape(8.dp))
+                    .background(if (sel) EnactGreen.copy(alpha = 0.22f) else EnactSurface)
+                    .clickable { onClick() }.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                Text(label, color = if (sel) EnactGreen else EnactOnSurfaceDim,
+                    fontSize = 12.sp,
+                    fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal)
+            }
+        }
+
+        Text("Default view", color = EnactLime, fontSize = 12.sp,
+            fontWeight = FontWeight.Bold)
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+            com.rfsat.dms.nav.BaseView.values().forEach { b ->
+                pill(b.label, base == b) { base = b; s.base = b }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text("Overlays", color = EnactLime, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+            com.rfsat.dms.nav.Overlay.values().forEach { o ->
+                pill(o.label, o in overlays) {
+                    overlays = if (o in overlays) overlays - o else overlays + o
+                    s.overlays = overlays
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text("Map layer", color = EnactLime, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+            com.rfsat.dms.nav.MapLayer.values().forEach { l ->
+                pill(l.label, layer == l) { layer = l; s.mapLayer = l }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text("My location icon", color = EnactLime, fontSize = 12.sp,
+            fontWeight = FontWeight.Bold)
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+            com.rfsat.dms.nav.OwnLocationIcon.values().forEach { ic ->
+                pill(ic.label, icon == ic) { icon = ic; s.ownIcon = ic }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Text("Show speed limits, parking & cameras on map",
+                color = EnactOnSurface, fontSize = 12.sp, modifier = Modifier.weight(1f))
+            androidx.compose.material3.Switch(checked = mapData,
+                onCheckedChange = { mapData = it; s.showMapData = it })
+        }
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Text("Windshield mirror (for dashboard reflection)",
+                color = EnactOnSurface, fontSize = 12.sp, modifier = Modifier.weight(1f))
+            androidx.compose.material3.Switch(checked = mirror,
+                onCheckedChange = { mirror = it; s.windshieldMirror = it })
+        }
     }
 
     @Composable

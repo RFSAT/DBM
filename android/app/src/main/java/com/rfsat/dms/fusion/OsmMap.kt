@@ -19,6 +19,17 @@ data class RoadSegment(
     val maxSpeed: Int,
 )
 
+/** A (lat,lon) pair for map-overlay features. */
+data class DoublePair(val lat: Double, val lon: Double)
+
+/** Map-display features near a point: speed-limit segment polylines, parking
+ *  points, and speed-camera points. See OsmMap.overlayNear(). */
+data class MapOverlay(
+    val speedLimitLines: List<List<DoublePair>>,
+    val parking: List<DoublePair>,
+    val cameras: List<DoublePair>,
+)
+
 /** Result of matching a GPS point to the road network. */
 data class MatchResult(val mapLimit: Int, val segId: Long, val distM: Double)
 
@@ -166,6 +177,65 @@ class OsmMap private constructor(private val db: SQLiteDatabase) {
 
     /** R-tree query: segments whose bounding box overlaps a small window around
      *  the point. Reads only those segments' geometry, not the whole network. */
+    /**
+     * Features for map display in the given area: speed-limit road-segment
+     * polylines (only segments that HAVE a limit), parking points, and speed
+     * cameras. Reuses the same bbox query as navigation matching. Coordinates are
+     * (lat,lon) pairs. Cheap enough to call as the map view moves (debounced by
+     * the caller). marginDeg widens the query box to roughly the visible area.
+     */
+    fun overlayNear(lat: Double, lon: Double, marginDeg: Double = 0.02): MapOverlay {
+        val limits = ArrayList<List<DoublePair>>()
+        val sql = """
+            SELECT maxspeed, coords FROM segments
+            WHERE maxLat >= ? AND minLat <= ? AND maxLon >= ? AND minLon <= ?
+              AND maxspeed > 0
+        """.trimIndent()
+        runCatching {
+            db.rawQuery(sql, arrayOf(
+                (lat - marginDeg).toString(), (lat + marginDeg).toString(),
+                (lon - marginDeg).toString(), (lon + marginDeg).toString())).use { c ->
+                var n = 0
+                while (c.moveToNext() && n < 4000) {   // cap to keep it light
+                    val blob = c.getBlob(1)
+                    val (la, lo) = unpackCoords(blob)
+                    if (la.size >= 2) {
+                        limits.add(la.indices.map { DoublePair(la[it], lo[it]) })
+                        n++
+                    }
+                }
+            }
+        }.onFailure { DLog.e(TAG, "overlay segment query failed", it) }
+
+        val park = runCatching {
+            parking?.lotsNear(lat, lon, radiusM = 3000.0, publicOnly = false,
+                limit = 500)?.map { DoublePair(it.lat, it.lon) } ?: emptyList()
+        }.getOrDefault(emptyList())
+
+        // cameras: query the table directly (bbox), independent of heading
+        val cams = ArrayList<DoublePair>()
+        runCatching {
+            val hasTable = db.rawQuery(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='speed_camera'",
+                null).use { it.moveToNext() }
+            if (hasTable) {
+                db.rawQuery("""
+                    SELECT lat, lon FROM speed_camera
+                    WHERE lat >= ? AND lat <= ? AND lon >= ? AND lon <= ?
+                """.trimIndent(), arrayOf(
+                    (lat - marginDeg).toString(), (lat + marginDeg).toString(),
+                    (lon - marginDeg).toString(), (lon + marginDeg).toString())).use { c ->
+                    var n = 0
+                    while (c.moveToNext() && n < 500) {
+                        cams.add(DoublePair(c.getDouble(0), c.getDouble(1))); n++
+                    }
+                }
+            }
+        }.onFailure { DLog.e(TAG, "overlay camera query failed", it) }
+
+        return MapOverlay(limits, park, cams)
+    }
+
     private fun queryNear(lat: Double, lon: Double): List<RoadSegment> {
         val out = ArrayList<RoadSegment>(16)
         // Android's built-in SQLite has no rtree module, so we filter on plain

@@ -786,6 +786,11 @@ class MonitorService : Service() {
             ?: emptyList()
     }
 
+    /** Map-display features (speed limits / parking / cameras) around a point,
+     *  for the navigation map overlay. Null when no offline map is loaded. */
+    fun mapOverlayNear(lat: Double, lon: Double): com.rfsat.dms.fusion.MapOverlay? =
+        osmMap?.overlayNear(lat, lon)
+
     private fun markSignScanAtStop() {
         val pos = lastFusePos ?: return
         signScanStopLat = pos.first
