@@ -300,12 +300,13 @@ private fun updateData(
 ) {
     style.getSourceAs<GeoJsonSource>(ROUTE_SRC)?.setGeoJson(
         if (route != null && route.size >= 2)
-            Feature.fromGeometry(LineString.fromLngLats(route.map {
-                Point.fromLngLat(it.lon, it.lat) }))
+            FeatureCollection.fromFeature(Feature.fromGeometry(
+                LineString.fromLngLats(route.map { Point.fromLngLat(it.lon, it.lat) })))
         else FeatureCollection.fromFeatures(emptyList()))
 
     style.getSourceAs<GeoJsonSource>(OWN_SRC)?.setGeoJson(
-        if (own != null) Feature.fromGeometry(Point.fromLngLat(own.lon, own.lat))
+        if (own != null) FeatureCollection.fromFeature(
+            Feature.fromGeometry(Point.fromLngLat(own.lon, own.lat)))
         else FeatureCollection.fromFeatures(emptyList()))
     // reflect the chosen own-icon as a colour for now
     style.getLayerAs<CircleLayer>(OWN_LYR)?.setProperties(
@@ -317,7 +318,8 @@ private fun updateData(
         }))
 
     style.getSourceAs<GeoJsonSource>(DEST_SRC)?.setGeoJson(
-        if (dest != null) Feature.fromGeometry(Point.fromLngLat(dest.lon, dest.lat))
+        if (dest != null) FeatureCollection.fromFeature(
+            Feature.fromGeometry(Point.fromLngLat(dest.lon, dest.lat)))
         else FeatureCollection.fromFeatures(emptyList()))
 
     // map-data overlays — each drawn only if its POI type is enabled

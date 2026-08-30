@@ -16,6 +16,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -304,7 +305,7 @@ private fun ArrowView(g: Guidance?, big: Boolean) {
                 Maneuver.UTURN -> 180f
                 else -> 0f
             }
-            androidx.compose.ui.graphics.drawscope.rotate(deg, pivot = Offset(cx, cy)) {
+            rotate(deg, pivot = Offset(cx, cy)) {
                 val len = size.minDimension * 0.34f
                 drawPath(Path().apply { moveTo(cx, cy + len); lineTo(cx, cy - len) },
                     EnactGreen, style = Stroke(width = size.minDimension * 0.09f))

@@ -1,5 +1,12 @@
 # DBM Changelog
 
+## v1.20.95 — fix nav map compile errors (from v1.20.90)
+- Fixed setGeoJson ambiguity in MapLibreBase: the route/own/destination sources
+  used an if/else returning a Feature in one branch and a FeatureCollection in the
+  other, whose common supertype matched no setGeoJson overload. Both branches now
+  return a FeatureCollection (single feature wrapped via fromFeature).
+- Fixed unresolved 'rotate' in NavScreen's ArrowView by importing
+  androidx.compose.ui.graphics.drawscope.rotate instead of calling it by FQN.
 ## v1.20.94 — customizable POI list for the navigation map
 - Replaced the single "show map data" toggle with a customizable list of POI /
   map-data categories in Settings > Navigation. Each can be turned on/off
