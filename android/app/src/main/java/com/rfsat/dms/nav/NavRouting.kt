@@ -1,0 +1,90 @@
+package com.rfsat.dms.nav
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.withContext
+
+/** Where the routing flow currently is, for the UI to reflect. */
+enum class RoutingPhase { IDLE, SEARCHING, ROUTING, NAVIGATING, ERROR }
+
+data class RoutingState(
+    val phase: RoutingPhase = RoutingPhase.IDLE,
+    val start: GeoPoint? = null,
+    val startLabel: String = "Current location",
+    val destination: GeoPoint? = null,
+    val destinationLabel: String = "",
+    val searchResults: List<Pair<String, GeoPoint>> = emptyList(),
+    val route: Route? = null,
+    val guidance: Guidance? = null,
+    val error: String? = null
+)
+
+/**
+ * Owns the routing/navigation flow, independent of any UI framework. The screen
+ * observes `state` and calls these methods. Provider is injected, so online
+ * (OSM) today and offline later are interchangeable.
+ */
+class NavRouter(@Volatile var provider: NavProvider) {
+
+    private val _state = MutableStateFlow(RoutingState())
+    val state: StateFlow<RoutingState> = _state
+
+    private var engine: RouteEngine? = null
+
+    /** Set the start point (null = use live location supplied at navigate time). */
+    fun setStart(point: GeoPoint?, label: String) {
+        _state.value = _state.value.copy(start = point, startLabel = label)
+    }
+
+    suspend fun search(query: String) {
+        if (query.isBlank()) return
+        _state.value = _state.value.copy(phase = RoutingPhase.SEARCHING, error = null)
+        val results = withContext(Dispatchers.IO) {
+            runCatching { provider.search(query) }.getOrDefault(emptyList()) }
+        _state.value = _state.value.copy(
+            phase = RoutingPhase.IDLE, searchResults = results)
+    }
+
+    fun chooseDestination(label: String, point: GeoPoint) {
+        _state.value = _state.value.copy(
+            destination = point, destinationLabel = label, searchResults = emptyList())
+    }
+
+    /** Calculate the route from start (or the given live position) to destination. */
+    suspend fun calculateRoute(livePosition: GeoPoint?) {
+        val s = _state.value
+        val from = s.start ?: livePosition
+        val to = s.destination
+        if (from == null || to == null) {
+            _state.value = s.copy(phase = RoutingPhase.ERROR,
+                error = "Need both a start and a destination.")
+            return
+        }
+        _state.value = s.copy(phase = RoutingPhase.ROUTING, error = null)
+        val route = withContext(Dispatchers.IO) {
+            runCatching { provider.route(from, to) }.getOrNull() }
+        if (route == null) {
+            _state.value = _state.value.copy(phase = RoutingPhase.ERROR,
+                error = "Could not calculate a route (service unreachable?).")
+            return
+        }
+        engine = RouteEngine(route)
+        _state.value = _state.value.copy(
+            phase = RoutingPhase.NAVIGATING, route = route,
+            guidance = engine!!.update(from, null, null))
+    }
+
+    /** Feed a live position update during navigation to advance guidance. */
+    fun onPosition(pos: GeoPoint, speedMps: Float?, speedLimitKmh: Int?) {
+        val e = engine ?: return
+        if (_state.value.phase != RoutingPhase.NAVIGATING) return
+        _state.value = _state.value.copy(
+            guidance = e.update(pos, speedMps, speedLimitKmh))
+    }
+
+    fun stop() {
+        engine = null
+        _state.value = RoutingState()
+    }
+}

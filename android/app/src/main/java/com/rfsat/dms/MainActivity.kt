@@ -355,7 +355,9 @@ class MainActivity : ComponentActivity() {
                 4 -> ObdScreen()
                 5 -> LogScreen()
                 6 -> SettingsScreen()
-                7 -> com.rfsat.dms.nav.NavScreen()
+                7 -> com.rfsat.dms.nav.NavScreen(
+                        positionFlow = service?.speed?.position,
+                        speedKmhFlow = service?.speed?.speedKmh)
             }
             // Auto-dim only while on the Detector tab and actively monitoring.
             val monitoring by (service?.analysing

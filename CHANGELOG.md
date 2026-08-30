@@ -1,5 +1,18 @@
 # DBM Changelog
 
+## v1.20.85 — Navigation: real OSM routing (start/destination/navigate)
+- Navigation now does REAL routing on free OpenStreetMap services (no API key,
+  no billing): OSRM for routing + Nominatim for address search. Enter a
+  destination, pick a result, tap Go, and it calculates a real route with
+  turn-by-turn steps and navigates using the phone's live GNSS position (reused
+  from the existing SpeedMonitor — no new location handling). Live guidance
+  (next maneuver + distance) drives the arrow/text/ribbon renderers.
+- Provider is behind the NavProvider interface, so the online OSM provider can be
+  swapped for an offline one (downloaded maps + on-device routing) later with no
+  UI changes. For production, OSRM/Nominatim can be pointed at self-hosted servers.
+- Actual map DISPLAY (2D/perspective/3D) still shows placeholders: it needs the
+  MapLibre GL native library, a deliberate dependency add — see notes. Camera-AR
+  likewise waits on reliable on-road lane detection (see design doc).
 ## v1.20.84 — Navigation (skeleton) + tab bar polish
 - New "Navigation" top-bar tab (added at the end so all existing tab indices,
   incl. the OBD special-casing, are untouched). Self-contained in a new
