@@ -1499,7 +1499,7 @@ class MainActivity : ComponentActivity() {
         var layer by remember { mutableStateOf(s.mapLayer) }
         var icon by remember { mutableStateOf(s.ownIcon) }
         var mirror by remember { mutableStateOf(s.windshieldMirror) }
-        var mapData by remember { mutableStateOf(s.showMapData) }
+        var pois by remember { mutableStateOf(s.enabledPois) }
 
         @Composable
         fun pill(label: String, sel: Boolean, onClick: () -> Unit) {
@@ -1545,11 +1545,24 @@ class MainActivity : ComponentActivity() {
             }
         }
         Spacer(Modifier.height(8.dp))
-        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            Text("Show speed limits, parking & cameras on map",
-                color = EnactOnSurface, fontSize = 12.sp, modifier = Modifier.weight(1f))
-            androidx.compose.material3.Switch(checked = mapData,
-                onCheckedChange = { mapData = it; s.showMapData = it })
+        Text("Show on map", color = EnactLime, fontSize = 12.sp,
+            fontWeight = FontWeight.Bold)
+        Text("Pick which map data to display. Greyed items aren't in the current " +
+             "map data yet.", color = EnactOnSurfaceDim, fontSize = 10.sp)
+        com.rfsat.dms.nav.PoiType.values().forEach { poi ->
+            Row(Modifier.fillMaxWidth(),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text(poi.label + if (!poi.available) "  (coming soon)" else "",
+                    color = if (poi.available) EnactOnSurface else EnactOnSurfaceDim,
+                    fontSize = 12.sp, modifier = Modifier.weight(1f))
+                androidx.compose.material3.Switch(
+                    enabled = poi.available,
+                    checked = poi in pois,
+                    onCheckedChange = { on ->
+                        pois = if (on) pois + poi else pois - poi
+                        s.enabledPois = pois
+                    })
+            }
         }
         Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
             Text("Windshield mirror (for dashboard reflection)",

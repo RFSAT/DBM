@@ -60,7 +60,7 @@ fun NavScreen(
     val ownIcon = settings.ownIcon
     val overlays = settings.overlays
     val mirror = settings.windshieldMirror
-    val showMapData = settings.showMapData
+    val enabledPois = settings.enabledPois
 
     val livePos = positionFlow?.collectAsState()?.value
     val liveSpeedKmh = speedKmhFlow?.collectAsState()?.value ?: 0
@@ -83,10 +83,11 @@ fun NavScreen(
             livePos?.let { GeoPoint(it.first, it.second) }
         else mapCenter ?: livePos?.let { GeoPoint(it.first, it.second) }
     LaunchedEffect(overlayAnchor?.lat?.let { (it * 200).toInt() },
-                   overlayAnchor?.lon?.let { (it * 200).toInt() }, showMapData) {
+                   overlayAnchor?.lon?.let { (it * 200).toInt() }, enabledPois) {
         val a = overlayAnchor
-        overlayData = if (showMapData && a != null)
-            mapOverlayProvider?.invoke(a.lat, a.lon) else null
+        overlayData = if (enabledPois.isNotEmpty() && a != null)
+            mapOverlayProvider?.invoke(a.lat, a.lon)?.copy(enabled = enabledPois)
+        else null
     }
 
     val guidance = routing.guidance

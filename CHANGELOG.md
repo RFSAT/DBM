@@ -1,5 +1,14 @@
 # DBM Changelog
 
+## v1.20.94 — customizable POI list for the navigation map
+- Replaced the single "show map data" toggle with a customizable list of POI /
+  map-data categories in Settings > Navigation. Each can be turned on/off
+  individually and the choice persists. Currently available (backed by the
+  offline map data): speed limits, speed cameras, parking. Future categories
+  (fuel, EV charging, hospitals, rest areas) are listed but greyed out until the
+  map pre-processor emits them — adding one later is a single enum entry plus a
+  query + layer, so the list is extensible by design (PoiType).
+- The map draws only the enabled categories; disabling one clears its layer.
 ## v1.20.93 — nav map: camera & parking icons instead of dots
 - Speed cameras and parking on the navigation map are now shown as clear ICONS
   instead of plain coloured dots: a red camera badge for speed cameras and a blue

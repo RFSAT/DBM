@@ -320,21 +320,23 @@ private fun updateData(
         if (dest != null) Feature.fromGeometry(Point.fromLngLat(dest.lon, dest.lat))
         else FeatureCollection.fromFeatures(emptyList()))
 
-    // map-data overlays
+    // map-data overlays — each drawn only if its POI type is enabled
+    val en = mapData?.enabled ?: emptySet()
+    val empty = FeatureCollection.fromFeatures(emptyList())
     style.getSourceAs<GeoJsonSource>(LIMIT_SRC)?.setGeoJson(
-        mapData?.speedLimitLines?.let { lines ->
-            FeatureCollection.fromFeatures(lines.map { seg ->
+        if (PoiType.SPEED_LIMITS in en && mapData != null)
+            FeatureCollection.fromFeatures(mapData.speedLimitLines.map { seg ->
                 Feature.fromGeometry(LineString.fromLngLats(
                     seg.map { Point.fromLngLat(it.lon, it.lat) })) })
-        } ?: FeatureCollection.fromFeatures(emptyList()))
+        else empty)
     style.getSourceAs<GeoJsonSource>(PARK_SRC)?.setGeoJson(
-        mapData?.parking?.let { pts ->
-            FeatureCollection.fromFeatures(pts.map {
+        if (PoiType.PARKING in en && mapData != null)
+            FeatureCollection.fromFeatures(mapData.parking.map {
                 Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)) })
-        } ?: FeatureCollection.fromFeatures(emptyList()))
+        else empty)
     style.getSourceAs<GeoJsonSource>(CAM_SRC)?.setGeoJson(
-        mapData?.cameras?.let { pts ->
-            FeatureCollection.fromFeatures(pts.map {
+        if (PoiType.SPEED_CAMERAS in en && mapData != null)
+            FeatureCollection.fromFeatures(mapData.cameras.map {
                 Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)) })
-        } ?: FeatureCollection.fromFeatures(emptyList()))
+        else empty)
 }

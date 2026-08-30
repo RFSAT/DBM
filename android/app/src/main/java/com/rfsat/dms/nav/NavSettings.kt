@@ -74,9 +74,19 @@ class NavSettings(ctx: Context) {
         get() = get("theme", NavTheme.AUTO) { NavTheme.valueOf(it) }
         set(v) { p.edit().putString("theme", v.name).apply() }
 
-    var showMapData: Boolean      // speed limits / parking / cameras on the map
-        get() = p.getBoolean("mapdata", true)
-        set(v) { p.edit().putBoolean("mapdata", v).apply() }
+    /** Which POI / map-data categories to draw on the navigation map. */
+    var enabledPois: Set<PoiType>
+        get() {
+            val saved = p.getStringSet("pois", null)
+                ?: return PoiType.defaults
+            return saved.mapNotNull { runCatching { PoiType.valueOf(it) }.getOrNull() }
+                .filter { it.available }.toSet()
+        }
+        set(v) { p.edit().putStringSet("pois",
+            v.filter { it.available }.map { it.name }.toSet()).apply() }
+
+    /** Convenience: is ANY map data enabled (used to skip the query entirely). */
+    val anyPoiEnabled: Boolean get() = enabledPois.isNotEmpty()
 
     var googleApiKey: String?
         get() = p.getString("google_key", null)
