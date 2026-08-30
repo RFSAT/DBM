@@ -17,7 +17,7 @@ plugins {
 // ---------------------------------------------------------------------------
 val dmsVersionEpoch = 1
 val dmsVersionMajor = 20
-val dmsVersionMinor = 85
+val dmsVersionMinor = 86
 val dmsVersionName = "$dmsVersionEpoch.$dmsVersionMajor.$dmsVersionMinor"
 
 android {
@@ -140,6 +140,16 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-service:2.8.7")
+
+    // Navigation maps: MapLibre GL Native (open-source, BSD). Renders real OSM
+    // vector tiles (free demotiles style, no API key) for the 2D/perspective/3D
+    // nav base views and draws the route line. Ships native .so libraries — if
+    // the CI 16 KB-alignment check warns about a new maplibre .so, that means
+    // this version isn't 16 KB-aligned yet; bump to a newer one (or add it to the
+    // KNOWN_ACCEPTED list once Play accepts it). We keep the default Google Play
+    // Services location dependency (the app already uses gms location), so no
+    // exclude is needed here.
+    implementation("org.maplibre.gl:android-sdk:13.5.1")
 
     // Phone cameras (Phase 1)
     implementation("androidx.camera:camera-core:$camerax")

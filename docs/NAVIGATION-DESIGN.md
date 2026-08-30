@@ -62,3 +62,16 @@ Each renderer = one class; adding a mode = adding a class, touching no others.
 - MapLibre GL Android does 2D/perspective/3D + offline vector tiles in one engine.
 - Routing: OSRM/GraphHopper/Valhalla public or self-host; offline via on-device
   Valhalla or a routing graph built from the downloaded maps.
+
+## Progress log
+- v1.20.84: skeleton (state model, provider interface, arrow renderer).
+- v1.20.85: real routing — OSRM + Nominatim online provider; destination search,
+  route calc, live guidance from GNSS.
+- v1.20.86: MapLibre map bases (2D/perspective/3D via camera tilt, real OSM tiles,
+  route line drawn); geometric camera-AR base (ArProjection) drawing the route
+  carpet+arrow projected onto the road plane — no ML needed for straight/level
+  roads. REMAINING for camera-AR: (a) composite the live front-camera feed behind
+  the projection (camera owned by MonitorService); (b) ML road/lane segmentation
+  to refine placement on hills/curves and mask non-road regions. The current
+  classical LaneAnalyzer is the fallback; an ML segmentation model (e.g. a small
+  TFLite UFLD/road-seg net) is the accuracy path and is a separate sourcing task.

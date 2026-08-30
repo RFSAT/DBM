@@ -93,3 +93,11 @@
 -keepclassmembers class com.google.protobuf.** { <fields>; }
 -keepnames class com.google.protobuf.** { *; }
 -dontwarn com.google.protobuf.**
+
+# --- MapLibre GL Native (navigation maps) ------------------------------------
+# MapLibre uses JNI heavily; its native<->Java bridge classes must be kept intact
+# or the release (R8-minified) build crashes at runtime when the map initializes.
+-keep class org.maplibre.android.** { *; }
+-keep class com.mapbox.** { *; }
+-keep class org.maplibre.geojson.** { *; }
+-dontwarn org.maplibre.**

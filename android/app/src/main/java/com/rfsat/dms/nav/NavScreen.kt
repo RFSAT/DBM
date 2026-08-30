@@ -78,19 +78,21 @@ fun NavScreen(
             .then(if (mirror) Modifier.scale(scaleX = -1f, scaleY = 1f) else Modifier)) {
 
         // ---- BASE VIEW ------------------------------------------------------
+        val routePts = routing.route?.points
+        val centerPt = livePos?.let { GeoPoint(it.first, it.second) }
+            ?: routePts?.firstOrNull()
         when (state.base) {
             BaseView.ARROW_ONLY -> ArrowView(guidance, big = true)
-            BaseView.CAMERA_AR -> PlaceholderBase("Camera (AR) view",
-                "Arrows over the road in the camera view. This needs on-road lane " +
-                "detection to place the arrow correctly — in progress. The arrow " +
-                "overlay itself works and will be composited here once road " +
-                "geometry is reliable.")
-            BaseView.MAP_2D_TOPDOWN -> PlaceholderBase("2D map",
-                "Interactive OSM map (MapLibre) — next integration step.")
-            BaseView.MAP_2D_PERSPECTIVE -> PlaceholderBase("2D perspective",
-                "Tilted bird's-eye OSM map — MapLibre camera pitch.")
-            BaseView.MAP_3D -> PlaceholderBase("3D map",
-                "3D terrain + buildings — MapLibre.")
+            BaseView.CAMERA_AR -> CameraArBase(guidance)
+            BaseView.MAP_2D_TOPDOWN ->
+                MapLibreBase(routePts, centerPt, tiltDegrees = 0.0,
+                    modifier = Modifier.fillMaxSize())
+            BaseView.MAP_2D_PERSPECTIVE ->
+                MapLibreBase(routePts, centerPt, tiltDegrees = 45.0,
+                    modifier = Modifier.fillMaxSize())
+            BaseView.MAP_3D ->
+                MapLibreBase(routePts, centerPt, tiltDegrees = 62.0,
+                    modifier = Modifier.fillMaxSize())
         }
 
         // ---- VISUAL OVERLAYS (any combination) ------------------------------
@@ -242,14 +244,60 @@ private fun ArrowView(g: Guidance?, big: Boolean) {
     }
 }
 
+/**
+ * Camera-AR base: draws the navigation path projected onto the road plane using
+ * the geometric projection (ArProjection), so the arrow sits where the road is
+ * on a straight, level road — no ML needed for this baseline. The LIVE camera
+ * feed is composited behind this next (the camera is owned by the monitor
+ * service); until then it's drawn over a dark backdrop so the projection is
+ * visible. ML road segmentation will refine placement on hills/curves and mask
+ * out non-road areas.
+ */
 @Composable
-private fun PlaceholderBase(title: String, detail: String) {
-    Column(Modifier.fillMaxSize().padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center) {
-        Text(title, color = EnactGreen, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(10.dp))
-        Text(detail, color = EnactOnSurfaceDim, fontSize = 14.sp)
+private fun CameraArBase(g: Guidance?) {
+    val proj = remember { ArProjection() }
+    // Bend the projected path toward the upcoming maneuver so the carpet leads
+    // into the turn (sign only; magnitude is a gentle visual lead for the demo).
+    val bend = when (g?.nextStep?.maneuver) {
+        Maneuver.TURN_LEFT, Maneuver.SLIGHT_LEFT, Maneuver.SHARP_LEFT -> -0.25
+        Maneuver.TURN_RIGHT, Maneuver.SLIGHT_RIGHT, Maneuver.SHARP_RIGHT -> 0.25
+        else -> 0.0
+    }
+    Box(Modifier.fillMaxSize().background(EnactDark)) {
+        androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+            val dists = (3..60 step 3).map { it.toDouble() }
+            val pts = proj.projectPath(dists, bendDegPerM = bend)
+                .map { Offset(it.first * size.width, it.second * size.height) }
+            if (pts.size >= 2) {
+                // road "carpet": a thick tapering line from near to far
+                for (i in 0 until pts.size - 1) {
+                    val t = i.toFloat() / (pts.size - 1)
+                    drawPath(Path().apply {
+                        moveTo(pts[i].x, pts[i].y); lineTo(pts[i + 1].x, pts[i + 1].y)
+                    }, EnactGreen.copy(alpha = 0.85f - t * 0.5f),
+                        style = Stroke(width = (34f * (1f - t)) + 6f))
+                }
+                // arrowhead at the far end pointing along the last segment
+                val a = pts[pts.size - 2]; val b = pts[pts.size - 1]
+                val ang = kotlin.math.atan2(b.y - a.y, b.x - a.x)
+                val hl = 26f
+                drawPath(Path().apply {
+                    moveTo(b.x, b.y)
+                    lineTo(b.x - hl * kotlin.math.cos(ang - 0.5).toFloat(),
+                           b.y - hl * kotlin.math.sin(ang - 0.5).toFloat())
+                    lineTo(b.x - hl * kotlin.math.cos(ang + 0.5).toFloat(),
+                           b.y - hl * kotlin.math.sin(ang + 0.5).toFloat())
+                    close()
+                }, EnactGreen)
+            }
+        }
+        Text("Camera-AR (geometric projection) — live camera composites behind next",
+            color = EnactOnSurfaceDim, fontSize = 11.sp,
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = 92.dp))
+        if (g?.nextStep != null)
+            Text(g.nextStep.instruction, color = EnactOnSurface, fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 70.dp))
     }
 }
 

@@ -1,5 +1,22 @@
 # DBM Changelog
 
+## v1.20.86 — Navigation: real maps (MapLibre) + geometric camera-AR
+- Real interactive maps via MapLibre GL Native (open-source; free OSM demotiles
+  style, no API key). The three map base views are one engine at different camera
+  tilts: 2D top-down (0deg), 2D perspective (45deg), 3D-style (62deg). The active
+  route is drawn as a line on the map. Adds the org.maplibre.gl:android-sdk
+  dependency (ships native .so libs) + R8 keep rules for its JNI classes.
+- Camera-AR base now draws the navigation path GEOMETRICALLY projected onto the
+  road plane (ArProjection: pinhole + flat-ground model using the mount height/
+  pitch), so the arrow/"carpet" sits where the road is on a straight, level road
+  WITHOUT needing ML road detection. Verified the projection numerically (near
+  points low in frame, far points rise to the horizon, lateral offsets track).
+  Remaining for full camera-AR: composite the live front-camera feed behind it,
+  and add ML road/lane segmentation to refine curves/hills and mask non-road.
+- NOTE: MapLibre ships native libraries. If the CI 16 KB-alignment check warns
+  about a new maplibre .so, bump the SDK version. Verified API against MapLibre
+  13.5.1 and the correct LocalLifecycleOwner package for this Compose version,
+  but this is a large native dependency not compiled here — watch the first CI.
 ## v1.20.85 — Navigation: real OSM routing (start/destination/navigate)
 - Navigation now does REAL routing on free OpenStreetMap services (no API key,
   no billing): OSRM for routing + Nominatim for address search. Enter a
