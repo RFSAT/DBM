@@ -553,7 +553,7 @@ class MainActivity : ComponentActivity() {
     private fun NavCameraAr(modifier: Modifier) {
         val analysing by (service?.analysing
             ?: MutableStateFlow(true)).collectAsState()
-        val liveResult by (service?.results?.get(CameraRole.ROAD)
+        val liveResult by (service?.results?.get(CameraRole.FRONT)
             ?: MutableStateFlow(AnalysisResult())).collectAsState()
         val result = if (analysing) liveResult else AnalysisResult()
         Box(modifier) {

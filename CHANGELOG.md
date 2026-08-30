@@ -1,5 +1,9 @@
 # DBM Changelog
 
+## v1.20.89 — fix nav camera build error
+- Fixed the compile error in v1.20.88: NavCameraAr referenced CameraRole.ROAD,
+  which doesn't exist — the road-facing camera role is FRONT (as used everywhere
+  else). One-line fix; no behaviour change.
 ## v1.20.88 — Navigation: road network, zoom/orientation, waypoints, live camera
 - Maps now render the full surrounding OSM road network (raster street tiles, no
   API key), with the route drawn on top — not just the route line.
