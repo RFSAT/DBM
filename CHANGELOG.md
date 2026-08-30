@@ -1,5 +1,17 @@
 # DBM Changelog
 
+## v1.20.87 — fix MapLibre/Kotlin build failure
+- Fixed the CI build failure introduced with MapLibre in v1.20.86: MapLibre 13.5.1
+  is compiled with Kotlin 2.2.0 and pulled kotlin-stdlib 2.2.10, whose metadata the
+  project's Kotlin 2.0.21 compiler cannot read (kspDebug/ReleaseKotlin failed with
+  "binary version of its metadata is 2.2.0, expected 2.0.0").
+- Pinned MapLibre to 13.0.0 — verified (from its published module metadata) to be
+  the last release built against Kotlin 2.0.x (kotlin-stdlib 2.0.20), and confirmed
+  all APIs used (MapView.getMapAsync, Style.Builder.fromUri, getSource/getSourceAs,
+  GeoJsonSource.setGeoJson, LineLayer, CameraPosition) exist in 13.0.0.
+- Also pinned kotlin-stdlib to 2.0.21 via a dependency constraint so no transitive
+  dependency can drag it above the compiler's version again. No app source changed;
+  this is a build-configuration-only fix.
 ## v1.20.86 — Navigation: real maps (MapLibre) + geometric camera-AR
 - Real interactive maps via MapLibre GL Native (open-source; free OSM demotiles
   style, no API key). The three map base views are one engine at different camera

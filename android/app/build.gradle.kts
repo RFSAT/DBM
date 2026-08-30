@@ -17,7 +17,7 @@ plugins {
 // ---------------------------------------------------------------------------
 val dmsVersionEpoch = 1
 val dmsVersionMajor = 20
-val dmsVersionMinor = 86
+val dmsVersionMinor = 87
 val dmsVersionName = "$dmsVersionEpoch.$dmsVersionMajor.$dmsVersionMinor"
 
 android {
@@ -128,6 +128,14 @@ androidComponents {
 }
 
 dependencies {
+    // Keep the Kotlin stdlib pinned to the project's Kotlin version (2.0.21) so a
+    // transitive dependency can't drag it up to a newer metadata version than the
+    // 2.0.21 compiler can read (which broke the build when MapLibre pulled 2.2.10).
+    constraints {
+        implementation("org.jetbrains.kotlin:kotlin-stdlib:2.0.21")
+        implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.0.21")
+        implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.0.21")
+    }
     val media3 = "1.5.1"
     // 16 KB: CameraX 1.4.x ships libimage_processing_util_jni.so and
     // libsurface_util_jni.so aligned to 4 KB. Bumped to the 1.5.x line, which is
@@ -143,13 +151,18 @@ dependencies {
 
     // Navigation maps: MapLibre GL Native (open-source, BSD). Renders real OSM
     // vector tiles (free demotiles style, no API key) for the 2D/perspective/3D
-    // nav base views and draws the route line. Ships native .so libraries — if
-    // the CI 16 KB-alignment check warns about a new maplibre .so, that means
-    // this version isn't 16 KB-aligned yet; bump to a newer one (or add it to the
-    // KNOWN_ACCEPTED list once Play accepts it). We keep the default Google Play
-    // Services location dependency (the app already uses gms location), so no
-    // exclude is needed here.
-    implementation("org.maplibre.gl:android-sdk:13.5.1")
+    // nav base views and draws the route line. Ships native .so libraries.
+    //
+    // Pinned to 13.0.0 deliberately: it is the LAST release built against Kotlin
+    // 2.0.x (kotlin-stdlib 2.0.20). Versions 13.4.1+ are built with Kotlin 2.2.0,
+    // whose module metadata a Kotlin 2.0.21 compiler cannot read — that caused a
+    // "binary version of its metadata is 2.2.0, expected 2.0.0" failure in
+    // kspDebug/ReleaseKotlin. Do NOT bump this past 13.0.0 without also bumping
+    // the project's Kotlin toolchain (android/build.gradle.kts) to match. All the
+    // APIs used here (MapView.getMapAsync, Style.Builder.fromUri, getSourceAs,
+    // GeoJsonSource.setGeoJson, LineLayer, CameraPosition) exist in 13.0.0.
+    // If the CI 16 KB-alignment check warns about a maplibre .so, see PLAY notes.
+    implementation("org.maplibre.gl:android-sdk:13.0.0")
 
     // Phone cameras (Phase 1)
     implementation("androidx.camera:camera-core:$camerax")
