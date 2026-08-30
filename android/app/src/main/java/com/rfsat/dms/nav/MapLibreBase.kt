@@ -54,6 +54,7 @@ fun MapLibreBase(
     headingDeg: Double,
     recenterKey: Int,               // increment to request a recenter-on-user
     mapData: MapOverlayData?,       // speed limits / parking / cameras, or null
+    onCenterChanged: ((GeoPoint) -> Unit)? = null,  // reports map center when idle
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -97,6 +98,12 @@ fun MapLibreBase(
                 m.uiSettings.isTiltGesturesEnabled = true
                 m.uiSettings.isScrollGesturesEnabled = true
                 m.uiSettings.isCompassEnabled = true
+                onCenterChanged?.let { cb ->
+                    m.addOnCameraIdleListener {
+                        val t = m.cameraPosition.target
+                        if (t != null) cb(GeoPoint(t.latitude, t.longitude))
+                    }
+                }
                 loadStyle(m, styleSpec) { style ->
                     styleHolder.value = style; loadedStyle.value = styleSpec
                     ensureLayers(style)

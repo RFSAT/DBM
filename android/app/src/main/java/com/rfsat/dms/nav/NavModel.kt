@@ -41,7 +41,7 @@ data class DisplayTransform(
 
 /** The complete, serializable navigation UI state. */
 data class NavState(
-    val base: BaseView = BaseView.ARROW_ONLY,
+    val base: BaseView = BaseView.MAP_2D_TOPDOWN,
     val overlays: Set<Overlay> = setOf(Overlay.ARROW_MANEUVER, Overlay.VOICE),
     val transform: DisplayTransform = DisplayTransform()
 ) {

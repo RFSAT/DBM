@@ -27,6 +27,19 @@ enum class OwnLocationIcon(val label: String) {
 class NavSettings(ctx: Context) {
     private val p = ctx.getSharedPreferences("dbm_nav", Context.MODE_PRIVATE)
 
+    init {
+        // One-time migration: earlier builds defaulted the base view to
+        // ARROW_ONLY. The default is now the 2D street map. On the first run of
+        // this version, if ARROW_ONLY is the stored base, clear it so the new
+        // 2D-street default takes effect. The marker ensures this runs only once,
+        // so any later deliberate choice of ARROW_ONLY in Settings is kept.
+        if (!p.getBoolean("migrated_v2", false)) {
+            if (p.getString("base", null) == "ARROW_ONLY")
+                p.edit().remove("base").apply()
+            p.edit().putBoolean("migrated_v2", true).apply()
+        }
+    }
+
     private fun <T> get(key: String, default: T, parse: (String) -> T): T =
         p.getString(key, null)?.let { runCatching { parse(it) }.getOrDefault(default) }
             ?: default

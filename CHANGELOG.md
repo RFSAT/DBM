@@ -1,5 +1,25 @@
 # DBM Changelog
 
+## v1.20.92 — Navigation defaults to 2D street map
+- The Navigation view now defaults to the 2D street map (with Street layer),
+  unless a different view/layer is chosen in Settings > Navigation. Aligned the
+  NavState default to match, and added a one-time migration so existing installs
+  that still carry the old ARROW_ONLY default switch to the 2D map (a deliberate
+  later choice of the arrow view in Settings is preserved).
+## v1.20.91 — shared map data across regions; nav overlays follow map/GPS
+- The app no longer only loads "greece.db". The active offline map region is now
+  chosen by GPS location from whatever the user has downloaded, and switches
+  automatically as you cross into another downloaded region (matched against each
+  region's catalogue bbox). This fixes speed limits / cameras / parking working
+  ONLY in Greece — it now benefits BOTH the Detector and Navigation, which share
+  the same single osmMap instance (no duplicate loading).
+- Clarified/confirmed: navigation already reuses the SAME osmMap + tables as the
+  Detector; it was never a separate copy. The Detector uses point-in-time
+  advisories (limit here / next camera ahead / parking when stopped); navigation
+  needs the set of features in view, so it queries the same db via overlayNear().
+- Nav map overlays now pull data around the MAP CENTRE when you pan the map, and
+  around your GPS position while navigating (MapLibre camera-idle reports centre).
+- Remembers the last active region across launches for an instant start.
 ## v1.20.90 — Navigation: persistent settings, better map behaviour, map data
 - Nav mode settings (default view, overlays, map layer, my-location icon,
   windshield, show-map-data) moved into Settings > Navigation and now PERSIST

@@ -74,13 +74,19 @@ fun NavScreen(
         }
     }
 
-    // Map-data overlay: refresh when the user location moves enough.
+    // Map-data overlay: query around the MAP CENTRE when the user pans the map,
+    // but around the GPS position while navigating (so it follows the drive).
+    var mapCenter by remember { mutableStateOf<GeoPoint?>(null) }
     var overlayData by remember { mutableStateOf<MapOverlayData?>(null) }
-    LaunchedEffect(livePos?.first?.let { (it * 200).toInt() },
-                   livePos?.second?.let { (it * 200).toInt() }, showMapData) {
-        val p = livePos
-        overlayData = if (showMapData && p != null)
-            mapOverlayProvider?.invoke(p.first, p.second) else null
+    val overlayAnchor: GeoPoint? =
+        if (routing.phase == RoutingPhase.NAVIGATING)
+            livePos?.let { GeoPoint(it.first, it.second) }
+        else mapCenter ?: livePos?.let { GeoPoint(it.first, it.second) }
+    LaunchedEffect(overlayAnchor?.lat?.let { (it * 200).toInt() },
+                   overlayAnchor?.lon?.let { (it * 200).toInt() }, showMapData) {
+        val a = overlayAnchor
+        overlayData = if (showMapData && a != null)
+            mapOverlayProvider?.invoke(a.lat, a.lon) else null
     }
 
     val guidance = routing.guidance
@@ -105,6 +111,7 @@ fun NavScreen(
                     styleSpec = MapStyles.styleFor(mapLayer),
                     orientation = orientation, headingDeg = heading.toDouble(),
                     recenterKey = recenterState.value, mapData = overlayData,
+                    onCenterChanged = { mapCenter = it },
                     modifier = Modifier.fillMaxSize())
             }
         }

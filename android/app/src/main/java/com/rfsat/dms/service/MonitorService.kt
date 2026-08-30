@@ -320,13 +320,21 @@ class MonitorService : Service() {
             .getBoolean("show_limit_roundel", true)
         obd = com.rfsat.dms.obd.ObdManager(this)
         obd.start()
-        // Open the on-device speed-limit database (SQLite + R-tree) off the
-        // main thread. Looks in the app files dir (where the downloader places
-        // it) then /sdcard/Download (manual adb-push during dev). Until present,
-        // fusion runs sign+cache only — safe, no crash.
+        // Open the on-device speed-limit database off the main thread. The
+        // active region is now chosen by GPS location from whatever the user has
+        // downloaded (see selectRegionForLocation); until the first fix we open
+        // the most recently used region, or any installed one, so limits work
+        // immediately on a known route. Until a db is present, fusion runs
+        // sign+cache only — safe, no crash.
         kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
-            osmMap = OsmMap.open(this@MonitorService, "greece.db")
-            DLog.i(TAG, "map db ready: ${osmMap != null}")
+            val initial = lastUsedRegionFile() ?: anyInstalledRegionFile()
+            if (initial != null) {
+                osmMap = OsmMap.open(this@MonitorService, initial)
+                activeRegionFile = if (osmMap != null) initial else null
+                DLog.i(TAG, "map db ready: ${osmMap != null} (region=$initial)")
+            } else {
+                DLog.i(TAG, "no installed map region yet")
+            }
         }
         getSharedPreferences("dbm", MODE_PRIVATE).let { p ->
             lanes.horizonOffset = p.getFloat("lane_horizon", 0f)
@@ -368,6 +376,7 @@ class MonitorService : Service() {
                         else Double.NaN
                     } ?: Double.NaN
                     lastFusePos = pos
+                    selectRegionForLocation(lat, lon)
 
                     checkCamerasAhead(lat, lon, heading, bestSpeedKmh())
 
@@ -784,6 +793,57 @@ class MonitorService : Service() {
         val pos = lastFusePos ?: return emptyList()
         return osmMap?.parking?.lotsNear(pos.first, pos.second, publicOnly = publicOnly)
             ?: emptyList()
+    }
+
+    // ---- active-region selection by GPS location -----------------------------
+    // The app can have several downloaded regions; the active one is chosen by
+    // where the user is, so limits/cameras/parking work anywhere they've
+    // downloaded — not just Greece. The db is (re)opened when the point crosses
+    // into a different region than the one currently open.
+    @Volatile private var activeRegionFile: String? = null
+    private val mapRepo by lazy { com.rfsat.dms.maps.MapRepository(this) }
+
+    private fun lastUsedRegionFile(): String? =
+        getSharedPreferences("dbm", MODE_PRIVATE).getString("active_region_file", null)
+            ?.takeIf { fileExistsForRegion(it) }
+
+    private fun anyInstalledRegionFile(): String? =
+        mapRepo.installed().values.firstOrNull()?.file?.takeIf { fileExistsForRegion(it) }
+
+    private fun fileExistsForRegion(file: String): Boolean =
+        java.io.File(java.io.File(filesDir, "maps"), file).exists() ||
+        (getExternalFilesDir("maps")?.let { java.io.File(it, file).exists() } ?: false)
+
+    /** Region .db files whose bbox contains (lat,lon), from the cached catalog. */
+    private fun regionFileContaining(lat: Double, lon: Double): String? {
+        val cat = com.rfsat.dms.maps.MapDownloader(mapRepo).loadCachedCatalog()
+            ?: return null
+        val installed = mapRepo.installed()
+        // find an installed region whose catalog bbox contains the point
+        for ((id, inst) in installed) {
+            val region = cat.regions.firstOrNull { it.id == id } ?: continue
+            val b = region.bounds ?: continue        // (minLat, minLon, maxLat, maxLon)
+            if (lat >= b[0] && lat <= b[2] && lon >= b[1] && lon <= b[3])
+                return inst.file
+        }
+        return null
+    }
+
+    /** Switch the active map db if the point falls in a different downloaded
+     *  region than the one currently open. Cheap when nothing changes. */
+    private fun selectRegionForLocation(lat: Double, lon: Double) {
+        val want = regionFileContaining(lat, lon) ?: return
+        if (want == activeRegionFile) return
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            val opened = OsmMap.open(this@MonitorService, want) ?: return@launch
+            val old = osmMap
+            osmMap = opened
+            activeRegionFile = want
+            getSharedPreferences("dbm", MODE_PRIVATE).edit()
+                .putString("active_region_file", want).apply()
+            DLog.i(TAG, "switched active map region -> $want")
+            runCatching { old?.close() }
+        }
     }
 
     /** Map-display features (speed limits / parking / cameras) around a point,
