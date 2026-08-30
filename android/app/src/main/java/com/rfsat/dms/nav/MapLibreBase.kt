@@ -1,5 +1,10 @@
 package com.rfsat.dms.nav
 
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color as AndroidColor
+import android.graphics.Paint
+import android.graphics.RectF
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableStateOf
@@ -181,11 +186,58 @@ private const val DEST_SRC = "dbm-dest"; private const val DEST_LYR = "dbm-dest-
 private const val LIMIT_SRC = "dbm-lim"; private const val LIMIT_LYR = "dbm-lim-l"
 private const val PARK_SRC = "dbm-park"; private const val PARK_LYR = "dbm-park-l"
 private const val CAM_SRC = "dbm-cam"; private const val CAM_LYR = "dbm-cam-l"
+private const val ICON_PARKING = "dbm-ic-parking"
+private const val ICON_CAMERA = "dbm-ic-camera"
 
 private fun loadStyle(map: MapLibreMap, spec: String, onLoaded: (Style) -> Unit) {
     val b = if (MapStyles.isInlineJson(spec)) Style.Builder().fromJson(spec)
             else Style.Builder().fromUri(spec)
     map.setStyle(b) { onLoaded(it) }
+}
+
+/**
+ * Register the parking and camera icons as style images (drawn programmatically,
+ * so no asset files are bundled). A rounded blue "P" for parking, a red disc with
+ * a simple camera glyph for speed cameras. Idempotent — only adds once per style.
+ */
+private fun registerOverlayIcons(style: Style) {
+    if (style.getImage(ICON_PARKING) == null)
+        style.addImage(ICON_PARKING, parkingBitmap())
+    if (style.getImage(ICON_CAMERA) == null)
+        style.addImage(ICON_CAMERA, cameraBitmap())
+}
+
+private fun parkingBitmap(): Bitmap {
+    val s = 48
+    val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
+    val c = Canvas(bmp)
+    val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    p.color = AndroidColor.parseColor("#1565C0")
+    c.drawRoundRect(RectF(4f, 4f, s - 4f, s - 4f), 10f, 10f, p)
+    p.color = AndroidColor.WHITE; p.style = Paint.Style.STROKE; p.strokeWidth = 3f
+    c.drawRoundRect(RectF(4f, 4f, s - 4f, s - 4f), 10f, 10f, p)
+    p.style = Paint.Style.FILL; p.color = AndroidColor.WHITE
+    p.textSize = 30f; p.textAlign = Paint.Align.CENTER; p.isFakeBoldText = true
+    val fm = p.fontMetrics
+    c.drawText("P", s / 2f, s / 2f - (fm.ascent + fm.descent) / 2f, p)
+    return bmp
+}
+
+private fun cameraBitmap(): Bitmap {
+    val s = 48
+    val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
+    val c = Canvas(bmp)
+    val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    p.color = AndroidColor.parseColor("#D32F2F")
+    c.drawCircle(s / 2f, s / 2f, s / 2f - 4f, p)
+    p.color = AndroidColor.WHITE; p.style = Paint.Style.STROKE; p.strokeWidth = 3f
+    c.drawCircle(s / 2f, s / 2f, s / 2f - 4f, p)
+    p.style = Paint.Style.FILL; p.color = AndroidColor.WHITE
+    c.drawRoundRect(RectF(13f, 20f, 35f, 34f), 3f, 3f, p)
+    c.drawRect(RectF(19f, 16f, 27f, 21f), p)
+    p.color = AndroidColor.parseColor("#D32F2F")
+    c.drawCircle(24f, 27f, 4.5f, p)
+    return bmp
 }
 
 private fun ensureLayers(style: Style) {
@@ -203,18 +255,24 @@ private fun ensureLayers(style: Style) {
             PropertyFactory.lineColor("#FFCA28"), PropertyFactory.lineWidth(2.5f),
             PropertyFactory.lineOpacity(0.7f)))
     }
+    // Parking + camera get recognizable ICONS (a "P" and a camera glyph),
+    // registered as style images and drawn via SymbolLayers.
+    registerOverlayIcons(style)
     if (style.getSource(PARK_SRC) == null) {
         style.addSource(GeoJsonSource(PARK_SRC))
-        style.addLayer(CircleLayer(PARK_LYR, PARK_SRC).withProperties(
-            PropertyFactory.circleColor("#42A5F5"), PropertyFactory.circleRadius(4f),
-            PropertyFactory.circleOpacity(0.8f)))
+        style.addLayer(SymbolLayer(PARK_LYR, PARK_SRC).withProperties(
+            PropertyFactory.iconImage(ICON_PARKING),
+            PropertyFactory.iconSize(1.0f),
+            PropertyFactory.iconAllowOverlap(true),
+            PropertyFactory.iconIgnorePlacement(true)))
     }
     if (style.getSource(CAM_SRC) == null) {
         style.addSource(GeoJsonSource(CAM_SRC))
-        style.addLayer(CircleLayer(CAM_LYR, CAM_SRC).withProperties(
-            PropertyFactory.circleColor("#EF5350"), PropertyFactory.circleRadius(5f),
-            PropertyFactory.circleStrokeColor("#FFFFFF"),
-            PropertyFactory.circleStrokeWidth(1.5f)))
+        style.addLayer(SymbolLayer(CAM_LYR, CAM_SRC).withProperties(
+            PropertyFactory.iconImage(ICON_CAMERA),
+            PropertyFactory.iconSize(1.0f),
+            PropertyFactory.iconAllowOverlap(true),
+            PropertyFactory.iconIgnorePlacement(true)))
     }
     // markers on top
     if (style.getSource(DEST_SRC) == null) {

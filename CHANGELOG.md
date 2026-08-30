@@ -1,5 +1,12 @@
 # DBM Changelog
 
+## v1.20.93 — nav map: camera & parking icons instead of dots
+- Speed cameras and parking on the navigation map are now shown as clear ICONS
+  instead of plain coloured dots: a red camera badge for speed cameras and a blue
+  "P" badge for parking. Icons are drawn programmatically (no bundled assets) and
+  registered as MapLibre style images; the layers became SymbolLayers. Own-
+  location and destination stay as circle markers. Speed-limit segments remain
+  yellow lines. (No text warnings in navigation — the map conveys these visually.)
 ## v1.20.92 — Navigation defaults to 2D street map
 - The Navigation view now defaults to the 2D street map (with Street layer),
   unless a different view/layer is chosen in Settings > Navigation. Aligned the
