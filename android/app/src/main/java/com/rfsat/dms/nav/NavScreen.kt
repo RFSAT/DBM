@@ -49,6 +49,7 @@ fun NavScreen(
     headingFlow: StateFlow<Float>? = null,
     speedLimitProvider: (() -> Int?)? = null,
     mapOverlayProvider: ((Double, Double) -> MapOverlayData?)? = null,
+    cameraWarningFlow: StateFlow<String?>? = null,   // same as Detector's warning
     cameraArContent: (@Composable (Modifier) -> Unit)? = null
 ) {
     val scope = rememberCoroutineScope()
@@ -192,6 +193,22 @@ fun NavScreen(
                 onGo = { scope.launch {
                     router.calculateRoute(livePos?.let { GeoPoint(it.first, it.second) }) } },
                 onStop = { router.stop() })
+            // Speed-camera-ahead warning — the SAME warning the Detector shows,
+            // from the same StateFlow and the same "hazard_speed_cameras" setting
+            // (so it's null/hidden when that option is off).
+            val camWarn = cameraWarningFlow?.collectAsState()?.value
+            if (camWarn != null) {
+                Row(Modifier.padding(horizontal = 8.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(EnactWarning.copy(alpha = 0.92f))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text("\uD83D\uDCF7", fontSize = 16.sp)
+                    Spacer(Modifier.width(8.dp))
+                    Text(camWarn, color = EnactDark, fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold)
+                }
+            }
         }
     }
 }

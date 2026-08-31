@@ -383,6 +383,7 @@ class MainActivity : ComponentActivity() {
                                         com.rfsat.dms.nav.GeoPoint(it.lat, it.lon) })
                             }
                         },
+                        cameraWarningFlow = service?.cameraWarning,
                         cameraArContent = { mod -> NavCameraAr(mod) })
                 }
             }

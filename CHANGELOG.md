@@ -1,5 +1,12 @@
 # DBM Changelog
 
+## v1.20.97 — speed-camera-ahead warning in Navigation
+- The navigation view now shows the same "speed camera N m ahead" warning the
+  Detector shows, as a banner under the route panel. It reuses the exact same
+  source (the service cameraWarning StateFlow from checkCamerasAhead) and the
+  same "hazard_speed_cameras" Settings option and warn-distance config — so it's
+  a single app-wide setting, and the banner is hidden when that option is off.
+  No new computation or setting was added.
 ## v1.20.96 — own-location icons, on-map mode switch, blue route
 - The own-location marker now uses the ICON chosen in Settings (blue GPS dot, car,
   pedestrian, arrow) instead of always a blue dot — the own layer became a
