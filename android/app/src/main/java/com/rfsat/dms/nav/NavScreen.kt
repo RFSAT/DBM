@@ -68,6 +68,14 @@ fun NavScreen(
     val liveSpeedKmh = speedKmhFlow?.collectAsState()?.value ?: 0
     val heading = headingFlow?.collectAsState()?.value ?: 0f
 
+    // Current speed limit (same value + setting as the Detector roundel), polled
+    // as the position updates so it shows whether or not a route is active.
+    var currentLimitKmh by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(livePos?.first?.let { (it * 500).toInt() },
+                   livePos?.second?.let { (it * 500).toInt() }) {
+        currentLimitKmh = speedLimitProvider?.invoke()
+    }
+
     LaunchedEffect(livePos, routing.phase) {
         val p = livePos
         if (p != null && routing.phase == RoutingPhase.NAVIGATING) {
@@ -124,9 +132,11 @@ fun NavScreen(
             && base != BaseView.CAMERA_AR)
             ArrowView(guidance, big = false)
         if (Overlay.SPEED_LIMIT in overlays)
-            SpeedLimitOverlay(guidance, liveSpeedKmh)
+            SpeedLimitOverlay(currentLimitKmh)
         if (Overlay.RIBBON_HUD in overlays)
             RibbonHud(guidance)
+        // Current speed with units, high-contrast, always visible (bottom-left).
+        CurrentSpeedOverlay(liveSpeedKmh, currentLimitKmh)
 
         // on-map action buttons (right side). The MODE button is always present
         // (cycles all five views like the orientation/layer buttons); the
@@ -390,17 +400,44 @@ private fun CameraArBase(g: Guidance?, cameraContent: (@Composable (Modifier) ->
 }
 
 @Composable
-private fun BoxScope.SpeedLimitOverlay(g: Guidance?, liveSpeedKmh: Int) {
+private fun BoxScope.CurrentSpeedOverlay(speedKmh: Int, limitKmh: Int?) {
+    // Current speed with units, in a high-contrast pill so it's legible over both
+    // the (light) map and the camera feed. Turns amber when over the limit.
+    val over = limitKmh != null && limitKmh > 0 && speedKmh > limitKmh + 2
+    Row(Modifier.align(Alignment.BottomStart).padding(start = 12.dp, bottom = 16.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(androidx.compose.ui.graphics.Color(0xCC000000))   // dark, ~80% opaque
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.Bottom) {
+        Text("$speedKmh",
+            color = if (over) EnactWarning else androidx.compose.ui.graphics.Color.White,
+            fontSize = 30.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.width(4.dp))
+        Text("km/h",
+            color = if (over) EnactWarning else androidx.compose.ui.graphics.Color(0xFFCFE8DD),
+            fontSize = 13.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 4.dp))
+    }
+}
+
+@Composable
+private fun BoxScope.SpeedLimitOverlay(limitKmh: Int?) {
+    // Only show when we actually have a limit (roundel option on + value known).
+    if (limitKmh == null || limitKmh <= 0) return
     Row(Modifier.align(Alignment.TopEnd).padding(top = 96.dp, end = 60.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(52.dp).clip(CircleShape).background(EnactOnSurface),
-            contentAlignment = Alignment.Center) {
-            Text("${g?.speedLimitKmh ?: "--"}", color = EnactError,
-                fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        // Speed-limit roundel (white disc + red ring + value) — same style as the
+        // Detector's sign roundel.
+        Box(Modifier.size(56.dp), contentAlignment = Alignment.Center) {
+            androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+                val r = size.minDimension / 2f
+                drawCircle(androidx.compose.ui.graphics.Color.White, r, center)
+                drawCircle(androidx.compose.ui.graphics.Color(0xFFD32F2F), r, center,
+                    style = Stroke(width = r * 0.30f))
+            }
+            Text("$limitKmh", fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                color = androidx.compose.ui.graphics.Color.Black)
         }
-        Spacer(Modifier.width(8.dp))
-        Text("$liveSpeedKmh", color = EnactOnSurface, fontSize = 20.sp,
-            fontWeight = FontWeight.Bold)
     }
 }
 

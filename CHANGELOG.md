@@ -1,5 +1,27 @@
 # DBM Changelog
 
+## v1.20.100 — tighter top menu spacing
+- Reduced the horizontal spacing between top-menu items. Replaced the Material
+  ScrollableTabRow (which imposes a ~90dp minimum width per tab, spreading short
+  labels far apart) with a horizontally-scrolling Row of the same shaded pills,
+  sitting directly beside each other with a small 2dp gap. Selection tint and the
+  Exit action are unchanged; the OBD tab still hides when OBD is off.
+## v1.20.99 — nav: current speed with units, high contrast
+- Current speed is shown again in the navigation view (it had been dropped when
+  the speed-limit roundel was cleaned up), now WITH units ("km/h") and in a
+  high-contrast dark pill with white text so it stays legible over both the light
+  map and the camera feed. It turns amber when you're over the current limit.
+  Placed bottom-left, clear of the route panel and the button column.
+## v1.20.98 — nav: speed-limit roundel, bigger own icon, remove logo bar
+- Speed limit now DISPLAYS on the navigation map, as a proper red-ring roundel
+  (same style as the Detector). Root cause: NavScreen had a speedLimitProvider
+  parameter that MainActivity never passed, so the value was always null. It now
+  reads the SAME fused limit and the SAME "show roundel" setting the Detector
+  uses, polled as position updates (shown with or without an active route).
+- Increased the own-location icon size (iconSize 1.0 -> 1.7) so it stands out.
+- Removed the horizontal black line at the bottom of the nav map: that was
+  MapLibre's logo strip. Disabled the logo; OSM attribution stays as the small
+  "i" button (licence compliance).
 ## v1.20.97 — speed-camera-ahead warning in Navigation
 - The navigation view now shows the same "speed camera N m ahead" warning the
   Detector shows, as a banner under the route panel. It reuses the exact same

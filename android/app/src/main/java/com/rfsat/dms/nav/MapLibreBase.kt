@@ -103,6 +103,11 @@ fun MapLibreBase(
                 m.uiSettings.isTiltGesturesEnabled = true
                 m.uiSettings.isScrollGesturesEnabled = true
                 m.uiSettings.isCompassEnabled = true
+                // Hide MapLibre's logo strip (the dark bar that appears at the
+                // bottom). Attribution stays as the small "i" button (kept for OSM
+                // licence compliance), nudged in from the bottom-left corner.
+                m.uiSettings.isLogoEnabled = false
+                m.uiSettings.isAttributionEnabled = true
                 onCenterChanged?.let { cb ->
                     m.addOnCameraIdleListener {
                         val t = m.cameraPosition.target
@@ -359,7 +364,7 @@ private fun ensureLayers(style: Style) {
         // chosen in Settings. iconImage is set in updateData to match the choice.
         style.addLayer(SymbolLayer(OWN_LYR, OWN_SRC).withProperties(
             PropertyFactory.iconImage(ICON_OWN_BLUE_DOT),
-            PropertyFactory.iconSize(1.0f),
+            PropertyFactory.iconSize(1.7f),
             PropertyFactory.iconAllowOverlap(true),
             PropertyFactory.iconIgnorePlacement(true),
             PropertyFactory.iconRotationAlignment("map")))

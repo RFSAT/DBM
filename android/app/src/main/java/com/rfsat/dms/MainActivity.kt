@@ -40,10 +40,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Slider
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRowDefaults
-import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
-import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -292,64 +288,44 @@ class MainActivity : ComponentActivity() {
         }
         Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().background(EnactDark).safeDrawingPadding()) {
-            ScrollableTabRow(
-                selectedTabIndex = tab,
-                containerColor = EnactDarkMid,
-                contentColor = EnactGreen,
-                edgePadding = 4.dp,
-                indicator = { pos ->
-                    // When the OBD tab is hidden, the rendered position list is
-                    // shorter than the tab index space; map the selected logical
-                    // tab to its rendered position and clamp to avoid overflow.
-                    val renderedIndex = if (!obdOn && tab > 4) tab - 1 else tab
-                    if (renderedIndex in pos.indices) {
-                        TabRowDefaults.SecondaryIndicator(
-                            Modifier.tabIndicatorOffset(pos[renderedIndex]),
-                            color = EnactGreen)
-                    }
-                },
+            Row(
+                Modifier.fillMaxWidth()
+                    .background(EnactDarkMid)
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 4.dp, vertical = 3.dp),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
             ) {
                 tabs.forEachIndexed { i, name ->
                     // Skip the OBD tab (index 4) when OBD is disabled.
                     if (i == 4 && !obdOn) return@forEachIndexed
                     val sel = tab == i
-                    Tab(selected = sel, onClick = { tab = i },
-                        selectedContentColor = EnactGreen,
-                        unselectedContentColor = EnactOnSurfaceDim,
-                        text = {
-                            // Each tab sits in its own shaded, rounded pill so
-                            // items are clearly distinguishable and can sit closer
-                            // together. The selected pill is tinted with the accent.
-                            Box(Modifier
-                                    .padding(horizontal = 2.dp, vertical = 4.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (sel) EnactGreen.copy(alpha = 0.20f)
-                                                else EnactSurface)
-                                    .padding(horizontal = 10.dp, vertical = 5.dp)) {
-                                Text(name, fontSize = 13.sp,
-                                    color = if (sel) EnactGreen else EnactOnSurfaceDim,
-                                    fontWeight = if (sel) FontWeight.Bold
-                                                 else FontWeight.Normal)
-                            }
-                        })
+                    // Each tab is a shaded rounded pill sitting directly beside the
+                    // next (small 2dp gap), so items are compact and clearly
+                    // distinguishable. No ScrollableTabRow minimum-width spreading.
+                    Box(Modifier
+                            .padding(horizontal = 2.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (sel) EnactGreen.copy(alpha = 0.20f)
+                                        else EnactSurface)
+                            .clickable { tab = i }
+                            .padding(horizontal = 9.dp, vertical = 6.dp)) {
+                        Text(name, fontSize = 13.sp,
+                            color = if (sel) EnactGreen else EnactOnSurfaceDim,
+                            fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal)
+                    }
                 }
-                // Exit: an action, not a screen. Never "selected"; tapping it
-                // fully shuts the app down (stops the foreground service and
-                // releases cameras) via the shared exitApp(). Tinted to read as
-                // an action rather than another tab.
-                Tab(selected = false, onClick = { exitApp() },
-                    selectedContentColor = EnactWarning,
-                    unselectedContentColor = EnactWarning,
-                    text = {
-                        Box(Modifier
-                                .padding(horizontal = 2.dp, vertical = 4.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(EnactWarning.copy(alpha = 0.16f))
-                                .padding(horizontal = 10.dp, vertical = 5.dp)) {
-                            Text("Exit", fontSize = 13.sp, color = EnactWarning,
-                                fontWeight = FontWeight.Bold)
-                        }
-                    })
+                // Exit: an action, not a screen. Tapping it fully shuts the app
+                // down (stops the foreground service and releases cameras) via the
+                // shared exitApp(). Tinted to read as an action rather than a tab.
+                Box(Modifier
+                        .padding(horizontal = 2.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(EnactWarning.copy(alpha = 0.16f))
+                        .clickable { exitApp() }
+                        .padding(horizontal = 9.dp, vertical = 6.dp)) {
+                    Text("Exit", fontSize = 13.sp, color = EnactWarning,
+                        fontWeight = FontWeight.Bold)
+                }
             }
             when (tab) {
                 0 -> AboutScreen()
@@ -384,6 +360,14 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         cameraWarningFlow = service?.cameraWarning,
+                        speedLimitProvider = {
+                            // Same value + setting as the Detector's roundel:
+                            // the fused active limit, only when the roundel option
+                            // is on. null => nav shows no limit (roundel hidden).
+                            val show = service?.showLimitRoundel?.value ?: false
+                            if (show) service?.scorer?.state?.value?.activeSpeedLimitKmh
+                            else null
+                        },
                         cameraArContent = { mod -> NavCameraAr(mod) })
                 }
             }
