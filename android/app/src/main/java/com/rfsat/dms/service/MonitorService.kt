@@ -331,6 +331,7 @@ class MonitorService : Service() {
             if (initial != null) {
                 osmMap = OsmMap.open(this@MonitorService, initial)
                 activeRegionFile = if (osmMap != null) initial else null
+                cacheAvailablePois()
                 DLog.i(TAG, "map db ready: ${osmMap != null} (region=$initial)")
             } else {
                 DLog.i(TAG, "no installed map region yet")
@@ -839,6 +840,7 @@ class MonitorService : Service() {
             val old = osmMap
             osmMap = opened
             activeRegionFile = want
+            cacheAvailablePois()
             getSharedPreferences("dbm", MODE_PRIVATE).edit()
                 .putString("active_region_file", want).apply()
             DLog.i(TAG, "switched active map region -> $want")
@@ -850,6 +852,14 @@ class MonitorService : Service() {
      *  for the navigation map overlay. Null when no offline map is loaded. */
     fun mapOverlayNear(lat: Double, lon: Double): com.rfsat.dms.fusion.MapOverlay? =
         osmMap?.overlayNear(lat, lon)
+
+    /** Cache which optional POI types the active map contains into the nav prefs,
+     *  so the Settings screen can grey out unavailable ones without a live db. */
+    private fun cacheAvailablePois() {
+        val extra = osmMap?.availableExtraPois() ?: emptySet()
+        getSharedPreferences("dbm_nav", MODE_PRIVATE).edit()
+            .putStringSet("available_extra_pois", extra).apply()
+    }
 
     private fun markSignScanAtStop() {
         val pos = lastFusePos ?: return

@@ -11,5 +11,9 @@ data class MapOverlayData(
     val speedLimitLines: List<List<GeoPoint>> = emptyList(),
     val parking: List<GeoPoint> = emptyList(),
     val cameras: List<GeoPoint> = emptyList(),
+    val fuel: List<GeoPoint> = emptyList(),
+    val charging: List<GeoPoint> = emptyList(),
+    val hospital: List<GeoPoint> = emptyList(),
+    val restArea: List<GeoPoint> = emptyList(),
     val enabled: Set<PoiType> = emptySet()
 )

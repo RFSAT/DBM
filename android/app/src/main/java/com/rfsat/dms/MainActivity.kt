@@ -350,13 +350,16 @@ class MainActivity : ComponentActivity() {
                         headingFlow = service?.speed?.heading,
                         mapOverlayProvider = { lat, lon ->
                             service?.mapOverlayNear(lat, lon)?.let { o ->
+                                fun cv(l: List<com.rfsat.dms.fusion.DoublePair>) =
+                                    l.map { com.rfsat.dms.nav.GeoPoint(it.lat, it.lon) }
                                 com.rfsat.dms.nav.MapOverlayData(
-                                    speedLimitLines = o.speedLimitLines.map { seg ->
-                                        seg.map { com.rfsat.dms.nav.GeoPoint(it.lat, it.lon) } },
-                                    parking = o.parking.map {
-                                        com.rfsat.dms.nav.GeoPoint(it.lat, it.lon) },
-                                    cameras = o.cameras.map {
-                                        com.rfsat.dms.nav.GeoPoint(it.lat, it.lon) })
+                                    speedLimitLines = o.speedLimitLines.map { cv(it) },
+                                    parking = cv(o.parking),
+                                    cameras = cv(o.cameras),
+                                    fuel = cv(o.fuel),
+                                    charging = cv(o.charging),
+                                    hospital = cv(o.hospital),
+                                    restArea = cv(o.restArea))
                             }
                         },
                         cameraWarningFlow = service?.cameraWarning,
@@ -1543,14 +1546,16 @@ class MainActivity : ComponentActivity() {
             fontWeight = FontWeight.Bold)
         Text("Pick map data to display. Greyed ones aren't in current map data yet.",
              color = EnactOnSurfaceDim, fontSize = 10.sp)
+        val availablePois = s.availablePois
         com.rfsat.dms.nav.PoiType.values().forEach { poi ->
+            val avail = poi in availablePois
             Row(Modifier.fillMaxWidth(),
                 verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                Text(poi.label + if (!poi.available) "  (coming soon)" else "",
-                    color = if (poi.available) EnactOnSurface else EnactOnSurfaceDim,
+                Text(poi.label + if (!avail) "  (not in map data)" else "",
+                    color = if (avail) EnactOnSurface else EnactOnSurfaceDim,
                     fontSize = 12.sp, modifier = Modifier.weight(1f))
                 androidx.compose.material3.Switch(
-                    enabled = poi.available,
+                    enabled = avail,
                     checked = poi in pois,
                     onCheckedChange = { on ->
                         pois = if (on) pois + poi else pois - poi

@@ -1,5 +1,18 @@
 # DBM Changelog
 
+## v1.20.102 — data-driven POI availability (Option B) + extra POIs on map
+- POI availability is now detected from the map data, not hardcoded. add_pois.py
+  writes poi_<type>_count markers into the .db meta; OsmMap.availableExtraPois()
+  reads them; the service caches the set to prefs on each region load/switch;
+  NavSettings.availablePois exposes base types + whatever extras the loaded region
+  actually contains. Settings greys out (and labels "not in map data") only the
+  types the current region lacks, and un-greys them once you build a region with
+  add_pois.py. Region auto-switch updates availability as you cross regions.
+- Wired the four extra POIs end-to-end so they draw once present: OsmMap queries
+  fuel/charging/hospital/rest_area tables (shared point-query helper); MapOverlay
+  and the nav MapOverlayData carry them; MapLibreBase adds a SymbolLayer + badge
+  icon per type (⛽ fuel, ⚡ charging, H hospital, ☕ rest), gated by the enabled
+  set. Older .db files without these tables simply draw nothing — no errors.
 ## v1.20.101 — Settings text/layout tweaks; car icon; Ribbon HUD
 - Settings text: line-broke the 2nd sentence of the persistent-limit note;
   removed "(stored locally only)" from the plate-read row; reworded the Show-on-

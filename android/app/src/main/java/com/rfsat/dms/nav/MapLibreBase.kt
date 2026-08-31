@@ -191,6 +191,14 @@ private const val DEST_SRC = "dbm-dest"; private const val DEST_LYR = "dbm-dest-
 private const val LIMIT_SRC = "dbm-lim"; private const val LIMIT_LYR = "dbm-lim-l"
 private const val PARK_SRC = "dbm-park"; private const val PARK_LYR = "dbm-park-l"
 private const val CAM_SRC = "dbm-cam"; private const val CAM_LYR = "dbm-cam-l"
+private const val FUEL_SRC = "dbm-fuel"; private const val FUEL_LYR = "dbm-fuel-l"
+private const val CHG_SRC = "dbm-chg"; private const val CHG_LYR = "dbm-chg-l"
+private const val HOSP_SRC = "dbm-hosp"; private const val HOSP_LYR = "dbm-hosp-l"
+private const val REST_SRC = "dbm-rest"; private const val REST_LYR = "dbm-rest-l"
+private const val ICON_FUEL = "dbm-ic-fuel"
+private const val ICON_CHG = "dbm-ic-chg"
+private const val ICON_HOSP = "dbm-ic-hosp"
+private const val ICON_REST = "dbm-ic-rest"
 private const val ICON_PARKING = "dbm-ic-parking"
 private const val ICON_CAMERA = "dbm-ic-camera"
 private const val ICON_OWN_BLUE_DOT = "dbm-ic-own-dot"
@@ -222,6 +230,30 @@ private fun registerOverlayIcons(style: Style) {
         style.addImage(ICON_OWN_PED, ownPedBitmap())
     if (style.getImage(ICON_OWN_ARROW) == null)
         style.addImage(ICON_OWN_ARROW, ownArrowBitmap())
+    if (style.getImage(ICON_FUEL) == null)
+        style.addImage(ICON_FUEL, badgeBitmap("\u26FD", "#00897B"))   // fuel pump
+    if (style.getImage(ICON_CHG) == null)
+        style.addImage(ICON_CHG, badgeBitmap("\u26A1", "#2E7D32"))    // charging bolt
+    if (style.getImage(ICON_HOSP) == null)
+        style.addImage(ICON_HOSP, badgeBitmap("H", "#C62828"))        // hospital H
+    if (style.getImage(ICON_REST) == null)
+        style.addImage(ICON_REST, badgeBitmap("\u2615", "#6D4C41"))   // rest area
+}
+
+/** A small rounded badge with a glyph/letter centred on it — used for the extra
+ *  POI icons (fuel, charging, hospital, rest). */
+private fun badgeBitmap(glyph: String, colorHex: String): Bitmap {
+    val s = 44; val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
+    val c = Canvas(bmp); val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    p.color = AndroidColor.parseColor(colorHex)
+    c.drawRoundRect(RectF(4f, 4f, s - 4f, s - 4f), 10f, 10f, p)
+    p.color = AndroidColor.WHITE; p.style = Paint.Style.STROKE; p.strokeWidth = 2.5f
+    c.drawRoundRect(RectF(4f, 4f, s - 4f, s - 4f), 10f, 10f, p)
+    p.style = Paint.Style.FILL; p.color = AndroidColor.WHITE
+    p.textSize = 24f; p.textAlign = Paint.Align.CENTER; p.isFakeBoldText = true
+    val fm = p.fontMetrics
+    c.drawText(glyph, s / 2f, s / 2f - (fm.ascent + fm.descent) / 2f, p)
+    return bmp
 }
 
 private fun ownDotBitmap(): Bitmap {
@@ -366,6 +398,21 @@ private fun ensureLayers(style: Style) {
             PropertyFactory.iconAllowOverlap(true),
             PropertyFactory.iconIgnorePlacement(true)))
     }
+    // extra POI layers (fuel / charging / hospital / rest area)
+    for ((src, lyr, icon) in listOf(
+        Triple(FUEL_SRC, FUEL_LYR, ICON_FUEL),
+        Triple(CHG_SRC, CHG_LYR, ICON_CHG),
+        Triple(HOSP_SRC, HOSP_LYR, ICON_HOSP),
+        Triple(REST_SRC, REST_LYR, ICON_REST))) {
+        if (style.getSource(src) == null) {
+            style.addSource(GeoJsonSource(src))
+            style.addLayer(SymbolLayer(lyr, src).withProperties(
+                PropertyFactory.iconImage(icon),
+                PropertyFactory.iconSize(0.9f),
+                PropertyFactory.iconAllowOverlap(true),
+                PropertyFactory.iconIgnorePlacement(true)))
+        }
+    }
     // markers on top
     if (style.getSource(DEST_SRC) == null) {
         style.addSource(GeoJsonSource(DEST_SRC))
@@ -434,4 +481,17 @@ private fun updateData(
             FeatureCollection.fromFeatures(mapData.cameras.map {
                 Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)) })
         else empty)
+    fun pointFc(on: Boolean, pts: List<GeoPoint>?) =
+        if (on && pts != null)
+            FeatureCollection.fromFeatures(pts.map {
+                Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)) })
+        else empty
+    style.getSourceAs<GeoJsonSource>(FUEL_SRC)?.setGeoJson(
+        pointFc(PoiType.FUEL in en, mapData?.fuel))
+    style.getSourceAs<GeoJsonSource>(CHG_SRC)?.setGeoJson(
+        pointFc(PoiType.CHARGING in en, mapData?.charging))
+    style.getSourceAs<GeoJsonSource>(HOSP_SRC)?.setGeoJson(
+        pointFc(PoiType.HOSPITAL in en, mapData?.hospital))
+    style.getSourceAs<GeoJsonSource>(REST_SRC)?.setGeoJson(
+        pointFc(PoiType.REST_AREA in en, mapData?.restArea))
 }

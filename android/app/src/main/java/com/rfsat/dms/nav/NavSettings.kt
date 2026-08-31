@@ -74,16 +74,26 @@ class NavSettings(ctx: Context) {
         get() = get("theme", NavTheme.AUTO) { NavTheme.valueOf(it) }
         set(v) { p.edit().putString("theme", v.name).apply() }
 
-    /** Which POI / map-data categories to draw on the navigation map. */
+    /** POI types the LOADED map data supports (base types + extras present in the
+     *  active region .db, as cached by the service). Drives Settings greying. */
+    val availablePois: Set<PoiType>
+        get() {
+            val extra = p.getStringSet("available_extra_pois", null) ?: emptySet()
+            return PoiType.availableFrom(extra)
+        }
+
+    /** Which POI / map-data categories to draw on the navigation map. Filtered to
+     *  what's actually available so a stored choice for missing data is ignored. */
     var enabledPois: Set<PoiType>
         get() {
+            val avail = availablePois
             val saved = p.getStringSet("pois", null)
-                ?: return PoiType.defaults
+                ?: return PoiType.defaults.filter { it in avail }.toSet()
             return saved.mapNotNull { runCatching { PoiType.valueOf(it) }.getOrNull() }
-                .filter { it.available }.toSet()
+                .filter { it in avail }.toSet()
         }
         set(v) { p.edit().putStringSet("pois",
-            v.filter { it.available }.map { it.name }.toSet()).apply() }
+            v.map { it.name }.toSet()).apply() }
 
     /** Convenience: is ANY map data enabled (used to skip the query entirely). */
     val anyPoiEnabled: Boolean get() = enabledPois.isNotEmpty()

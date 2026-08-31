@@ -28,6 +28,10 @@ data class MapOverlay(
     val speedLimitLines: List<List<DoublePair>>,
     val parking: List<DoublePair>,
     val cameras: List<DoublePair>,
+    val fuel: List<DoublePair> = emptyList(),
+    val charging: List<DoublePair> = emptyList(),
+    val hospital: List<DoublePair> = emptyList(),
+    val restArea: List<DoublePair> = emptyList(),
 )
 
 /** Result of matching a GPS point to the road network. */
@@ -212,28 +216,55 @@ class OsmMap private constructor(private val db: SQLiteDatabase) {
                 limit = 500)?.map { DoublePair(it.lat, it.lon) } ?: emptyList()
         }.getOrDefault(emptyList())
 
-        // cameras: query the table directly (bbox), independent of heading
-        val cams = ArrayList<DoublePair>()
+        // cameras + the optional extra POI tables (fuel/charging/hospital/
+        // rest_area) all share the same "points in bbox" query.
+        val cams = queryPoiPoints("speed_camera", lat, lon, marginDeg)
+        val fuel = queryPoiPoints("fuel", lat, lon, marginDeg)
+        val charging = queryPoiPoints("charging", lat, lon, marginDeg)
+        val hospital = queryPoiPoints("hospital", lat, lon, marginDeg)
+        val restArea = queryPoiPoints("rest_area", lat, lon, marginDeg)
+
+        return MapOverlay(limits, park, cams, fuel, charging, hospital, restArea)
+    }
+
+    /** Points (lat,lon) from a table that has a lat/lon column, within a bbox.
+     *  Returns empty if the table doesn't exist (older .db without extra POIs). */
+    private fun queryPoiPoints(
+        table: String, lat: Double, lon: Double, marginDeg: Double, cap: Int = 500
+    ): List<DoublePair> {
+        val out = ArrayList<DoublePair>()
         runCatching {
             val hasTable = db.rawQuery(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='speed_camera'",
-                null).use { it.moveToNext() }
-            if (hasTable) {
-                db.rawQuery("""
-                    SELECT lat, lon FROM speed_camera
-                    WHERE lat >= ? AND lat <= ? AND lon >= ? AND lon <= ?
-                """.trimIndent(), arrayOf(
-                    (lat - marginDeg).toString(), (lat + marginDeg).toString(),
-                    (lon - marginDeg).toString(), (lon + marginDeg).toString())).use { c ->
-                    var n = 0
-                    while (c.moveToNext() && n < 500) {
-                        cams.add(DoublePair(c.getDouble(0), c.getDouble(1))); n++
-                    }
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                arrayOf(table)).use { it.moveToNext() }
+            if (!hasTable) return emptyList()
+            db.rawQuery(
+                "SELECT lat, lon FROM $table " +
+                "WHERE lat >= ? AND lat <= ? AND lon >= ? AND lon <= ?",
+                arrayOf((lat - marginDeg).toString(), (lat + marginDeg).toString(),
+                        (lon - marginDeg).toString(), (lon + marginDeg).toString())
+            ).use { c ->
+                var n = 0
+                while (c.moveToNext() && n < cap) {
+                    out.add(DoublePair(c.getDouble(0), c.getDouble(1))); n++
                 }
             }
-        }.onFailure { DLog.e(TAG, "overlay camera query failed", it) }
+        }.onFailure { DLog.e(TAG, "overlay $table query failed", it) }
+        return out
+    }
 
-        return MapOverlay(limits, park, cams)
+    /** Which optional POI types this loaded .db actually contains, from the meta
+     *  markers add_pois.py writes (poi_<type>_count > 0). The base types (speed
+     *  limits, cameras, parking) are always present in a built map. Returns the
+     *  extra type keys: "fuel", "charging", "hospital", "rest_area". */
+    fun availableExtraPois(): Set<String> {
+        val meta = runCatching { readMeta(db) }.getOrDefault(emptyMap())
+        val out = HashSet<String>()
+        for (t in listOf("fuel", "charging", "hospital", "rest_area")) {
+            val c = meta["poi_${t}_count"]?.toIntOrNull() ?: 0
+            if (c > 0) out.add(t)
+        }
+        return out
     }
 
     private fun queryNear(lat: Double, lon: Double): List<RoadSegment> {
