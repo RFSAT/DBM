@@ -443,12 +443,17 @@ private fun BoxScope.SpeedLimitOverlay(limitKmh: Int?) {
 
 @Composable
 private fun BoxScope.RibbonHud(g: Guidance?) {
-    Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(52.dp)
-            .padding(horizontal = 24.dp).padding(bottom = 48.dp)
-            .clip(RoundedCornerShape(10.dp)).background(EnactSurface.copy(alpha = 0.85f)),
+    // Thin low-clutter "next maneuver" strip for at-a-glance guidance (and for
+    // windshield reflection). Only shown while navigating — hidden when there's
+    // no route so it doesn't sit as an empty dark bar.
+    val step = g?.nextStep ?: return
+    Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(46.dp)
+            .padding(horizontal = 24.dp).padding(bottom = 76.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(EnactGreen.copy(alpha = 0.92f)),
         contentAlignment = Alignment.Center) {
-        Text("${g?.nextStep?.instruction ?: "No route"}  ·  ${g?.distanceToNext?.toInt() ?: 0} m",
-            color = EnactLime, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        Text("${step.instruction}  ·  ${g.distanceToNext.toInt()} m",
+            color = EnactDark, fontSize = 17.sp, fontWeight = FontWeight.Bold)
     }
 }
 

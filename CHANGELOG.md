@@ -1,5 +1,19 @@
 # DBM Changelog
 
+## v1.20.101 — Settings text/layout tweaks; car icon; Ribbon HUD
+- Settings text: line-broke the 2nd sentence of the persistent-limit note;
+  removed "(stored locally only)" from the plate-read row; reworded the Show-on-
+  map hint to "Pick map data to display. Greyed ones aren't in current map data
+  yet."; line-broke the bracketed part of the Required-gap note and the 2nd
+  sentence of the Mirror-check note.
+- "Fixed warning distance" row is now a flush inline row (was double-boxed by a
+  nested SettingRow), so its label left-aligns and its switch lines up with the
+  surrounding controls.
+- Navigation own-location "car" icon redrawn as a recognizable top-down car
+  (body, windshield, wheels), with the surrounding blue circle removed.
+- Ribbon HUD: was showing as a near-black empty bar. It now only appears while
+  navigating, as a light-green strip with the next maneuver + distance (the
+  low-clutter at-a-glance / windshield style). No route -> hidden.
 ## v1.20.100 — tighter top menu spacing
 - Reduced the horizontal spacing between top-menu items. Replaced the Material
   ScrollableTabRow (which imposes a ~90dp minimum width per tab, spreading short

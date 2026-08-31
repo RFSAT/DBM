@@ -1209,7 +1209,7 @@ class MainActivity : ComponentActivity() {
                     "parking_advice", default = false)
                 SpeedCameraToggle()
                 DetectionElementRow(
-                    "Read lead-vehicle plate on serious hazard (stored locally only)",
+                    "Read lead-vehicle plate on serious hazard",
                     "capture_plate", default = false)
             }
             CollapsibleSection("Offline maps") {
@@ -1340,7 +1340,7 @@ class MainActivity : ComponentActivity() {
         }
         Text(if (persistent)
                 "Keeps the last known limit on screen where the map/camera has no " +
-                "data. The shown limit changes only when a new one is detected."
+                "data.\nThe shown limit changes only when a new one is detected."
             else
                 "Shows a limit only where map or camera data exists — blank when it " +
                 "doesn't. You see only what is known, nothing carried over.",
@@ -1381,12 +1381,21 @@ class MainActivity : ComponentActivity() {
         Column(Modifier.fillMaxWidth().padding(top = 4.dp)
                 .clip(RoundedCornerShape(12.dp)).background(EnactSurface)
                 .padding(horizontal = 12.dp, vertical = 8.dp)) {
-            SettingRow("Fixed warning distance", fixed) {
-                fixed = it
-                val v = if (it) sliderM.toInt() else 0
-                dist = v
-                service?.setCameraWarnDistance(v)
-                    ?: prefs.edit().putInt("camera_warn_dist_m", v).apply()
+            // Inline row (no extra box) so the label left-aligns with the section
+            // content and the switch lines up with the controls below it, rather
+            // than being indented by a nested SettingRow background+padding.
+            Row(Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("Fixed warning distance", color = EnactOnSurface, fontSize = 13.sp)
+                Switch(checked = fixed, modifier = Modifier.scale(0.8f),
+                    onCheckedChange = {
+                        fixed = it
+                        val v = if (it) sliderM.toInt() else 0
+                        dist = v
+                        service?.setCameraWarnDistance(v)
+                            ?: prefs.edit().putInt("camera_warn_dist_m", v).apply()
+                    })
             }
             if (fixed) {
                 Text("Warn ${sliderM.toInt()} m before a camera",
@@ -1532,8 +1541,8 @@ class MainActivity : ComponentActivity() {
         Spacer(Modifier.height(8.dp))
         Text("Show on map", color = EnactLime, fontSize = 12.sp,
             fontWeight = FontWeight.Bold)
-        Text("Pick which map data to display. Greyed items aren't in the current " +
-             "map data yet.", color = EnactOnSurfaceDim, fontSize = 10.sp)
+        Text("Pick map data to display. Greyed ones aren't in current map data yet.",
+             color = EnactOnSurfaceDim, fontSize = 10.sp)
         com.rfsat.dms.nav.PoiType.values().forEach { poi ->
             Row(Modifier.fillMaxWidth(),
                 verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
@@ -2071,7 +2080,7 @@ class MainActivity : ComponentActivity() {
                 .clip(RoundedCornerShape(12.dp)).background(EnactSurface)
                 .padding(horizontal = 12.dp, vertical = 8.dp)) {
             Text("Mirror-check reminders", color = EnactOnSurface, fontSize = 13.sp)
-            Text("Warn if no glance toward a mirror for this long. Set to 0 to " +
+            Text("Warn if no glance toward a mirror for this long.\nSet to 0 to " +
                 "disable that reminder.", color = EnactOnSurfaceDim, fontSize = 11.sp)
             Text("Rearview mirror: ${if (rear.toInt()==0) "off" else "${rear.toInt()} s"}",
                 color = EnactOnSurface, fontSize = 12.sp)
@@ -2197,7 +2206,7 @@ class MainActivity : ComponentActivity() {
                 .padding(horizontal = 12.dp, vertical = 8.dp)) {
             Text("Required gap: ${pct.toInt()} % of computed stopping distance",
                 color = EnactOnSurface, fontSize = 13.sp)
-            Text("100 % = dry-road stopping distance at current speed " +
+            Text("100 % = dry-road stopping distance at current speed\n" +
                 "(1 s reaction + braking). Increase for wet roads or extra margin.",
                 color = EnactOnSurfaceDim, fontSize = 11.sp)
             Slider(value = pct, onValueChange = { pct = it },

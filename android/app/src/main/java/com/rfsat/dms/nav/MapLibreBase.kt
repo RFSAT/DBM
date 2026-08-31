@@ -236,17 +236,33 @@ private fun ownDotBitmap(): Bitmap {
 }
 
 private fun ownCarBitmap(): Bitmap {
-    val s = 44; val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
+    // Recognizable top-down car silhouette (no surrounding circle). Points up =
+    // direction of travel: rounded body, windshield, side windows, wheels.
+    val s = 56; val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
     val c = Canvas(bmp); val p = Paint(Paint.ANTI_ALIAS_FLAG)
-    p.color = AndroidColor.parseColor("#2E7DFF")
-    c.drawCircle(s / 2f, s / 2f, s / 2f - 3f, p)
-    p.color = AndroidColor.WHITE; p.style = Paint.Style.STROKE; p.strokeWidth = 2.5f
-    c.drawCircle(s / 2f, s / 2f, s / 2f - 3f, p)
-    // simple top-down car body (points up = heading)
-    p.style = Paint.Style.FILL; p.color = AndroidColor.WHITE
-    c.drawRoundRect(RectF(15f, 12f, 29f, 34f), 5f, 5f, p)
-    p.color = AndroidColor.parseColor("#2E7DFF")
-    c.drawRoundRect(RectF(18f, 16f, 26f, 22f), 2f, 2f, p)   // windshield
+    val blue = AndroidColor.parseColor("#2E7DFF")
+    // wheels (dark), poking out at the four corners
+    p.color = AndroidColor.parseColor("#1A1A1A")
+    c.drawRoundRect(RectF(11f, 16f, 17f, 26f), 2f, 2f, p)   // front-left
+    c.drawRoundRect(RectF(39f, 16f, 45f, 26f), 2f, 2f, p)   // front-right
+    c.drawRoundRect(RectF(11f, 32f, 17f, 42f), 2f, 2f, p)   // rear-left
+    c.drawRoundRect(RectF(39f, 32f, 45f, 42f), 2f, 2f, p)   // rear-right
+    // body
+    p.color = blue
+    c.drawRoundRect(RectF(15f, 8f, 41f, 50f), 11f, 13f, p)
+    // white glass: windshield (front, narrower) + rear window
+    p.color = AndroidColor.WHITE
+    val wind = android.graphics.Path().apply {
+        moveTo(20f, 20f); lineTo(36f, 20f); lineTo(33f, 13f); lineTo(23f, 13f); close()
+    }
+    c.drawPath(wind, p)
+    val rear = android.graphics.Path().apply {
+        moveTo(21f, 34f); lineTo(35f, 34f); lineTo(33f, 41f); lineTo(23f, 41f); close()
+    }
+    c.drawPath(rear, p)
+    // roof line between the windows (a lighter blue strip reads as the cabin)
+    p.color = AndroidColor.parseColor("#5C9BFF")
+    c.drawRect(RectF(20f, 21f, 36f, 33f), p)
     return bmp
 }
 
