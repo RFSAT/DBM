@@ -1,5 +1,18 @@
 # DBM Changelog
 
+## v1.20.96 — own-location icons, on-map mode switch, blue route
+- The own-location marker now uses the ICON chosen in Settings (blue GPS dot, car,
+  pedestrian, arrow) instead of always a blue dot — the own layer became a
+  SymbolLayer with drawn icon images, matching the setting.
+- Added an on-map view-mode button that cycles 2D -> 2D perspective -> 3D ->
+  Camera (AR) -> Arrow/Text, styled like the orientation/layer buttons (always
+  visible, top of the right-hand button column). Removed the bottom pill strip;
+  the choice persists.
+- Route line is now blue (#1A73E8 with a dark-blue casing), matching common
+  navigation apps, instead of green.
+- Confirmed: speed cameras and speed limits on the nav map use the SAME data as
+  the Detector — the same shared osmMap instance and the same speed_camera /
+  segments tables (region auto-selected by GPS since v1.20.91). No separate copy.
 ## v1.20.95 — fix nav map compile errors (from v1.20.90)
 - Fixed setGeoJson ambiguity in MapLibreBase: the route/own/destination sources
   used an if/else returning a Feature in one branch and a FeatureCollection in the

@@ -127,15 +127,33 @@ fun NavScreen(
         if (Overlay.RIBBON_HUD in overlays)
             RibbonHud(guidance)
 
-        // on-map action buttons (only for map bases)
+        // on-map action buttons (right side). The MODE button is always present
+        // (cycles all five views like the orientation/layer buttons); the
+        // recenter/orientation/layer buttons appear only on the map bases.
         val onMap = base == BaseView.MAP_2D_TOPDOWN ||
                 base == BaseView.MAP_2D_PERSPECTIVE || base == BaseView.MAP_3D
-        if (onMap) {
-            Column(Modifier.align(Alignment.CenterEnd).padding(end = 8.dp)) {
-                // recenter to current location
+        Column(Modifier.align(Alignment.CenterEnd).padding(end = 8.dp)) {
+            // view-mode cycle: 2D -> 2D perspective -> 3D -> Camera -> Arrow
+            RoundBtn(when (base) {
+                BaseView.MAP_2D_TOPDOWN -> "2D"
+                BaseView.MAP_2D_PERSPECTIVE -> "2½"
+                BaseView.MAP_3D -> "3D"
+                BaseView.CAMERA_AR -> "\uD83D\uDCF7"   // camera
+                BaseView.ARROW_ONLY -> "\u2191"        // arrow
+            }) {
+                base = when (base) {
+                    BaseView.MAP_2D_TOPDOWN -> BaseView.MAP_2D_PERSPECTIVE
+                    BaseView.MAP_2D_PERSPECTIVE -> BaseView.MAP_3D
+                    BaseView.MAP_3D -> BaseView.CAMERA_AR
+                    BaseView.CAMERA_AR -> BaseView.ARROW_ONLY
+                    BaseView.ARROW_ONLY -> BaseView.MAP_2D_TOPDOWN
+                }
+                settings.base = base
+            }
+            if (onMap) {
+                Spacer(Modifier.height(8.dp))
                 RoundBtn("◎") { recenterState.value = recenterState.value + 1 }
                 Spacer(Modifier.height(8.dp))
-                // orientation cycle: north -> heading -> free
                 RoundBtn(when (orientation) {
                     MapOrientation.NORTH_UP -> "N"
                     MapOrientation.HEADING_UP -> "▲"
@@ -149,7 +167,6 @@ fun NavScreen(
                     settings.orientation = orientation
                 }
                 Spacer(Modifier.height(8.dp))
-                // map layer cycle: street -> satellite -> terrain
                 RoundBtn(when (mapLayer) {
                     MapLayer.STREET -> "S"
                     MapLayer.SATELLITE -> "◱"
@@ -175,24 +192,6 @@ fun NavScreen(
                 onGo = { scope.launch {
                     router.calculateRoute(livePos?.let { GeoPoint(it.first, it.second) }) } },
                 onStop = { router.stop() })
-        }
-
-        // base-view quick switcher (bottom) — quick access to the 5 bases; full
-        // mode settings live in the Settings screen.
-        Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp)
-                .clip(RoundedCornerShape(12.dp)).background(EnactDarkMid.copy(alpha = 0.9f))
-                .padding(4.dp)) {
-            BaseView.values().forEach { b ->
-                val sel = base == b
-                Box(Modifier.padding(2.dp).clip(RoundedCornerShape(8.dp))
-                        .background(if (sel) EnactGreen.copy(alpha = 0.25f) else EnactSurface)
-                        .clickable { base = b; settings.base = b }
-                        .padding(horizontal = 8.dp, vertical = 6.dp)) {
-                    Text(b.label, color = if (sel) EnactGreen else EnactOnSurfaceDim,
-                        fontSize = 11.sp,
-                        fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal)
-                }
-            }
         }
     }
 }

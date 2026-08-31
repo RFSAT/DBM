@@ -188,6 +188,10 @@ private const val PARK_SRC = "dbm-park"; private const val PARK_LYR = "dbm-park-
 private const val CAM_SRC = "dbm-cam"; private const val CAM_LYR = "dbm-cam-l"
 private const val ICON_PARKING = "dbm-ic-parking"
 private const val ICON_CAMERA = "dbm-ic-camera"
+private const val ICON_OWN_BLUE_DOT = "dbm-ic-own-dot"
+private const val ICON_OWN_CAR = "dbm-ic-own-car"
+private const val ICON_OWN_PED = "dbm-ic-own-ped"
+private const val ICON_OWN_ARROW = "dbm-ic-own-arrow"
 
 private fun loadStyle(map: MapLibreMap, spec: String, onLoaded: (Style) -> Unit) {
     val b = if (MapStyles.isInlineJson(spec)) Style.Builder().fromJson(spec)
@@ -205,6 +209,73 @@ private fun registerOverlayIcons(style: Style) {
         style.addImage(ICON_PARKING, parkingBitmap())
     if (style.getImage(ICON_CAMERA) == null)
         style.addImage(ICON_CAMERA, cameraBitmap())
+    if (style.getImage(ICON_OWN_BLUE_DOT) == null)
+        style.addImage(ICON_OWN_BLUE_DOT, ownDotBitmap())
+    if (style.getImage(ICON_OWN_CAR) == null)
+        style.addImage(ICON_OWN_CAR, ownCarBitmap())
+    if (style.getImage(ICON_OWN_PED) == null)
+        style.addImage(ICON_OWN_PED, ownPedBitmap())
+    if (style.getImage(ICON_OWN_ARROW) == null)
+        style.addImage(ICON_OWN_ARROW, ownArrowBitmap())
+}
+
+private fun ownDotBitmap(): Bitmap {
+    val s = 44; val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
+    val c = Canvas(bmp); val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    // soft accuracy halo, white ring, blue core (classic GPS dot)
+    p.color = AndroidColor.argb(60, 46, 125, 255)
+    c.drawCircle(s / 2f, s / 2f, s / 2f - 2f, p)
+    p.color = AndroidColor.WHITE; c.drawCircle(s / 2f, s / 2f, 11f, p)
+    p.color = AndroidColor.parseColor("#2E7DFF"); c.drawCircle(s / 2f, s / 2f, 8f, p)
+    return bmp
+}
+
+private fun ownCarBitmap(): Bitmap {
+    val s = 44; val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
+    val c = Canvas(bmp); val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    p.color = AndroidColor.parseColor("#2E7DFF")
+    c.drawCircle(s / 2f, s / 2f, s / 2f - 3f, p)
+    p.color = AndroidColor.WHITE; p.style = Paint.Style.STROKE; p.strokeWidth = 2.5f
+    c.drawCircle(s / 2f, s / 2f, s / 2f - 3f, p)
+    // simple top-down car body (points up = heading)
+    p.style = Paint.Style.FILL; p.color = AndroidColor.WHITE
+    c.drawRoundRect(RectF(15f, 12f, 29f, 34f), 5f, 5f, p)
+    p.color = AndroidColor.parseColor("#2E7DFF")
+    c.drawRoundRect(RectF(18f, 16f, 26f, 22f), 2f, 2f, p)   // windshield
+    return bmp
+}
+
+private fun ownPedBitmap(): Bitmap {
+    val s = 44; val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
+    val c = Canvas(bmp); val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    p.color = AndroidColor.parseColor("#2E7DFF")
+    c.drawCircle(s / 2f, s / 2f, s / 2f - 3f, p)
+    p.color = AndroidColor.WHITE; p.style = Paint.Style.STROKE; p.strokeWidth = 2.5f
+    c.drawCircle(s / 2f, s / 2f, s / 2f - 3f, p)
+    // stick-figure pedestrian
+    p.style = Paint.Style.FILL; p.color = AndroidColor.WHITE
+    c.drawCircle(22f, 14f, 3.5f, p)                          // head
+    p.style = Paint.Style.STROKE; p.strokeWidth = 3f; p.strokeCap = Paint.Cap.ROUND
+    c.drawLine(22f, 18f, 22f, 28f, p)                        // body
+    c.drawLine(22f, 21f, 17f, 26f, p); c.drawLine(22f, 21f, 27f, 26f, p)  // arms
+    c.drawLine(22f, 28f, 18f, 34f, p); c.drawLine(22f, 28f, 26f, 34f, p)  // legs
+    return bmp
+}
+
+private fun ownArrowBitmap(): Bitmap {
+    val s = 44; val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
+    val c = Canvas(bmp); val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    p.color = AndroidColor.parseColor("#2E7DFF")
+    c.drawCircle(s / 2f, s / 2f, s / 2f - 3f, p)
+    p.color = AndroidColor.WHITE; p.style = Paint.Style.STROKE; p.strokeWidth = 2.5f
+    c.drawCircle(s / 2f, s / 2f, s / 2f - 3f, p)
+    // upward navigation chevron
+    p.style = Paint.Style.FILL; p.color = AndroidColor.WHITE
+    val path = android.graphics.Path().apply {
+        moveTo(22f, 12f); lineTo(31f, 32f); lineTo(22f, 26f); lineTo(13f, 32f); close()
+    }
+    c.drawPath(path, p)
+    return bmp
 }
 
 private fun parkingBitmap(): Bitmap {
@@ -244,9 +315,9 @@ private fun ensureLayers(style: Style) {
     if (style.getSource(ROUTE_SRC) == null) {
         style.addSource(GeoJsonSource(ROUTE_SRC))
         style.addLayer(LineLayer(ROUTE_CASING, ROUTE_SRC).withProperties(
-            PropertyFactory.lineColor("#0C2E28"), PropertyFactory.lineWidth(9f)))
+            PropertyFactory.lineColor("#0B3D91"), PropertyFactory.lineWidth(9f)))
         style.addLayer(LineLayer(ROUTE_LYR, ROUTE_SRC).withProperties(
-            PropertyFactory.lineColor("#4DC494"), PropertyFactory.lineWidth(5f)))
+            PropertyFactory.lineColor("#1A73E8"), PropertyFactory.lineWidth(5f)))
     }
     // map-data overlays (drawn under the markers)
     if (style.getSource(LIMIT_SRC) == null) {
@@ -284,13 +355,14 @@ private fun ensureLayers(style: Style) {
     }
     if (style.getSource(OWN_SRC) == null) {
         style.addSource(GeoJsonSource(OWN_SRC))
-        // own-location marker: a coloured circle. (Bitmap icons for car/pedestrian
-        // are added via style images in a later pass; colour encodes the choice
-        // so the selection is visible now without bundling icon assets.)
-        style.addLayer(CircleLayer(OWN_LYR, OWN_SRC).withProperties(
-            PropertyFactory.circleColor("#2E7DFF"), PropertyFactory.circleRadius(7f),
-            PropertyFactory.circleStrokeColor("#FFFFFF"),
-            PropertyFactory.circleStrokeWidth(2.5f)))
+        // own-location marker as a real icon (blue dot / car / pedestrian / arrow),
+        // chosen in Settings. iconImage is set in updateData to match the choice.
+        style.addLayer(SymbolLayer(OWN_LYR, OWN_SRC).withProperties(
+            PropertyFactory.iconImage(ICON_OWN_BLUE_DOT),
+            PropertyFactory.iconSize(1.0f),
+            PropertyFactory.iconAllowOverlap(true),
+            PropertyFactory.iconIgnorePlacement(true),
+            PropertyFactory.iconRotationAlignment("map")))
     }
 }
 
@@ -308,13 +380,13 @@ private fun updateData(
         if (own != null) FeatureCollection.fromFeature(
             Feature.fromGeometry(Point.fromLngLat(own.lon, own.lat)))
         else FeatureCollection.fromFeatures(emptyList()))
-    // reflect the chosen own-icon as a colour for now
-    style.getLayerAs<CircleLayer>(OWN_LYR)?.setProperties(
-        PropertyFactory.circleColor(when (ownIcon) {
-            OwnLocationIcon.BLUE_DOT -> "#2E7DFF"
-            OwnLocationIcon.CAR -> "#4DC494"
-            OwnLocationIcon.PEDESTRIAN -> "#FFCA28"
-            OwnLocationIcon.ARROW -> "#96CC45"
+    // switch the own-location icon to the one chosen in Settings
+    style.getLayerAs<SymbolLayer>(OWN_LYR)?.setProperties(
+        PropertyFactory.iconImage(when (ownIcon) {
+            OwnLocationIcon.BLUE_DOT -> ICON_OWN_BLUE_DOT
+            OwnLocationIcon.CAR -> ICON_OWN_CAR
+            OwnLocationIcon.PEDESTRIAN -> ICON_OWN_PED
+            OwnLocationIcon.ARROW -> ICON_OWN_ARROW
         }))
 
     style.getSourceAs<GeoJsonSource>(DEST_SRC)?.setGeoJson(
