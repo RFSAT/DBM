@@ -1,5 +1,22 @@
 # DBM Changelog
 
+## v1.20.104 — show downloaded vs latest map version
+- The map list now shows BOTH the version on the phone and the latest available,
+  and the old labels no longer mislabel the catalog (latest) version as the
+  downloaded one. Installed: "Downloaded vN (latest)"; update available:
+  "Downloaded vN • update to vM available"; not installed: "Not downloaded •
+  latest vM".
+- The per-map info dialog now lists "Latest version" and "Downloaded version"
+  (with an up-to-date / update-available note) as separate rows.
+- The index-refresh time is still shown as before.
+## v1.20.103 — fix standalone-country map button (Greece stuck on "Get")
+- Standalone countries (no sub-regions, e.g. Greece) always showed "Get" and only
+  ever triggered a fresh download — regardless of whether the map was already
+  installed or had an update. So an installed Greece map couldn't be updated or
+  deleted, and "Get" appeared to do nothing (it re-downloaded the same file).
+  The country-level button now reflects the map's real state like sub-regions do:
+  "Update" when an update is available, "Delete" (red) when installed and current,
+  "Get" when not installed — routing to download or delete accordingly.
 ## v1.20.102 — data-driven POI availability (Option B) + extra POIs on map
 - POI availability is now detected from the map data, not hardcoded. add_pois.py
   writes poi_<type>_count markers into the .db meta; OsmMap.availableExtraPois()

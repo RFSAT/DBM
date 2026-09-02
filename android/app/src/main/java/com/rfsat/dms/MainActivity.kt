@@ -1817,7 +1817,15 @@ class MainActivity : ComponentActivity() {
                             Modifier.padding(vertical = 6.dp),
                             color = EnactOnSurfaceDim.copy(alpha = 0.3f))
                         row("Map data date", r.dataDate.ifEmpty { "—" })
-                        row("Version", "v${r.version}")
+                        // Latest available vs the version currently on the phone.
+                        val haveV = statuses.firstOrNull { it.region.id == r.id }
+                            ?.installed?.version
+                        row("Latest version", "v${r.version}")
+                        row("Downloaded version",
+                            if (haveV != null) "v$haveV" +
+                                (if (haveV < r.version) " (update available)"
+                                 else " (up to date)")
+                            else "not downloaded")
                         row("Download size",
                             if (r.sizeBytes > 0) "%.0f MB".format(r.sizeBytes / 1e6) else "—")
                         if (r.bounds != null) {
@@ -1939,12 +1947,26 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.heightIn(min = 32.dp),
                         onClick = {
                             val sa = standalone
-                            if (sa != null) pending = sa.region
-                            else pendingCountry = country
+                            if (sa != null) {
+                                // Standalone country: act on THIS map's state —
+                                // Delete when installed, otherwise Get/Update it.
+                                if (sa.state == com.rfsat.dms.maps.MapState.INSTALLED)
+                                    toDelete = sa.region
+                                else pending = sa.region
+                            } else pendingCountry = country
                         }) {
-                        Text(if (anyDownloadingHere) "…"
-                             else if (standalone != null) "Get" else "Get all",
-                            fontSize = 12.sp)
+                        val sa = standalone
+                        val label = when {
+                            anyDownloadingHere -> "…"
+                            sa == null -> "Get all"
+                            sa.state == com.rfsat.dms.maps.MapState.UPDATE_AVAILABLE -> "Update"
+                            sa.state == com.rfsat.dms.maps.MapState.INSTALLED -> "Delete"
+                            else -> "Get"
+                        }
+                        val labelColor = if (sa != null &&
+                            sa.state == com.rfsat.dms.maps.MapState.INSTALLED)
+                            Color(0xFFE57373) else EnactGreen
+                        Text(label, fontSize = 12.sp, color = labelColor)
                     }
                     }
                     }
@@ -1956,11 +1978,17 @@ class MainActivity : ComponentActivity() {
                     val isDownloadingThis = downloadFracs.containsKey(r.id)
                     val thisFrac = downloadFracs[r.id] ?: -1f
                     val thisMsg = downloadMsgs[r.id] ?: ""
+                    // "have" = what's on the phone (may be an older version);
+                    // r.version = latest available in the catalog. Show both so the
+                    // user sees exactly which version they have vs what's newest.
+                    val haveVer = st.installed?.version
                     val label = when (st.state) {
-                        com.rfsat.dms.maps.MapState.INSTALLED -> "\u2713 Downloaded (v${r.version})"
+                        com.rfsat.dms.maps.MapState.INSTALLED ->
+                            "\u2713 Downloaded v${haveVer ?: r.version} (latest)"
                         com.rfsat.dms.maps.MapState.UPDATE_AVAILABLE ->
-                            "\u2713 Downloaded • update available (v${r.version}, ${r.dataDate})"
-                        com.rfsat.dms.maps.MapState.NOT_INSTALLED -> "Not downloaded"
+                            "\u2713 Downloaded v${haveVer ?: "?"} • update to v${r.version} available"
+                        com.rfsat.dms.maps.MapState.NOT_INSTALLED ->
+                            "Not downloaded • latest v${r.version}"
                         com.rfsat.dms.maps.MapState.UNSUPPORTED_SCHEMA -> "Needs app update"
                     }
                     val labelColor = when (st.state) {
