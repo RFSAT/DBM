@@ -7,7 +7,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -270,13 +269,25 @@ private fun RoutePanel(
         Text(if (routing.addingWaypoint) "Add a stop" else "Where to?",
             color = EnactLime, fontSize = 12.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(6.dp))
-        TextField(value = query, onValueChange = { query = it }, singleLine = true,
-            placeholder = { Text("Search address or place", fontSize = 13.sp,
-                color = EnactOnSurfaceDim) },
+        // Compact single-line address field (BasicTextField so we control the
+        // height — Material TextField is ~56dp tall and crowded the map).
+        androidx.compose.foundation.text.BasicTextField(
+            value = query, onValueChange = { query = it }, singleLine = true,
+            textStyle = androidx.compose.ui.text.TextStyle(
+                color = EnactOnSurface, fontSize = 14.sp),
+            cursorBrush = androidx.compose.ui.graphics.SolidColor(EnactGreen),
             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                 imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = { onSearch(query) }),
-            modifier = Modifier.fillMaxWidth())
+            modifier = Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp)).background(EnactSurface)
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            decorationBox = { inner ->
+                if (query.isEmpty())
+                    Text("Search address or place", fontSize = 13.sp,
+                        color = EnactOnSurfaceDim)
+                inner()
+            })
         if (routing.phase == RoutingPhase.SEARCHING)
             Text("Searching…", color = EnactOnSurfaceDim, fontSize = 12.sp,
                 modifier = Modifier.padding(top = 4.dp))
@@ -424,7 +435,7 @@ private fun BoxScope.CurrentSpeedOverlay(speedKmh: Int, limitKmh: Int?) {
 private fun BoxScope.SpeedLimitOverlay(limitKmh: Int?) {
     // Only show when we actually have a limit (roundel option on + value known).
     if (limitKmh == null || limitKmh <= 0) return
-    Row(Modifier.align(Alignment.TopEnd).padding(top = 96.dp, end = 60.dp),
+    Row(Modifier.align(Alignment.TopEnd).padding(top = 96.dp, end = 10.dp),
         verticalAlignment = Alignment.CenterVertically) {
         // Speed-limit roundel (white disc + red ring + value) — same style as the
         // Detector's sign roundel.

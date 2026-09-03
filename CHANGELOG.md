@@ -1,5 +1,19 @@
 # DBM Changelog
 
+## v1.20.105 — map manager + nav UI fixes
+- Standalone-country "downloaded" marker is now green, matching sub-regions (was
+  grey).
+- Standalone country downloads/updates now show a progress bar (the bar lived
+  only in the sub-region loop, which standalone rows skip).
+- When an update is available, BOTH Update and Delete buttons are shown (for
+  sub-regions and standalone countries) — you no longer lose the delete option.
+- Top-menu order changed so the last tabs are Navigation, Settings, Log (then
+  Exit). OBD stays at index 4 so its show/hide logic is unaffected.
+- Redrew the navigation car icon to look more like a car (tapered body, cabin,
+  wheels); redrew the pedestrian icon without the circle and with a smaller head.
+- Reduced the height of the address search field (now a compact BasicTextField)
+  so it no longer overlaps the speed-limit sign.
+- Moved the speed-limit sign closer to the right edge of the map.
 ## v1.20.104 — show downloaded vs latest map version
 - The map list now shows BOTH the version on the phone and the latest available,
   and the old labels no longer mislabel the catalog (latest) version as the

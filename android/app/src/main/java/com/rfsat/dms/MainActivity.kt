@@ -269,7 +269,7 @@ class MainActivity : ComponentActivity() {
 
     // ------------------------------------------------------------------ UI
 
-    private val tabs = listOf("About", "Detector", "Summary", "History", "OBD", "Log", "Settings", "Navigation")
+    private val tabs = listOf("About", "Detector", "Summary", "History", "OBD", "Navigation", "Settings", "Log")
 
     @Composable
     private fun Root() {
@@ -338,9 +338,9 @@ class MainActivity : ComponentActivity() {
                 3 -> HistoryScreen(dao = DmsDatabase.get(this@MainActivity).events(),
                         onBack = { tab = 1 })
                 4 -> ObdScreen()
-                5 -> LogScreen()
+                7 -> LogScreen()
                 6 -> SettingsScreen()
-                7 -> {
+                5 -> {
                     com.rfsat.dms.nav.NavScreen(
                         router = navRouter,
                         settings = navSettings,
@@ -1924,7 +1924,7 @@ class MainActivity : ComponentActivity() {
                         // the name line, at right, to align with the button column)
                         if (installedCount > 0)
                             Text("\u2713 $installedCount downloaded",
-                                color = EnactOnSurfaceDim, fontSize = 10.sp)
+                                color = EnactGreen, fontSize = 10.sp)
                     }
                     // total size on the name line, right-aligned before the button
                     if (totalBytes > 0)
@@ -1935,11 +1935,36 @@ class MainActivity : ComponentActivity() {
                     // lines up with the sub-region action buttons below. For a
                     // standalone country it downloads that one map; for a country
                     // with sub-regions it downloads ALL of them.
-                    Box(Modifier.width(76.dp),
+                    Box(Modifier.width(120.dp),
                         contentAlignment = androidx.compose.ui.Alignment.CenterEnd) {
                     androidx.compose.runtime.CompositionLocalProvider(
                         androidx.compose.material3.LocalMinimumInteractiveComponentSize
                             provides androidx.compose.ui.unit.Dp.Unspecified) {
+                    val sa0 = standalone
+                    if (sa0 != null &&
+                        sa0.state == com.rfsat.dms.maps.MapState.UPDATE_AVAILABLE) {
+                        // Update AND Delete both available for the standalone map.
+                        Row(verticalAlignment =
+                                androidx.compose.ui.Alignment.CenterVertically) {
+                            androidx.compose.material3.TextButton(
+                                enabled = !anyDownloadingHere,
+                                contentPadding = androidx.compose.foundation.layout
+                                    .PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                modifier = Modifier.heightIn(min = 32.dp),
+                                onClick = { pending = sa0.region }) {
+                                Text(if (anyDownloadingHere) "…" else "Update",
+                                    fontSize = 12.sp)
+                            }
+                            androidx.compose.material3.TextButton(
+                                contentPadding = androidx.compose.foundation.layout
+                                    .PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                modifier = Modifier.heightIn(min = 32.dp),
+                                onClick = { toDelete = sa0.region }) {
+                                Text("Delete", color = Color(0xFFE57373),
+                                    fontSize = 12.sp)
+                            }
+                        }
+                    } else {
                     androidx.compose.material3.TextButton(
                         enabled = !anyDownloadingHere,
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(
@@ -1948,8 +1973,6 @@ class MainActivity : ComponentActivity() {
                         onClick = {
                             val sa = standalone
                             if (sa != null) {
-                                // Standalone country: act on THIS map's state —
-                                // Delete when installed, otherwise Get/Update it.
                                 if (sa.state == com.rfsat.dms.maps.MapState.INSTALLED)
                                     toDelete = sa.region
                                 else pending = sa.region
@@ -1959,7 +1982,6 @@ class MainActivity : ComponentActivity() {
                         val label = when {
                             anyDownloadingHere -> "…"
                             sa == null -> "Get all"
-                            sa.state == com.rfsat.dms.maps.MapState.UPDATE_AVAILABLE -> "Update"
                             sa.state == com.rfsat.dms.maps.MapState.INSTALLED -> "Delete"
                             else -> "Get"
                         }
@@ -1969,6 +1991,25 @@ class MainActivity : ComponentActivity() {
                         Text(label, fontSize = 12.sp, color = labelColor)
                     }
                     }
+                    }
+                    }
+                }
+                // Progress bar for a standalone country's own download/update
+                // (sub-region rows have their own below; standalone skips that loop).
+                standalone?.let { sa ->
+                    val frac = downloadFracs[sa.region.id]
+                    if (frac != null) {
+                        val msg = downloadMsgs[sa.region.id] ?: "Downloading…"
+                        Column(Modifier.fillMaxWidth().padding(start = 10.dp, top = 2.dp)) {
+                            if (frac >= 0f)
+                                androidx.compose.material3.LinearProgressIndicator(
+                                    progress = { frac }, color = EnactGreen,
+                                    modifier = Modifier.fillMaxWidth())
+                            else
+                                androidx.compose.material3.LinearProgressIndicator(
+                                    color = EnactGreen, modifier = Modifier.fillMaxWidth())
+                            Text(msg, color = EnactLime, fontSize = 10.sp)
+                        }
                     }
                 }
                 if (standalone != null || !expanded) continue
@@ -2035,27 +2076,44 @@ class MainActivity : ComponentActivity() {
                         // (Download / Update / … / Delete have different widths).
                         // Fixed-width action area (fits "Delete") so buttons align
                         // in a column down the list and the info icon stays put.
-                        Box(Modifier.width(76.dp),
+                        // Wider action area so an update row can show BOTH Update
+                        // and Delete side by side.
+                        Box(Modifier.width(120.dp),
                             contentAlignment = androidx.compose.ui.Alignment.CenterEnd) {
                         androidx.compose.runtime.CompositionLocalProvider(
                             androidx.compose.material3.LocalMinimumInteractiveComponentSize
                                 provides androidx.compose.ui.unit.Dp.Unspecified) {
                         val tightPad = androidx.compose.foundation.layout.PaddingValues(
-                            horizontal = 8.dp, vertical = 0.dp)
+                            horizontal = 6.dp, vertical = 0.dp)
                         when (st.state) {
-                            com.rfsat.dms.maps.MapState.NOT_INSTALLED,
-                            com.rfsat.dms.maps.MapState.UPDATE_AVAILABLE ->
+                            com.rfsat.dms.maps.MapState.NOT_INSTALLED ->
                                 androidx.compose.material3.TextButton(
-                                    // Only THIS region's button is disabled while it
-                                    // downloads; other regions can still be started,
-                                    // so multiple downloads run concurrently.
                                     enabled = !isDownloadingThis,
                                     contentPadding = tightPad,
                                     modifier = Modifier.heightIn(min = 32.dp),
                                     onClick = { pending = r }) {
-                                    Text(if (isDownloadingThis) "…"
-                                        else if (st.state == com.rfsat.dms.maps.MapState.UPDATE_AVAILABLE)
-                                            "Update" else "Get", fontSize = 12.sp)
+                                    Text(if (isDownloadingThis) "…" else "Get",
+                                        fontSize = 12.sp)
+                                }
+                            com.rfsat.dms.maps.MapState.UPDATE_AVAILABLE ->
+                                // Update AND Delete both available.
+                                Row(verticalAlignment =
+                                        androidx.compose.ui.Alignment.CenterVertically) {
+                                    androidx.compose.material3.TextButton(
+                                        enabled = !isDownloadingThis,
+                                        contentPadding = tightPad,
+                                        modifier = Modifier.heightIn(min = 32.dp),
+                                        onClick = { pending = r }) {
+                                        Text(if (isDownloadingThis) "…" else "Update",
+                                            fontSize = 12.sp)
+                                    }
+                                    androidx.compose.material3.TextButton(
+                                        contentPadding = tightPad,
+                                        modifier = Modifier.heightIn(min = 32.dp),
+                                        onClick = { toDelete = r }) {
+                                        Text("Delete", color = Color(0xFFE57373),
+                                            fontSize = 12.sp)
+                                    }
                                 }
                             com.rfsat.dms.maps.MapState.INSTALLED ->
                                 androidx.compose.material3.TextButton(

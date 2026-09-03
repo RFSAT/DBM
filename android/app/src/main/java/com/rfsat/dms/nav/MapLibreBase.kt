@@ -268,50 +268,58 @@ private fun ownDotBitmap(): Bitmap {
 }
 
 private fun ownCarBitmap(): Bitmap {
-    // Recognizable top-down car silhouette (no surrounding circle). Points up =
-    // direction of travel: rounded body, windshield, side windows, wheels.
-    val s = 56; val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
+    // Cleaner top-down car: tapered nose, cabin greenhouse, wheels. Points up.
+    val s = 60; val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
     val c = Canvas(bmp); val p = Paint(Paint.ANTI_ALIAS_FLAG)
     val blue = AndroidColor.parseColor("#2E7DFF")
-    // wheels (dark), poking out at the four corners
-    p.color = AndroidColor.parseColor("#1A1A1A")
-    c.drawRoundRect(RectF(11f, 16f, 17f, 26f), 2f, 2f, p)   // front-left
-    c.drawRoundRect(RectF(39f, 16f, 45f, 26f), 2f, 2f, p)   // front-right
-    c.drawRoundRect(RectF(11f, 32f, 17f, 42f), 2f, 2f, p)   // rear-left
-    c.drawRoundRect(RectF(39f, 32f, 45f, 42f), 2f, 2f, p)   // rear-right
-    // body
+    // wheels (dark rounded rects at the corners)
+    p.color = AndroidColor.parseColor("#202124")
+    c.drawRoundRect(RectF(12f, 18f, 18f, 28f), 3f, 3f, p)
+    c.drawRoundRect(RectF(42f, 18f, 48f, 28f), 3f, 3f, p)
+    c.drawRoundRect(RectF(12f, 34f, 18f, 44f), 3f, 3f, p)
+    c.drawRoundRect(RectF(42f, 34f, 48f, 44f), 3f, 3f, p)
+    // body: a tapered shape (narrower at the nose) via a path
     p.color = blue
-    c.drawRoundRect(RectF(15f, 8f, 41f, 50f), 11f, 13f, p)
-    // white glass: windshield (front, narrower) + rear window
+    val body = android.graphics.Path().apply {
+        moveTo(30f, 6f)                     // nose tip
+        cubicTo(38f, 8f, 44f, 14f, 44f, 24f)
+        lineTo(44f, 44f)
+        cubicTo(44f, 51f, 38f, 54f, 30f, 54f)
+        cubicTo(22f, 54f, 16f, 51f, 16f, 44f)
+        lineTo(16f, 24f)
+        cubicTo(16f, 14f, 22f, 8f, 30f, 6f)
+        close()
+    }
+    c.drawPath(body, p)
+    // cabin/greenhouse (lighter) + windshield split
+    p.color = AndroidColor.parseColor("#BFDBFF")
+    c.drawRoundRect(RectF(21f, 20f, 39f, 40f), 5f, 5f, p)
+    // windshield (white) at the front of the cabin
     p.color = AndroidColor.WHITE
     val wind = android.graphics.Path().apply {
-        moveTo(20f, 20f); lineTo(36f, 20f); lineTo(33f, 13f); lineTo(23f, 13f); close()
+        moveTo(22f, 22f); lineTo(38f, 22f); lineTo(35f, 15f); lineTo(25f, 15f); close()
     }
     c.drawPath(wind, p)
-    val rear = android.graphics.Path().apply {
-        moveTo(21f, 34f); lineTo(35f, 34f); lineTo(33f, 41f); lineTo(23f, 41f); close()
-    }
-    c.drawPath(rear, p)
-    // roof line between the windows (a lighter blue strip reads as the cabin)
-    p.color = AndroidColor.parseColor("#5C9BFF")
-    c.drawRect(RectF(20f, 21f, 36f, 33f), p)
     return bmp
 }
 
 private fun ownPedBitmap(): Bitmap {
+    // Blue pedestrian figure, no surrounding circle, smaller head.
     val s = 44; val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
     val c = Canvas(bmp); val p = Paint(Paint.ANTI_ALIAS_FLAG)
-    p.color = AndroidColor.parseColor("#2E7DFF")
-    c.drawCircle(s / 2f, s / 2f, s / 2f - 3f, p)
-    p.color = AndroidColor.WHITE; p.style = Paint.Style.STROKE; p.strokeWidth = 2.5f
-    c.drawCircle(s / 2f, s / 2f, s / 2f - 3f, p)
-    // stick-figure pedestrian
-    p.style = Paint.Style.FILL; p.color = AndroidColor.WHITE
-    c.drawCircle(22f, 14f, 3.5f, p)                          // head
-    p.style = Paint.Style.STROKE; p.strokeWidth = 3f; p.strokeCap = Paint.Cap.ROUND
-    c.drawLine(22f, 18f, 22f, 28f, p)                        // body
-    c.drawLine(22f, 21f, 17f, 26f, p); c.drawLine(22f, 21f, 27f, 26f, p)  // arms
-    c.drawLine(22f, 28f, 18f, 34f, p); c.drawLine(22f, 28f, 26f, 34f, p)  // legs
+    val blue = AndroidColor.parseColor("#2E7DFF")
+    // thin white outline behind the figure for contrast on any map
+    fun figure(col: Int, sw: Float) {
+        p.color = col; p.style = Paint.Style.FILL
+        c.drawCircle(22f, 11f, 3f, p)                         // head (smaller)
+        p.style = Paint.Style.STROKE; p.strokeWidth = sw
+        p.strokeCap = Paint.Cap.ROUND
+        c.drawLine(22f, 15f, 22f, 27f, p)                    // body
+        c.drawLine(22f, 18f, 16f, 24f, p); c.drawLine(22f, 18f, 28f, 24f, p)  // arms
+        c.drawLine(22f, 27f, 17f, 36f, p); c.drawLine(22f, 27f, 27f, 36f, p)  // legs
+    }
+    figure(AndroidColor.WHITE, 7f)   // white halo
+    figure(blue, 4f)                 // blue figure
     return bmp
 }
 
