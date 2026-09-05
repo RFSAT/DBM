@@ -111,6 +111,20 @@ class MainActivity : ComponentActivity() {
     private val navRouter by lazy {
         com.rfsat.dms.nav.NavRouter(com.rfsat.dms.nav.OnlineOsmProvider()) }
     private val navSettings by lazy { com.rfsat.dms.nav.NavSettings(this) }
+    // Map downloads run on an ACTIVITY-scoped coroutine (not the composable's
+    // rememberCoroutineScope) and their progress state lives here too, so a
+    // download keeps running and reporting when the user leaves the Settings
+    // screen or collapses the maps section. Cancelled only when the Activity is
+    // destroyed.
+    private val downloadScope =
+        kotlinx.coroutines.CoroutineScope(
+            kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+    val downloadFracs = androidx.compose.runtime.mutableStateMapOf<String, Float>()
+    val downloadMsgs = androidx.compose.runtime.mutableStateMapOf<String, String>()
+    // Bumped whenever a background download finishes, so the map screen (if it's
+    // currently shown) re-derives install status even though the download ran
+    // outside its composition.
+    val downloadsChanged = androidx.compose.runtime.mutableStateOf(0)
     // Recenter requests: bumping this asks the map to recenter on the user once.
     private val navRecenter = androidx.compose.runtime.mutableStateOf(0)
     private var cameras: PhoneCameraManager? = null
@@ -1594,8 +1608,8 @@ class MainActivity : ComponentActivity() {
         // Concurrent downloads: track progress per region id so several maps can
         // download at once, each with its own progress bar. -1f = indeterminate
         // (connecting/verifying), 0..1 = fraction, absent = not downloading.
-        val downloadFracs = remember { androidx.compose.runtime.mutableStateMapOf<String, Float>() }
-        val downloadMsgs = remember { androidx.compose.runtime.mutableStateMapOf<String, String>() }
+        // downloadFracs / downloadMsgs are Activity-level (see the class props) so
+        // downloads survive leaving this screen; do NOT re-declare them here.
         val progressMsg by mapImportStatus.collectAsState()
         val indexUrl = "https://www.rfsat.com/products/maps/index.json"
         val bordersUrl = "https://www.rfsat.com/products/maps/borders.json"
@@ -1620,6 +1634,13 @@ class MainActivity : ComponentActivity() {
                     else applyCatalog(cat)
                 }
             }
+        }
+
+        // If a background download (started here, still running after the user
+        // left and came back) finishes while this screen is shown, re-derive the
+        // install status from disk — no network needed.
+        LaunchedEffect(downloadsChanged.value) {
+            currentCatalog?.let { statuses = repo.statusFor(it) }
         }
 
         // On open: show the cached list instantly (no waiting on the network),
@@ -1669,7 +1690,7 @@ class MainActivity : ComponentActivity() {
             if (downloadFracs.containsKey(r.id)) return   // already downloading
             downloadFracs[r.id] = -1f
             downloadMsgs[r.id] = "Starting…"
-            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            downloadScope.launch {
                 downloader.download(cat, r) { p ->
                     when (p) {
                         is com.rfsat.dms.maps.MapDownloader.Progress.Downloading -> {
@@ -1705,6 +1726,7 @@ class MainActivity : ComponentActivity() {
                     downloadFracs.remove(r.id)
                     downloadMsgs.remove(r.id)
                     refresh()
+                    downloadsChanged.value = downloadsChanged.value + 1
                 }
             }
         }
@@ -2682,6 +2704,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         cameras?.release()
+        downloadScope.coroutineContext[kotlinx.coroutines.Job]?.cancel()   // stop in-flight map downloads
         runCatching { unbindService(conn) }   // may already be unbound (Exit)
         super.onDestroy()
     }

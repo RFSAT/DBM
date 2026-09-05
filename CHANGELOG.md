@@ -1,5 +1,15 @@
 # DBM Changelog
 
+## v1.20.106 — map downloads continue when switching screens
+- Map downloads no longer stop when you leave the Settings screen or collapse the
+  maps section. Previously they were launched on the composable's
+  rememberCoroutineScope and their progress state was remembered inside the
+  composable, so navigating away cancelled the download and lost its progress.
+- Downloads now run on an Activity-scoped coroutine, and the progress state
+  (downloadFracs/downloadMsgs) lives at the Activity level, so a download keeps
+  running and reporting across screen switches. When the map screen is shown
+  again, install status re-derives from disk once a background download finishes.
+- The download scope is cancelled when the Activity is destroyed.
 ## v1.20.105 — map manager + nav UI fixes
 - Standalone-country "downloaded" marker is now green, matching sub-regions (was
   grey).
