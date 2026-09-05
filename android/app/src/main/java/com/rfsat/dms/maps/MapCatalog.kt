@@ -73,8 +73,13 @@ data class MapRegion(
     val country: String,       // grouping label
     val countryId: String,
     val file: String,          // e.g. "greece.db"
-    val sizeBytes: Long,
-    val sha256: String,
+    val sizeBytes: Long,       // size of the DECOMPRESSED .db
+    val sha256: String,        // sha256 of the DECOMPRESSED .db
+    // Compression: when true, the server hosts "<file>.gz" (gzip) and the app
+    // downloads that and decompresses on the fly; sha256/sizeBytes still refer to
+    // the decompressed .db, so integrity is verified on the final file.
+    val compressed: Boolean = false,
+    val compressedSize: Long = 0,   // size of the .gz on the server (for progress)
     val dataDate: String,      // OSM data date the .db was built from
     val version: Int,          // bump when regenerated
     val dbSchemaVersion: Int,  // schema inside the .db (app must support it)
@@ -105,6 +110,8 @@ data class MapRegion(
                 file = o.getString("file"),
                 sizeBytes = o.optLong("sizeBytes", 0),
                 sha256 = o.optString("sha256", ""),
+                compressed = o.optBoolean("compressed", false),
+                compressedSize = o.optLong("compressedSize", 0),
                 dataDate = o.optString("dataDate", ""),
                 version = o.optInt("version", 1),
                 dbSchemaVersion = o.optInt("dbSchemaVersion", 2),

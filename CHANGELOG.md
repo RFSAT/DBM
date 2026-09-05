@@ -1,5 +1,14 @@
 # DBM Changelog
 
+## v1.20.107 — gzip-compressed map downloads
+- Maps can now be served gzip-compressed. When a region is marked "compressed" in
+  index.json, the app downloads "<file>.gz" and decompresses it on the fly
+  (GZIPInputStream) so it lands as the plain .db — cutting download size/time and
+  server storage (~60-70%%, matching the ~32%%-of-original compression test). The
+  sha256/sizeBytes in the catalogue remain the DECOMPRESSED values, so integrity
+  is still verified on the final .db. Uncompressed maps work exactly as before.
+- Tooling: build_europe.py --compress writes <region>.db.gz beside each .db and
+  records compressed/compressedSize in index.json (deploy the .db.gz files).
 ## v1.20.106 — map downloads continue when switching screens
 - Map downloads no longer stop when you leave the Settings screen or collapse the
   maps section. Previously they were launched on the composable's

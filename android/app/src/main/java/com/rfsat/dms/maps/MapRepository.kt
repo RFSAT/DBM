@@ -110,7 +110,11 @@ class MapDownloader(private val repo: MapRepository) {
      */
     fun download(catalog: MapCatalog, region: MapRegion,
                  onProgress: (Progress) -> Unit): Boolean {
-        val url = catalog.baseUrl.trimEnd('/') + "/" + region.file
+        // Compressed maps are hosted as "<file>.gz" and streamed through a gunzip
+        // so they land as the plain .db. sha256/sizeBytes always refer to the
+        // decompressed .db, so integrity is checked on the final file regardless.
+        val serverName = if (region.compressed) region.file + ".gz" else region.file
+        val url = catalog.baseUrl.trimEnd('/') + "/" + serverName
         val dir = repo.mapsDir()
         val part = File(dir, region.file + ".part")
         val dest = File(dir, region.file)
@@ -123,27 +127,44 @@ class MapDownloader(private val repo: MapRepository) {
             if (conn.responseCode != 200) {
                 onProgress(Progress.Failed("HTTP ${conn.responseCode}")); return false
             }
-            val total = if (region.sizeBytes > 0) region.sizeBytes
+            // Progress is measured on the COMPRESSED bytes actually transferred.
+            val total = if (region.compressed && region.compressedSize > 0)
+                            region.compressedSize
+                        else if (!region.compressed && region.sizeBytes > 0)
+                            region.sizeBytes
                         else conn.contentLengthLong
             val digest = MessageDigest.getInstance("SHA-256")
-            conn.inputStream.use { input ->
+            // Count transferred (compressed) bytes for progress via a wrapper, but
+            // hash the DECOMPRESSED bytes for verification.
+            var done = 0L
+            var lastReport = 0L
+            val counting = object : java.io.FilterInputStream(conn.inputStream) {
+                override fun read(b: ByteArray, off: Int, len: Int): Int {
+                    val n = super.read(b, off, len)
+                    if (n > 0) {
+                        done += n
+                        if (done - lastReport > 500_000) {
+                            onProgress(Progress.Downloading(done, total)); lastReport = done
+                        }
+                    }
+                    return n
+                }
+            }
+            val source: java.io.InputStream =
+                if (region.compressed) java.util.zip.GZIPInputStream(counting)
+                else counting
+            source.use { input ->
                 part.outputStream().use { out ->
                     val buf = ByteArray(1 shl 16)
                     var read: Int
-                    var done = 0L
-                    var lastReport = 0L
                     while (input.read(buf).also { read = it } >= 0) {
                         out.write(buf, 0, read)
-                        digest.update(buf, 0, read)
-                        done += read
-                        if (done - lastReport > 1_000_000) {   // report each ~1 MB
-                            onProgress(Progress.Downloading(done, total)); lastReport = done
-                        }
+                        digest.update(buf, 0, read)   // hash of the decompressed .db
                     }
                 }
             }
 
-            // verify sha256 if the catalog provides one
+            // verify sha256 (of the decompressed .db) if the catalog provides one
             if (region.sha256.isNotBlank()) {
                 onProgress(Progress.Verifying)
                 val hex = digest.digest().joinToString("") { "%02x".format(it) }
@@ -156,7 +177,8 @@ class MapDownloader(private val repo: MapRepository) {
             if (dest.exists()) dest.delete()
             if (!part.renameTo(dest)) { part.delete(); onProgress(Progress.Failed("rename failed")); return false }
             repo.recordInstalled(region)
-            DLog.i(TAG, "downloaded ${region.id} v${region.version} -> ${dest.path}")
+            DLog.i(TAG, "downloaded ${region.id} v${region.version} -> ${dest.path}" +
+                (if (region.compressed) " (gz)" else ""))
             onProgress(Progress.Done)
             return true
         } catch (e: Exception) {
