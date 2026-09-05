@@ -373,10 +373,15 @@ class MainActivity : ComponentActivity() {
                                     fuel = cv(o.fuel),
                                     charging = cv(o.charging),
                                     hospital = cv(o.hospital),
-                                    restArea = cv(o.restArea))
+                                    restArea = cv(o.restArea),
+                                    tollBooth = cv(o.tollBooth),
+                                    borderControl = cv(o.borderControl),
+                                    levelCrossing = cv(o.levelCrossing),
+                                    speedBump = cv(o.speedBump))
                             }
                         },
                         cameraWarningFlow = service?.cameraWarning,
+                        hazardWarningFlow = service?.hazardWarning,
                         speedLimitProvider = {
                             // Same value + setting as the Detector's roundel:
                             // the fused active limit, only when the roundel option

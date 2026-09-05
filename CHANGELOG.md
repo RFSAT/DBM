@@ -1,5 +1,14 @@
 # DBM Changelog
 
+## v1.20.108 — new POIs: level crossings, speed bumps, toll booths, borders
+- Added four map-data types (from the map data when present): toll booths and
+  border crossings as MAP ICONS (€ and flag badges), and level crossings and
+  speed bumps as both map icons AND approaching-WARNINGS. The nav view shows a
+  "Railway crossing N m ahead" / "Speed bump N m ahead" banner (its own red
+  banner + ⚠ icon), computed from the offline map like the speed-camera warning,
+  gated by warn_level_crossing / warn_speed_bump settings (default on). All four
+  are selectable in Settings > Navigation and greyed until the map data has them.
+- Uses a new OsmMap.hazardsAhead() ahead-of-travel query and a hazardWarning flow.
 ## v1.20.107 — gzip-compressed map downloads
 - Maps can now be served gzip-compressed. When a region is marked "compressed" in
   index.json, the app downloads "<file>.gz" and decompresses it on the fly

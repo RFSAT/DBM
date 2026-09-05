@@ -195,10 +195,18 @@ private const val FUEL_SRC = "dbm-fuel"; private const val FUEL_LYR = "dbm-fuel-
 private const val CHG_SRC = "dbm-chg"; private const val CHG_LYR = "dbm-chg-l"
 private const val HOSP_SRC = "dbm-hosp"; private const val HOSP_LYR = "dbm-hosp-l"
 private const val REST_SRC = "dbm-rest"; private const val REST_LYR = "dbm-rest-l"
+private const val TOLL_SRC = "dbm-toll"; private const val TOLL_LYR = "dbm-toll-l"
+private const val BORDER_SRC = "dbm-border"; private const val BORDER_LYR = "dbm-border-l"
+private const val LEVELX_SRC = "dbm-levelx"; private const val LEVELX_LYR = "dbm-levelx-l"
+private const val BUMP_SRC = "dbm-bump"; private const val BUMP_LYR = "dbm-bump-l"
 private const val ICON_FUEL = "dbm-ic-fuel"
 private const val ICON_CHG = "dbm-ic-chg"
 private const val ICON_HOSP = "dbm-ic-hosp"
 private const val ICON_REST = "dbm-ic-rest"
+private const val ICON_TOLL = "dbm-ic-toll"
+private const val ICON_BORDER = "dbm-ic-border"
+private const val ICON_LEVELX = "dbm-ic-levelx"
+private const val ICON_BUMP = "dbm-ic-bump"
 private const val ICON_PARKING = "dbm-ic-parking"
 private const val ICON_CAMERA = "dbm-ic-camera"
 private const val ICON_OWN_BLUE_DOT = "dbm-ic-own-dot"
@@ -238,6 +246,14 @@ private fun registerOverlayIcons(style: Style) {
         style.addImage(ICON_HOSP, badgeBitmap("H", "#C62828"))        // hospital H
     if (style.getImage(ICON_REST) == null)
         style.addImage(ICON_REST, badgeBitmap("\u2615", "#6D4C41"))   // rest area
+    if (style.getImage(ICON_TOLL) == null)
+        style.addImage(ICON_TOLL, badgeBitmap("\u20AC", "#F9A825"))   // toll (€)
+    if (style.getImage(ICON_BORDER) == null)
+        style.addImage(ICON_BORDER, badgeBitmap("\u2691", "#5E35B1"))  // border flag
+    if (style.getImage(ICON_LEVELX) == null)
+        style.addImage(ICON_LEVELX, badgeBitmap("\u2715", "#B71C1C"))  // level crossing X
+    if (style.getImage(ICON_BUMP) == null)
+        style.addImage(ICON_BUMP, badgeBitmap("\u2229", "#EF6C00"))    // speed bump ∩
 }
 
 /** A small rounded badge with a glyph/letter centred on it — used for the extra
@@ -411,7 +427,11 @@ private fun ensureLayers(style: Style) {
         Triple(FUEL_SRC, FUEL_LYR, ICON_FUEL),
         Triple(CHG_SRC, CHG_LYR, ICON_CHG),
         Triple(HOSP_SRC, HOSP_LYR, ICON_HOSP),
-        Triple(REST_SRC, REST_LYR, ICON_REST))) {
+        Triple(REST_SRC, REST_LYR, ICON_REST),
+        Triple(TOLL_SRC, TOLL_LYR, ICON_TOLL),
+        Triple(BORDER_SRC, BORDER_LYR, ICON_BORDER),
+        Triple(LEVELX_SRC, LEVELX_LYR, ICON_LEVELX),
+        Triple(BUMP_SRC, BUMP_LYR, ICON_BUMP))) {
         if (style.getSource(src) == null) {
             style.addSource(GeoJsonSource(src))
             style.addLayer(SymbolLayer(lyr, src).withProperties(
@@ -502,4 +522,12 @@ private fun updateData(
         pointFc(PoiType.HOSPITAL in en, mapData?.hospital))
     style.getSourceAs<GeoJsonSource>(REST_SRC)?.setGeoJson(
         pointFc(PoiType.REST_AREA in en, mapData?.restArea))
+    style.getSourceAs<GeoJsonSource>(TOLL_SRC)?.setGeoJson(
+        pointFc(PoiType.TOLL_BOOTH in en, mapData?.tollBooth))
+    style.getSourceAs<GeoJsonSource>(BORDER_SRC)?.setGeoJson(
+        pointFc(PoiType.BORDER_CONTROL in en, mapData?.borderControl))
+    style.getSourceAs<GeoJsonSource>(LEVELX_SRC)?.setGeoJson(
+        pointFc(PoiType.LEVEL_CROSSING in en, mapData?.levelCrossing))
+    style.getSourceAs<GeoJsonSource>(BUMP_SRC)?.setGeoJson(
+        pointFc(PoiType.SPEED_BUMP in en, mapData?.speedBump))
 }

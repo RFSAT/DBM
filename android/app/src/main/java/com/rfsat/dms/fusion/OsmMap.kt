@@ -32,6 +32,10 @@ data class MapOverlay(
     val charging: List<DoublePair> = emptyList(),
     val hospital: List<DoublePair> = emptyList(),
     val restArea: List<DoublePair> = emptyList(),
+    val tollBooth: List<DoublePair> = emptyList(),
+    val borderControl: List<DoublePair> = emptyList(),
+    val levelCrossing: List<DoublePair> = emptyList(),
+    val speedBump: List<DoublePair> = emptyList(),
 )
 
 /** Result of matching a GPS point to the road network. */
@@ -223,12 +227,70 @@ class OsmMap private constructor(private val db: SQLiteDatabase) {
         val charging = queryPoiPoints("charging", lat, lon, marginDeg)
         val hospital = queryPoiPoints("hospital", lat, lon, marginDeg)
         val restArea = queryPoiPoints("rest_area", lat, lon, marginDeg)
+        val tollBooth = queryPoiPoints("toll_booth", lat, lon, marginDeg)
+        val borderControl = queryPoiPoints("border_control", lat, lon, marginDeg)
+        val levelCrossing = queryPoiPoints("level_crossing", lat, lon, marginDeg)
+        val speedBump = queryPoiPoints("speed_bump", lat, lon, marginDeg)
 
-        return MapOverlay(limits, park, cams, fuel, charging, hospital, restArea)
+        return MapOverlay(limits, park, cams, fuel, charging, hospital, restArea,
+                          tollBooth, borderControl, levelCrossing, speedBump)
     }
 
     /** Points (lat,lon) from a table that has a lat/lon column, within a bbox.
      *  Returns empty if the table doesn't exist (older .db without extra POIs). */
+    /** Points from a POI table that lie AHEAD in the direction of travel, within
+     *  aheadM metres — mirrors CameraMonitor.camerasAhead but generic, for the
+     *  level-crossing / speed-bump approach warnings. Returns (lat,lon,distM)
+     *  sorted nearest-first; empty if the table doesn't exist. */
+    fun hazardsAhead(table: String, lat: Double, lon: Double, headingDeg: Float,
+                     aheadM: Double): List<Triple<Double, Double, Double>> {
+        val out = ArrayList<Triple<Double, Double, Double>>(4)
+        runCatching {
+            val hasTable = db.rawQuery(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                arrayOf(table)).use { it.moveToNext() }
+            if (!hasTable) return emptyList()
+            val dLat = aheadM / 111_320.0
+            val dLon = aheadM / (111_320.0 *
+                Math.cos(Math.toRadians(lat)).coerceAtLeast(0.01))
+            db.rawQuery(
+                "SELECT lat, lon FROM $table " +
+                "WHERE maxLat >= ? AND minLat <= ? AND maxLon >= ? AND minLon <= ?",
+                arrayOf((lat - dLat).toString(), (lat + dLat).toString(),
+                        (lon - dLon).toString(), (lon + dLon).toString())).use { c ->
+                while (c.moveToNext()) {
+                    val pla = c.getDouble(0); val plo = c.getDouble(1)
+                    val d = distMeters(lat, lon, pla, plo)
+                    if (d > aheadM) continue
+                    val brg = bearingDegTo(lat, lon, pla, plo)
+                    if (angleDiffDeg(brg, headingDeg.toDouble()) > 55.0) continue
+                    out.add(Triple(pla, plo, d))
+                }
+            }
+        }.onFailure { DLog.e(TAG, "hazardsAhead($table) failed", it) }
+        return out.sortedBy { it.third }
+    }
+
+    private fun distMeters(la1: Double, lo1: Double, la2: Double, lo2: Double): Double {
+        val dLat = Math.toRadians(la2 - la1); val dLon = Math.toRadians(lo2 - lo1)
+        val a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(Math.toRadians(la1)) * Math.cos(Math.toRadians(la2)) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2)
+        return 6_371_000.0 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+    }
+
+    private fun bearingDegTo(la1: Double, lo1: Double, la2: Double, lo2: Double): Double {
+        val y = Math.sin(Math.toRadians(lo2 - lo1)) * Math.cos(Math.toRadians(la2))
+        val x = Math.cos(Math.toRadians(la1)) * Math.sin(Math.toRadians(la2)) -
+            Math.sin(Math.toRadians(la1)) * Math.cos(Math.toRadians(la2)) *
+            Math.cos(Math.toRadians(lo2 - lo1))
+        return (Math.toDegrees(Math.atan2(y, x)) + 360) % 360
+    }
+
+    private fun angleDiffDeg(a: Double, b: Double): Double {
+        val d = Math.abs(a - b) % 360; return if (d > 180) 360 - d else d
+    }
+
     private fun queryPoiPoints(
         table: String, lat: Double, lon: Double, marginDeg: Double, cap: Int = 500
     ): List<DoublePair> {

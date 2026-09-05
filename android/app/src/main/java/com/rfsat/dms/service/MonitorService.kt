@@ -129,6 +129,10 @@ class MonitorService : Service() {
     // some countries — the driver takes responsibility for local legality.
     private val _cameraWarning = MutableStateFlow<String?>(null)
     val cameraWarning: kotlinx.coroutines.flow.StateFlow<String?> = _cameraWarning
+    // Level-crossing / speed-bump approach warning (separate from cameras).
+    private val _hazardWarning = MutableStateFlow<String?>(null)
+    val hazardWarning: kotlinx.coroutines.flow.StateFlow<String?> = _hazardWarning
+    private var lastWarnedHazard: Pair<Double, Double>? = null
 
     // Whether the on-screen speed-limit roundel is shown. Toggleable from an
     // on-road quick chip (and persisted). Default on.
@@ -380,6 +384,7 @@ class MonitorService : Service() {
                     selectRegionForLocation(lat, lon)
 
                     checkCamerasAhead(lat, lon, heading, bestSpeedKmh())
+                    checkHazardsAhead(lat, lon, heading, bestSpeedKmh())
 
                     val mr = osmMap?.match(lat, lon, heading)
                     val mapLimit = mr?.mapLimit ?: -1
@@ -764,6 +769,49 @@ class MonitorService : Service() {
         val limit = nearest.maxspeed?.let { " · $it km/h zone" } ?: ""
         _cameraWarning.value = "Speed camera ${nearest.distanceM.toInt()} m ahead$limit"
         DLog.i(TAG, "camera warning: ${_cameraWarning.value}")
+    }
+
+    // Level-crossing / speed-bump approach warning. Gated by the same-style
+    // hazard settings; reuses the ahead-in-direction-of-travel query. Level
+    // crossings take priority over bumps when both are near.
+    private fun checkHazardsAhead(lat: Double, lon: Double, heading: Double, spd: Int) {
+        val map = osmMap
+        if (map == null || heading.isNaN()) return
+        val prefs = getSharedPreferences("dbm", MODE_PRIVATE)
+        val wantCrossing = prefs.getBoolean("warn_level_crossing", true)
+        val wantBump = prefs.getBoolean("warn_speed_bump", true)
+        if (!wantCrossing && !wantBump) {
+            if (_hazardWarning.value != null) _hazardWarning.value = null
+            return
+        }
+        val aheadM = (spd / 3.6 * 8.0).coerceIn(80.0, 500.0)  // ~8 s lead
+        var msg: String? = null
+        var key: Pair<Double, Double>? = null
+        if (wantCrossing) {
+            val x = map.hazardsAhead("level_crossing", lat, lon, heading.toFloat(),
+                aheadM).firstOrNull()
+            if (x != null) {
+                msg = "Railway crossing ${x.third.toInt()} m ahead"
+                key = x.first to x.second
+            }
+        }
+        if (msg == null && wantBump) {
+            val b = map.hazardsAhead("speed_bump", lat, lon, heading.toFloat(),
+                aheadM).firstOrNull()
+            if (b != null) {
+                msg = "Speed bump ${b.third.toInt()} m ahead"
+                key = b.first to b.second
+            }
+        }
+        if (msg == null) {
+            if (_hazardWarning.value != null) _hazardWarning.value = null
+            lastWarnedHazard = null
+            return
+        }
+        if (key == lastWarnedHazard) return
+        lastWarnedHazard = key
+        _hazardWarning.value = msg
+        DLog.i(TAG, "hazard warning: $msg")
     }
 
     private fun checkParkingAtStop(spd: Int) {

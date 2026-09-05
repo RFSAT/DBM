@@ -23,7 +23,16 @@ enum class PoiType(
     FUEL("Fuel stations", isBase = false, metaKey = "fuel", defaultOn = false),
     CHARGING("EV charging", isBase = false, metaKey = "charging", defaultOn = false),
     HOSPITAL("Hospitals", isBase = false, metaKey = "hospital", defaultOn = false),
-    REST_AREA("Rest areas", isBase = false, metaKey = "rest_area", defaultOn = false);
+    REST_AREA("Rest areas", isBase = false, metaKey = "rest_area", defaultOn = false),
+    TOLL_BOOTH("Toll booths", isBase = false, metaKey = "toll_booth", defaultOn = false),
+    BORDER_CONTROL("Border crossings", isBase = false, metaKey = "border_control",
+        defaultOn = false),
+    // These two also feed approaching-warnings (level crossings, speed bumps),
+    // in addition to appearing on the map when enabled.
+    LEVEL_CROSSING("Level crossings", isBase = false, metaKey = "level_crossing",
+        defaultOn = false),
+    SPEED_BUMP("Speed bumps", isBase = false, metaKey = "speed_bump",
+        defaultOn = false);
 
     companion object {
         val defaults: Set<PoiType> get() = values().filter { it.defaultOn }.toSet()

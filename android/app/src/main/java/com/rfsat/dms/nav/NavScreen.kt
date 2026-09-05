@@ -49,6 +49,7 @@ fun NavScreen(
     speedLimitProvider: (() -> Int?)? = null,
     mapOverlayProvider: ((Double, Double) -> MapOverlayData?)? = null,
     cameraWarningFlow: StateFlow<String?>? = null,   // same as Detector's warning
+    hazardWarningFlow: StateFlow<String?>? = null,   // level crossing / speed bump
     cameraArContent: (@Composable (Modifier) -> Unit)? = null
 ) {
     val scope = rememberCoroutineScope()
@@ -216,6 +217,20 @@ fun NavScreen(
                     Spacer(Modifier.width(8.dp))
                     Text(camWarn, color = EnactDark, fontSize = 14.sp,
                         fontWeight = FontWeight.Bold)
+                }
+            }
+            // Level-crossing / speed-bump approach warning (its own banner/icon).
+            val hazWarn = hazardWarningFlow?.collectAsState()?.value
+            if (hazWarn != null) {
+                Row(Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(EnactError.copy(alpha = 0.92f))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text("\u26A0", fontSize = 16.sp)
+                    Spacer(Modifier.width(8.dp))
+                    Text(hazWarn, color = androidx.compose.ui.graphics.Color.White,
+                        fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
