@@ -126,7 +126,33 @@ class OsmMap private constructor(private val db: SQLiteDatabase) {
             }.onFailure { DLog.e(TAG, "open map db failed: ${f.path}", it) }.getOrNull()
         }
 
-        private fun readMeta(db: SQLiteDatabase): Map<String, String> {
+        /** POI availability read DIRECTLY from an installed map DB, with no
+     *  dependency on MonitorService being running/bound — used by the Settings
+     *  screen so the toggles un-grey as soon as a map containing them is
+     *  installed, even if monitoring was never started. Prefers the active
+     *  region, else any installed one. Returns the extra-POI keys present. */
+    fun availablePoiKeysFromInstalledMap(ctx: android.content.Context): Set<String> {
+        val active = ctx.getSharedPreferences("dbm", android.content.Context.MODE_PRIVATE)
+            .getString("active_region_file", null)
+        val candidates = ArrayList<String>()
+        if (!active.isNullOrBlank()) candidates.add(active)
+        runCatching {
+            com.rfsat.dms.maps.MapRepository(ctx).installed().values
+                .forEach { im ->
+                    val f = im.file
+                    if (f.isNotBlank() && f !in candidates) candidates.add(f)
+                }
+        }
+        for (f in candidates) {
+            val m = runCatching { open(ctx, f) }.getOrNull() ?: continue
+            val keys = runCatching { m.availableExtraPois() }.getOrDefault(emptySet())
+            runCatching { m.close() }
+            if (keys.isNotEmpty()) return keys
+        }
+        return emptySet()
+    }
+
+    private fun readMeta(db: SQLiteDatabase): Map<String, String> {
             val m = HashMap<String, String>()
             runCatching {
                 db.rawQuery("SELECT key,value FROM meta", null).use { c ->

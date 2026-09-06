@@ -1,5 +1,15 @@
 # DBM Changelog
 
+## v1.20.112 — POI toggles now un-grey without the service running
+- Root cause of the toll/border/level-crossing/speed-bump toggles staying
+  disabled: POI availability was only ever computed when MonitorService opened a
+  region DB (i.e. during monitoring / after a GPS fix). Opening Settings without
+  monitoring running left the cached availability stale, so everything stayed
+  greyed even though the installed map contained the POIs.
+- Settings now reads availability DIRECTLY from the installed map DB via a new
+  OsmMap.availablePoiKeysFromInstalledMap(), with no dependency on the service
+  being started or bound, and refreshes the shared cache. The toggles un-grey as
+  soon as a map containing those POIs is installed.
 ## v1.20.111 — POI availability parsing hardened
 - availableExtraPois() now trims any surrounding quotes/whitespace from the
   poi_*_count meta values before parsing, so a value stored as "'254'" (or plain

@@ -1571,12 +1571,21 @@ class MainActivity : ComponentActivity() {
         // value while that resolves.
         var availablePois by remember { mutableStateOf(s.availablePois) }
         LaunchedEffect(Unit) {
-            val svc = service
-            if (svc != null) {
-                val keys = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    svc.availablePoiKeys()
-                }
+            // Read availability straight from the installed map DB — no dependency
+            // on MonitorService running/bound, so the toggles un-grey as soon as a
+            // map containing the POIs is installed, even if monitoring was never
+            // started. Falls back to the cached prefs value if nothing is found.
+            val keys = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    com.rfsat.dms.fusion.OsmMap
+                        .availablePoiKeysFromInstalledMap(this@MainActivity)
+                }.getOrDefault(emptySet())
+            }
+            if (keys.isNotEmpty()) {
                 availablePois = com.rfsat.dms.nav.PoiType.availableFrom(keys)
+                // refresh the cache so other screens and the service agree
+                getSharedPreferences("dbm_nav", MODE_PRIVATE).edit()
+                    .putStringSet("available_extra_pois", keys).apply()
             }
         }
         com.rfsat.dms.nav.PoiType.values().forEach { poi ->
