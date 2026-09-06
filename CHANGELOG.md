@@ -1,5 +1,11 @@
 # DBM Changelog
 
+## v1.20.111 — POI availability parsing hardened
+- availableExtraPois() now trims any surrounding quotes/whitespace from the
+  poi_*_count meta values before parsing, so a value stored as "'254'" (or plain
+  "254") both parse correctly. Belt-and-suspenders alongside the v1.20.110 fix
+  (Settings querying live availability), to make the toll/border/level-crossing/
+  speed-bump toggles reliably un-grey when the loaded map contains them.
 ## v1.20.110 — fix POI toggles staying greyed after a map update
 - The new POI types (toll booths, border crossings, level crossings, speed bumps)
   could stay greyed/disabled in Settings even after updating maps that contain

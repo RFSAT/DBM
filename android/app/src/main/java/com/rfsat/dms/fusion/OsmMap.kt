@@ -325,7 +325,11 @@ class OsmMap private constructor(private val db: SQLiteDatabase) {
         for (t in listOf("fuel", "charging", "hospital", "rest_area",
                          "level_crossing", "speed_bump", "toll_booth",
                          "border_control")) {
-            val c = meta["poi_${t}_count"]?.toIntOrNull() ?: 0
+            // Some builds stored the count wrapped in quotes ("'254'"); trim any
+            // surrounding quotes/whitespace before parsing so both "254" and
+            // "'254'" work.
+            val raw = meta["poi_${t}_count"]?.trim()?.trim('\'', '"')
+            val c = raw?.toIntOrNull() ?: 0
             if (c > 0) out.add(t)
         }
         return out
