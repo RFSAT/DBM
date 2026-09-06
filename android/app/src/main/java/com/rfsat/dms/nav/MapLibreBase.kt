@@ -259,14 +259,16 @@ private fun registerOverlayIcons(style: Style) {
 /** A small rounded badge with a glyph/letter centred on it — used for the extra
  *  POI icons (fuel, charging, hospital, rest). */
 private fun badgeBitmap(glyph: String, colorHex: String): Bitmap {
-    val s = 44; val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
+    // Drawn at higher resolution (64px) with a larger glyph so it stays crisp
+    // when scaled up on the map.
+    val s = 64; val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
     val c = Canvas(bmp); val p = Paint(Paint.ANTI_ALIAS_FLAG)
     p.color = AndroidColor.parseColor(colorHex)
-    c.drawRoundRect(RectF(4f, 4f, s - 4f, s - 4f), 10f, 10f, p)
-    p.color = AndroidColor.WHITE; p.style = Paint.Style.STROKE; p.strokeWidth = 2.5f
-    c.drawRoundRect(RectF(4f, 4f, s - 4f, s - 4f), 10f, 10f, p)
+    c.drawRoundRect(RectF(5f, 5f, s - 5f, s - 5f), 14f, 14f, p)
+    p.color = AndroidColor.WHITE; p.style = Paint.Style.STROKE; p.strokeWidth = 3.5f
+    c.drawRoundRect(RectF(5f, 5f, s - 5f, s - 5f), 14f, 14f, p)
     p.style = Paint.Style.FILL; p.color = AndroidColor.WHITE
-    p.textSize = 24f; p.textAlign = Paint.Align.CENTER; p.isFakeBoldText = true
+    p.textSize = 38f; p.textAlign = Paint.Align.CENTER; p.isFakeBoldText = true
     val fm = p.fontMetrics
     c.drawText(glyph, s / 2f, s / 2f - (fm.ascent + fm.descent) / 2f, p)
     return bmp
@@ -410,7 +412,7 @@ private fun ensureLayers(style: Style) {
         style.addSource(GeoJsonSource(PARK_SRC))
         style.addLayer(SymbolLayer(PARK_LYR, PARK_SRC).withProperties(
             PropertyFactory.iconImage(ICON_PARKING),
-            PropertyFactory.iconSize(1.0f),
+            PropertyFactory.iconSize(1.2f),
             PropertyFactory.iconAllowOverlap(true),
             PropertyFactory.iconIgnorePlacement(true)))
     }
@@ -418,7 +420,7 @@ private fun ensureLayers(style: Style) {
         style.addSource(GeoJsonSource(CAM_SRC))
         style.addLayer(SymbolLayer(CAM_LYR, CAM_SRC).withProperties(
             PropertyFactory.iconImage(ICON_CAMERA),
-            PropertyFactory.iconSize(1.0f),
+            PropertyFactory.iconSize(1.2f),
             PropertyFactory.iconAllowOverlap(true),
             PropertyFactory.iconIgnorePlacement(true)))
     }
@@ -436,7 +438,7 @@ private fun ensureLayers(style: Style) {
             style.addSource(GeoJsonSource(src))
             style.addLayer(SymbolLayer(lyr, src).withProperties(
                 PropertyFactory.iconImage(icon),
-                PropertyFactory.iconSize(0.9f),
+                PropertyFactory.iconSize(1.3f),
                 PropertyFactory.iconAllowOverlap(true),
                 PropertyFactory.iconIgnorePlacement(true)))
         }

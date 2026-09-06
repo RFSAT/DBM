@@ -322,7 +322,9 @@ class OsmMap private constructor(private val db: SQLiteDatabase) {
     fun availableExtraPois(): Set<String> {
         val meta = runCatching { readMeta(db) }.getOrDefault(emptyMap())
         val out = HashSet<String>()
-        for (t in listOf("fuel", "charging", "hospital", "rest_area")) {
+        for (t in listOf("fuel", "charging", "hospital", "rest_area",
+                         "level_crossing", "speed_bump", "toll_booth",
+                         "border_control")) {
             val c = meta["poi_${t}_count"]?.toIntOrNull() ?: 0
             if (c > 0) out.add(t)
         }

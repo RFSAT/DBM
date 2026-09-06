@@ -909,6 +909,26 @@ class MonitorService : Service() {
             .putStringSet("available_extra_pois", extra).apply()
     }
 
+    /** Live POI availability from the currently-loaded map DB, for the Settings
+     *  screen. If no region is loaded yet (e.g. no GPS fix), it opens the
+     *  last-used / any-installed region on the caller's thread so Settings can
+     *  detect availability without waiting for driving. Also refreshes the prefs
+     *  cache. Returns the extra-POI keys present (e.g. "toll_booth"). */
+    fun availablePoiKeys(): Set<String> {
+        var m = osmMap
+        if (m == null) {
+            val f = lastUsedRegionFile() ?: anyInstalledRegionFile()
+            if (f != null) {
+                m = OsmMap.open(this, f)
+                if (m != null) { osmMap = m; activeRegionFile = f }
+            }
+        }
+        val extra = m?.availableExtraPois() ?: emptySet()
+        getSharedPreferences("dbm_nav", MODE_PRIVATE).edit()
+            .putStringSet("available_extra_pois", extra).apply()
+        return extra
+    }
+
     private fun markSignScanAtStop() {
         val pos = lastFusePos ?: return
         signScanStopLat = pos.first

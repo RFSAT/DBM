@@ -1565,7 +1565,20 @@ class MainActivity : ComponentActivity() {
             fontWeight = FontWeight.Bold)
         Text("Pick map data to display. Greyed ones aren't in current map data yet.",
              color = EnactOnSurfaceDim, fontSize = 10.sp)
-        val availablePois = s.availablePois
+        // Availability from the currently-loaded map DB. Query the service live on
+        // open (it can open a region even without a GPS fix) so a freshly updated
+        // map's new POI types un-grey immediately; fall back to the cached prefs
+        // value while that resolves.
+        var availablePois by remember { mutableStateOf(s.availablePois) }
+        LaunchedEffect(Unit) {
+            val svc = service
+            if (svc != null) {
+                val keys = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    svc.availablePoiKeys()
+                }
+                availablePois = com.rfsat.dms.nav.PoiType.availableFrom(keys)
+            }
+        }
         com.rfsat.dms.nav.PoiType.values().forEach { poi ->
             val avail = poi in availablePois
             Row(Modifier.fillMaxWidth(),

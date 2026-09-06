@@ -1,5 +1,20 @@
 # DBM Changelog
 
+## v1.20.110 — fix POI toggles staying greyed after a map update
+- The new POI types (toll booths, border crossings, level crossings, speed bumps)
+  could stay greyed/disabled in Settings even after updating maps that contain
+  them. Cause: Settings read POI availability from a prefs cache that was only
+  refreshed when the service opened a region DB (on GPS/monitoring) — so a freshly
+  updated map's availability hadn't been detected yet when Settings opened.
+- Settings now queries the currently-loaded map DB LIVE when the Navigation
+  section opens (via a new MonitorService.availablePoiKeys(), which opens the
+  last-used/any-installed region even without a GPS fix), so a map's POI types
+  un-grey immediately. Falls back to the cached value while that resolves.
+## v1.20.109 — larger POI icons on the map
+- Increased the size of POI icons on the navigation map so they're easier to see:
+  the extra-POI badges (fuel, charging, hospital, rest, toll, border, level
+  crossing, speed bump) drawn at higher resolution (64px) with a bigger glyph and
+  iconSize 0.9 -> 1.3; parking and camera icons iconSize 1.0 -> 1.2.
 ## v1.20.108 — new POIs: level crossings, speed bumps, toll booths, borders
 - Added four map-data types (from the map data when present): toll booths and
   border crossings as MAP ICONS (€ and flag badges), and level crossings and
