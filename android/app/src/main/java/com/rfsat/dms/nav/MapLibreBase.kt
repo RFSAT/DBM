@@ -239,36 +239,40 @@ private fun registerOverlayIcons(style: Style) {
     if (style.getImage(ICON_OWN_ARROW) == null)
         style.addImage(ICON_OWN_ARROW, ownArrowBitmap())
     if (style.getImage(ICON_FUEL) == null)
-        style.addImage(ICON_FUEL, badgeBitmap("\u26FD", "#00897B"))   // fuel pump
+        style.addImage(ICON_FUEL, badgeBitmap("\u26FD", "#3A6EA5"))   // fuel pump
     if (style.getImage(ICON_CHG) == null)
-        style.addImage(ICON_CHG, badgeBitmap("\u26A1", "#2E7D32"))    // charging bolt
+        style.addImage(ICON_CHG, badgeBitmap("\u26A1", "#3F7D6A"))    // charging bolt
     if (style.getImage(ICON_HOSP) == null)
-        style.addImage(ICON_HOSP, badgeBitmap("H", "#C62828"))        // hospital H
+        style.addImage(ICON_HOSP, badgeBitmap("H", "#8C4A4A"))        // hospital H
     if (style.getImage(ICON_REST) == null)
-        style.addImage(ICON_REST, badgeBitmap("\u2615", "#6D4C41"))   // rest area
+        style.addImage(ICON_REST, badgeBitmap("\u2615", "#6B6257"))   // rest area
     if (style.getImage(ICON_TOLL) == null)
-        style.addImage(ICON_TOLL, badgeBitmap("\u20AC", "#F9A825"))   // toll (€)
+        style.addImage(ICON_TOLL, badgeBitmap("\u20AC", "#8A7A3F"))   // toll (€)
     if (style.getImage(ICON_BORDER) == null)
-        style.addImage(ICON_BORDER, badgeBitmap("\u2691", "#5E35B1"))  // border flag
+        style.addImage(ICON_BORDER, badgeBitmap("\u2691", "#5B5480"))  // border flag
     if (style.getImage(ICON_LEVELX) == null)
-        style.addImage(ICON_LEVELX, badgeBitmap("\u2715", "#B71C1C"))  // level crossing X
+        style.addImage(ICON_LEVELX, badgeBitmap("\u2715", "#9C3B3B"))  // level crossing X
     if (style.getImage(ICON_BUMP) == null)
-        style.addImage(ICON_BUMP, badgeBitmap("\u2229", "#EF6C00"))    // speed bump ∩
+        style.addImage(ICON_BUMP, badgeBitmap("\u2229", "#96693C"))    // speed bump ∩
 }
 
 /** A small rounded badge with a glyph/letter centred on it — used for the extra
  *  POI icons (fuel, charging, hospital, rest). */
 private fun badgeBitmap(glyph: String, colorHex: String): Bitmap {
-    // Drawn at higher resolution (64px) with a larger glyph so it stays crisp
-    // when scaled up on the map.
+    // Muted map badge: white glyph on a desaturated background, drawn at 64px so
+    // it stays crisp when scaled. Slightly translucent with a thin light outline
+    // so it reads as part of the map rather than shouting over it.
     val s = 64; val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
     val c = Canvas(bmp); val p = Paint(Paint.ANTI_ALIAS_FLAG)
     p.color = AndroidColor.parseColor(colorHex)
+    p.alpha = 225                                  // ~88% opaque
     c.drawRoundRect(RectF(5f, 5f, s - 5f, s - 5f), 14f, 14f, p)
-    p.color = AndroidColor.WHITE; p.style = Paint.Style.STROKE; p.strokeWidth = 3.5f
+    // thin, soft outline (was a heavy pure-white stroke)
+    p.color = AndroidColor.parseColor("#E8EEF2"); p.alpha = 180
+    p.style = Paint.Style.STROKE; p.strokeWidth = 2f
     c.drawRoundRect(RectF(5f, 5f, s - 5f, s - 5f), 14f, 14f, p)
-    p.style = Paint.Style.FILL; p.color = AndroidColor.WHITE
-    p.textSize = 38f; p.textAlign = Paint.Align.CENTER; p.isFakeBoldText = true
+    p.style = Paint.Style.FILL; p.color = AndroidColor.WHITE; p.alpha = 255
+    p.textSize = 36f; p.textAlign = Paint.Align.CENTER; p.isFakeBoldText = true
     val fm = p.fontMetrics
     c.drawText(glyph, s / 2f, s / 2f - (fm.ascent + fm.descent) / 2f, p)
     return bmp

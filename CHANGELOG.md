@@ -1,5 +1,18 @@
 # DBM Changelog
 
+## v1.20.113 — stop POI icons blinking; muted icon styling
+- Fixed POI icons flickering on the map. The overlay was re-queried on a ~500 m
+  grid with the DB read happening on the main thread, and overlayData was blanked
+  (set to null) before each refresh — so the icons cleared and redrew, and GPS/pan
+  jitter across a cell boundary re-triggered it repeatedly. Now: the query runs on
+  Dispatchers.IO, a 250 ms debounce absorbs jitter, the cell is coarser (~1 km),
+  and the previous overlay stays on screen while the new one loads (never blanked
+  mid-refresh).
+- Toned the POI icons down to a muted, map-appropriate palette — white glyph on a
+  desaturated background (e.g. fuel is now white-on-blue rather than bright teal),
+  with a thinner soft outline and slight transparency so they sit on the map
+  instead of shouting over it. The two safety types (level crossing, speed bump)
+  keep a muted red/orange so they still read as cautions.
 ## v1.20.112 — POI toggles now un-grey without the service running
 - Root cause of the toll/border/level-crossing/speed-bump toggles staying
   disabled: POI availability was only ever computed when MonitorService opened a

@@ -92,12 +92,25 @@ fun NavScreen(
         if (routing.phase == RoutingPhase.NAVIGATING)
             livePos?.let { GeoPoint(it.first, it.second) }
         else mapCenter ?: livePos?.let { GeoPoint(it.first, it.second) }
-    LaunchedEffect(overlayAnchor?.lat?.let { (it * 200).toInt() },
-                   overlayAnchor?.lon?.let { (it * 200).toInt() }, enabledPois) {
+    // Refresh map-data overlays when the anchor moves into a new ~1 km cell.
+    // Blink-avoidance: the query runs OFF the main thread, the previous overlay is
+    // kept on screen while the new one loads (never blanked mid-refresh), and a
+    // short debounce absorbs GPS/pan jitter that would otherwise re-trigger this
+    // repeatedly and make the icons flicker.
+    LaunchedEffect(overlayAnchor?.lat?.let { (it * 100).toInt() },
+                   overlayAnchor?.lon?.let { (it * 100).toInt() }, enabledPois) {
         val a = overlayAnchor
-        overlayData = if (enabledPois.isNotEmpty() && a != null)
+        if (enabledPois.isEmpty() || a == null) {
+            overlayData = null
+            return@LaunchedEffect
+        }
+        kotlinx.coroutines.delay(250)          // debounce jitter
+        val fresh = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             mapOverlayProvider?.invoke(a.lat, a.lon)?.copy(enabled = enabledPois)
-        else null
+        }
+        // Only swap in a real result; keep showing the old one if the query
+        // returned nothing, so icons don't disappear and reappear.
+        if (fresh != null) overlayData = fresh
     }
 
     val guidance = routing.guidance
