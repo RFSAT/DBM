@@ -381,9 +381,10 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         cameraWarningFlow = service?.cameraWarning,
-                        poiInfoProvider = { lat, lon ->
-                            service?.poiDetailsAt(lat, lon)
+                        poiInfoProvider = { lat, lon, fromLat, fromLon ->
+                            service?.poiDetailsAt(lat, lon, fromLat, fromLon)
                         },
+                        activeRegionId = service?.activeRegionId(),
                         hazardWarningFlow = service?.hazardWarning,
                         speedLimitProvider = {
                             // Same value + setting as the Detector's roundel:

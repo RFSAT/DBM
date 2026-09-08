@@ -49,8 +49,13 @@ fun NavScreen(
     speedLimitProvider: (() -> Int?)? = null,
     mapOverlayProvider: ((Double, Double) -> MapOverlayData?)? = null,
     // Looks up POI details at a tapped point (type/name/attributes), for the
-    // tap-for-info popup. Returns null when nothing is near the tap.
-    poiInfoProvider: ((Double, Double) -> com.rfsat.dms.fusion.PoiDetails?)? = null,
+    // tap-for-info popup. Args: tapLat, tapLon, fromLat, fromLon — the reported
+    // distance is measured from (fromLat,fromLon), i.e. the user's location.
+    poiInfoProvider: ((Double, Double, Double?, Double?)
+                      -> com.rfsat.dms.fusion.PoiDetails?)? = null,
+    // Active map region id (e.g. "france__alsace"), used to pick a country's free
+    // fuel-price provider. Null disables live prices.
+    activeRegionId: String? = null,
     cameraWarningFlow: StateFlow<String?>? = null,   // same as Detector's warning
     hazardWarningFlow: StateFlow<String?>? = null,   // level crossing / speed bump
     cameraArContent: (@Composable (Modifier) -> Unit)? = null
@@ -95,13 +100,35 @@ fun NavScreen(
     var tappedPoint by remember { mutableStateOf<GeoPoint?>(null) }
     var poiInfo by remember {
         mutableStateOf<com.rfsat.dms.fusion.PoiDetails?>(null) }
+    var fuelPrices by remember { mutableStateOf<FuelPriceResult?>(null) }
+    var fuelPricesLoading by remember { mutableStateOf(false) }
     LaunchedEffect(tappedPoint) {
         val p = tappedPoint
         if (p == null || poiInfoProvider == null) return@LaunchedEffect
+        val me = livePos          // user's current fix, may be null before a fix
         val found = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            poiInfoProvider.invoke(p.lat, p.lon)
+            poiInfoProvider.invoke(p.lat, p.lon, me?.first, me?.second)
         }
         poiInfo = found          // null clears the panel when tapping empty map
+        fuelPrices = null        // clear any price from a previously tapped POI
+    }
+    // ON-DEMAND fuel prices: fires ONLY when the opened POI is a fuel station and
+    // the region's country has a free provider. Nothing is prefetched, so no
+    // mobile data is used unless the user actually opens a fuel station's window.
+    LaunchedEffect(poiInfo) {
+        val info = poiInfo ?: return@LaunchedEffect
+        if (info.type != "Fuel station") return@LaunchedEffect
+        val region = activeRegionId
+        val gKey = settings.googleApiKey
+        // Free government source is tried first; Google is only consulted if that
+        // yields nothing AND the user supplied their own API key.
+        if (!FuelPrices.canLookup(region, gKey)) return@LaunchedEffect
+        fuelPricesLoading = true
+        val res = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            FuelPrices.lookup(region, info.lat, info.lon, gKey)
+        }
+        fuelPrices = res
+        fuelPricesLoading = false
     }
     val overlayAnchor: GeoPoint? =
         if (routing.phase == RoutingPhase.NAVIGATING)
@@ -167,7 +194,9 @@ fun NavScreen(
         // Current speed with units, high-contrast, always visible (bottom-left).
         CurrentSpeedOverlay(liveSpeedKmh, currentLimitKmh)
         // Tap-for-info panel for a POI the user tapped on the map.
-        poiInfo?.let { info -> PoiInfoPanel(info) { poiInfo = null } }
+        poiInfo?.let { info ->
+            PoiInfoPanel(info, fuelPrices, fuelPricesLoading) { poiInfo = null }
+        }
 
         // on-map action buttons (right side). The MODE button is always present
         // (cycles all five views like the orientation/layer buttons); the
@@ -458,7 +487,10 @@ private fun CameraArBase(g: Guidance?, cameraContent: (@Composable (Modifier) ->
 
 @Composable
 private fun BoxScope.PoiInfoPanel(
-    info: com.rfsat.dms.fusion.PoiDetails, onDismiss: () -> Unit
+    info: com.rfsat.dms.fusion.PoiDetails,
+    fuelPrices: FuelPriceResult? = null,
+    pricesLoading: Boolean = false,
+    onDismiss: () -> Unit
 ) {
     // Compact card above the bottom edge: type, name, the attributes the map data
     // actually stores, and the coordinates. Tap ✕ to dismiss.
@@ -478,16 +510,48 @@ private fun BoxScope.PoiInfoPanel(
             Text(it, color = EnactOnSurface, fontSize = 14.sp,
                 fontWeight = FontWeight.Bold)
         }
-        // stored attributes (brand, operator, capacity, access, fee, hours, …)
+        // Price/tariff first and highlighted (that's what people look for), then
+        // the rest with readable labels instead of raw column names.
+        val priceKeys = listOf("charge", "fee_cond")
+        info.attributes.filterKeys { it in priceKeys }.forEach { (_, v) ->
+            Text(v, color = EnactLime, fontSize = 13.sp,
+                fontWeight = FontWeight.Bold)
+        }
+        val labels = mapOf(
+            "brand" to "Brand", "operator" to "Operator", "network" to "Network",
+            "capacity" to "Spaces", "maxstay" to "Max stay", "hours" to "Hours",
+            "access" to "Access", "fee" to "Fee", "kind" to "Type",
+            "fuel_types" to "Fuels", "socket" to "Sockets",
+            "emergency" to "Emergency", "barrier" to "Barrier",
+            "maxspeed" to "Limit")
         info.attributes.forEach { (k, v) ->
-            if (k != "name") {
-                Text("${k.replace('_', ' ')}: $v",
+            if (k != "name" && k !in priceKeys) {
+                Text("${labels[k] ?: k.replace('_', ' ')}: $v",
                     color = EnactOnSurfaceDim, fontSize = 12.sp)
             }
         }
-        Text(String.format("%.5f, %.5f  ·  %.0f m away",
-                info.lat, info.lon, info.distanceM),
+        val d = info.distanceM
+        val distTxt = if (d >= 1000) String.format("%.1f km away", d / 1000.0)
+                      else String.format("%.0f m away", d)
+        Text(String.format("%.5f, %.5f  ·  %s", info.lat, info.lon, distTxt),
             color = EnactOnSurfaceDim, fontSize = 11.sp)
+
+        // Live fuel prices (fetched on demand, free government open data).
+        if (pricesLoading) {
+            Text("Fetching current prices…", color = EnactOnSurfaceDim,
+                fontSize = 11.sp)
+        } else if (fuelPrices != null && fuelPrices.prices.isNotEmpty()) {
+            Spacer(Modifier.height(4.dp))
+            fuelPrices.prices.forEach { fp ->
+                Text(String.format("%s  %.3f %s", fp.fuelType, fp.price, fp.currency),
+                    color = EnactLime, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
+            // Always show WHEN and WHERE the price came from — a stale price is
+            // worse than none, so the user can judge it.
+            val upd = fuelPrices.prices.firstNotNullOfOrNull { it.updated }
+            Text("source: ${fuelPrices.source}" + (upd?.let { " · $it" } ?: ""),
+                color = EnactOnSurfaceDim, fontSize = 10.sp)
+        }
     }
 }
 

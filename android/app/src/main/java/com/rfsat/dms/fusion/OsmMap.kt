@@ -275,21 +275,28 @@ class OsmMap private constructor(private val db: SQLiteDatabase) {
     /** Points (lat,lon) from a table that has a lat/lon column, within a bbox.
      *  Returns empty if the table doesn't exist (older .db without extra POIs). */
     /** Details of the POI nearest to a tapped point, for the map info popup.
-     *  Searches every POI table within radiusM and returns the closest, with the
-     *  name/attributes the table actually stores. Null if nothing is near. */
-    fun poiDetailsAt(lat: Double, lon: Double, radiusM: Double = 120.0): PoiDetails? {
+     *  Searches every POI table within radiusM of the TAP and returns the closest.
+     *  `fromLat`/`fromLon` (the user's current location, when known) is what the
+     *  reported distance is measured from — the tap is only used to pick which POI
+     *  was meant. Null if nothing is near the tap. */
+    fun poiDetailsAt(lat: Double, lon: Double, radiusM: Double = 120.0,
+                     fromLat: Double? = null, fromLon: Double? = null): PoiDetails? {
         // table -> (display type, extra columns to read as "label:col" pairs)
         val specs = listOf(
-            Triple("fuel", "Fuel station", listOf("name", "brand", "operator")),
-            Triple("charging", "EV charging", listOf("name", "network", "capacity")),
+            Triple("fuel", "Fuel station",
+                   listOf("name", "brand", "operator", "hours", "fuel_types")),
+            Triple("charging", "EV charging",
+                   listOf("name", "network", "capacity", "fee", "charge",
+                          "socket", "hours")),
             Triple("hospital", "Hospital", listOf("name", "emergency", "kind")),
             Triple("rest_area", "Rest area", listOf("name", "kind")),
             Triple("level_crossing", "Railway crossing", listOf("name", "barrier")),
             Triple("speed_bump", "Speed bump", listOf("kind")),
             Triple("toll_booth", "Toll booth", listOf("name")),
             Triple("border_control", "Border crossing", listOf("name")),
-            Triple("parking_lot", "Parking", listOf("name", "kind", "access", "fee",
-                                                    "capacity", "maxstay", "hours")),
+            Triple("parking_lot", "Parking",
+                   listOf("name", "kind", "access", "fee", "charge", "fee_cond",
+                          "capacity", "maxstay", "hours")),
             Triple("speed_camera", "Speed camera", listOf("maxspeed", "kind")),
         )
         val dLat = radiusM / 111_320.0
@@ -312,7 +319,7 @@ class OsmMap private constructor(private val db: SQLiteDatabase) {
                 ).use { c ->
                     while (c.moveToNext()) {
                         val pla = c.getDouble(0); val plo = c.getDouble(1)
-                        val d = distMeters(lat, lon, pla, plo)
+                        val d = distMeters(lat, lon, pla, plo)   // tap -> POI (pick)
                         if (d > radiusM || d >= bestD) continue
                         val attrs = LinkedHashMap<String, String>()
                         cols.forEachIndexed { i, col ->
@@ -320,7 +327,13 @@ class OsmMap private constructor(private val db: SQLiteDatabase) {
                             if (!v.isNullOrBlank() && v != "null") attrs[col] = v
                         }
                         bestD = d
-                        best = PoiDetails(typeLabel, attrs["name"], pla, plo, d, attrs)
+                        // Reported distance is from the USER's location when known
+                        // (that's what "how far away is it" means); fall back to
+                        // the tap distance if we have no fix yet.
+                        val shown = if (fromLat != null && fromLon != null)
+                            distMeters(fromLat, fromLon, pla, plo) else d
+                        best = PoiDetails(typeLabel, attrs["name"], pla, plo,
+                                          shown, attrs)
                     }
                 }
             }

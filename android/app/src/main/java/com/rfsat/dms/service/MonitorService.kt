@@ -909,9 +909,18 @@ class MonitorService : Service() {
             .putStringSet("available_extra_pois", extra).apply()
     }
 
-    /** POI details near a tapped map point, for the navigation info popup. */
-    fun poiDetailsAt(lat: Double, lon: Double): com.rfsat.dms.fusion.PoiDetails? =
-        osmMap?.poiDetailsAt(lat, lon)
+    /** Region id of the loaded map (e.g. "france__alsace"), for country-specific
+     *  online lookups such as free government fuel-price feeds. */
+    fun activeRegionId(): String? =
+        activeRegionFile?.removeSuffix(".db")
+
+    /** POI details near a tapped map point, for the navigation info popup. The
+     *  reported distance is measured from (fromLat,fromLon) — the user's current
+     *  location — not from the tap. */
+    fun poiDetailsAt(lat: Double, lon: Double,
+                     fromLat: Double? = null, fromLon: Double? = null
+    ): com.rfsat.dms.fusion.PoiDetails? =
+        osmMap?.poiDetailsAt(lat, lon, fromLat = fromLat, fromLon = fromLon)
 
     /** Live POI availability from the currently-loaded map DB, for the Settings
      *  screen. If no region is loaded yet (e.g. no GPS fix), it opens the

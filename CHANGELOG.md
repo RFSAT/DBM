@@ -1,5 +1,60 @@
 # DBM Changelog
 
+## v1.20.119 — Austria and Spain fuel-price sources added
+- AUSTRIA: E-Control Spritpreisrechner (api.e-control.at), keyless, statutory
+  price-transparency database, queried directly by lat/lon. Diesel, Super 95, CNG.
+- SPAIN: MINETUR price service. Uses the PER-PROVINCE endpoint (resolved from the
+  coordinates) rather than the national one, because the national endpoint
+  returns all ~12,000 stations (several MB) in a single response — which would be
+  exactly the mobile-data waste we set out to avoid. Covers the ten largest
+  provinces; outside those it returns nothing and the Google fallback applies.
+- ITALY deliberately NOT added: MIMIT publishes only bulk daily CSV dumps with no
+  geo-query endpoint, so a per-station lookup would mean downloading the whole
+  country. Google remains the fallback there.
+## v1.20.118 — Google Places as a paid FALLBACK for fuel prices
+- Fuel-price lookup now tries the FREE government source first and only falls
+  back to Google Places (New) when that source has no coverage for the country
+  or returns no price — and only when the user has supplied their own Google API
+  key (Settings > Navigation), so any cost lands on their billing account.
+- Cost-conscious by design: ONE Nearby Search call with a minimal field mask
+  (displayName + fuelOptions) rather than the two-call search-then-details
+  pattern; a small radius restricted to gas stations; and the shared 10-minute
+  cache so re-opening a station does not re-bill. NOTE: fuelOptions is price
+  data, which prices the call at Google's Enterprise SKU.
+- Still strictly on demand: nothing is fetched until a fuel station's info
+  window is opened. No key and no free source -> no request is made at all.
+## v1.20.117 — live fuel prices from free government open data (France)
+- New FuelPrices framework: live petrol/diesel prices from FREE, keyless
+  government open-data feeds, fetched STRICTLY ON DEMAND — only when the user
+  opens the info window on a fuel station, never prefetched or polled, so no
+  mobile data is spent unless asked.
+- France implemented (data.economie.gouv.fr flux instantane v2, Licence Ouverte
+  2.0, ~10 min refresh, ~9,800 stations). Spain/Italy/Austria slot into the same
+  framework once their endpoints are verified. Germany (Tankerkoenig) is
+  deliberately excluded for now as it needs a personal API key + CC-BY
+  attribution.
+- Prices show with the source name and the feed's own timestamp, because a stale
+  price is worse than none. 10-minute cache, 4 s timeout, silent failure: an
+  unavailable price never blocks or breaks the info panel. Unsupported countries
+  simply show no price section.
+## v1.20.116 — fees/tariffs and opening hours in the POI info panel
+- Extraction now captures the pricing-related tags OSM does hold: parking
+  "charge" (e.g. "EUR 2.00/hour") and "fee:conditional"; EV charging "fee",
+  "charge" tariff, socket types and opening hours; fuel opening hours and the
+  fuel:* types offered. Requires a map rebuild to take effect.
+- The POI info panel shows any tariff prominently (in lime) and the rest with
+  readable labels (Brand, Network, Spaces, Max stay, Hours, Fuels, Sockets...).
+- NOTE: live petrol/EV prices are NOT in map data and are not included here;
+  see the separate investigation into online price services.
+## v1.20.115 — fix POI info distance (measure from your location)
+- The distance in the POI info panel was measured from the TAPPED POINT, not from
+  the vehicle — so it was always a meaningless 0-120 m (the tap search radius).
+  The tap is now only used to pick which POI you meant; the reported distance is
+  measured from your current GPS location. Falls back to the tap distance only if
+  there is no fix yet.
+- Distances over 1 km are now shown in km rather than a long metre value.
+  (The haversine maths itself was verified correct: 1 deg latitude = 111.19 km,
+  Athens-Thessaloniki = 302.9 km.)
 ## v1.20.114 — box-free POI icons, blue hospital, tap-for-info
 - POI icons on the navigation map no longer have a box around them: they are now
   the glyph itself in a muted colour with a soft white halo for legibility.
