@@ -1,5 +1,16 @@
 # DBM Changelog
 
+## v1.20.114 — box-free POI icons, blue hospital, tap-for-info
+- POI icons on the navigation map no longer have a box around them: they are now
+  the glyph itself in a muted colour with a soft white halo for legibility.
+  Parking keeps its existing icon, and hospitals now use a BLUE box with a white
+  "H" as requested.
+- Tapping a POI on the map now shows an info panel with what the map data holds:
+  the POI type, its name (when OSM has one), the stored attributes (brand,
+  operator, network, capacity, access, fee, opening hours, max stay, ...) and the
+  coordinates plus distance from the tap. Tapping empty map or ✕ dismisses it.
+  Backed by a new OsmMap.poiDetailsAt() that searches every POI table (including
+  parking and cameras) for the nearest feature within ~120 m.
 ## v1.20.113 — stop POI icons blinking; muted icon styling
 - Fixed POI icons flickering on the map. The overlay was re-queried on a ~500 m
   grid with the DB read happening on the main thread, and overlayData was blanked

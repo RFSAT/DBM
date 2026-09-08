@@ -60,6 +60,7 @@ fun MapLibreBase(
     recenterKey: Int,               // increment to request a recenter-on-user
     mapData: MapOverlayData?,       // speed limits / parking / cameras, or null
     onCenterChanged: ((GeoPoint) -> Unit)? = null,  // reports map center when idle
+    onMapTap: ((GeoPoint) -> Unit)? = null,         // reports a tapped point
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -112,6 +113,14 @@ fun MapLibreBase(
                     m.addOnCameraIdleListener {
                         val t = m.cameraPosition.target
                         if (t != null) cb(GeoPoint(t.latitude, t.longitude))
+                    }
+                }
+                // Tap on the map -> report the point so the caller can look up a
+                // POI there and show its details.
+                onMapTap?.let { cb ->
+                    m.addOnMapClickListener { pt ->
+                        cb(GeoPoint(pt.latitude, pt.longitude))
+                        false      // don't consume; keep normal map behaviour
                     }
                 }
                 loadStyle(m, styleSpec) { style ->
@@ -239,25 +248,45 @@ private fun registerOverlayIcons(style: Style) {
     if (style.getImage(ICON_OWN_ARROW) == null)
         style.addImage(ICON_OWN_ARROW, ownArrowBitmap())
     if (style.getImage(ICON_FUEL) == null)
-        style.addImage(ICON_FUEL, badgeBitmap("\u26FD", "#3A6EA5"))   // fuel pump
+        style.addImage(ICON_FUEL, glyphBitmap("\u26FD", "#2F6096"))   // fuel pump
     if (style.getImage(ICON_CHG) == null)
-        style.addImage(ICON_CHG, badgeBitmap("\u26A1", "#3F7D6A"))    // charging bolt
+        style.addImage(ICON_CHG, glyphBitmap("\u26A1", "#2E7D5B"))    // charging bolt
     if (style.getImage(ICON_HOSP) == null)
-        style.addImage(ICON_HOSP, badgeBitmap("H", "#8C4A4A"))        // hospital H
+        style.addImage(ICON_HOSP, badgeBitmap("H", "#1565C0"))        // hospital H
     if (style.getImage(ICON_REST) == null)
-        style.addImage(ICON_REST, badgeBitmap("\u2615", "#6B6257"))   // rest area
+        style.addImage(ICON_REST, glyphBitmap("\u2615", "#5A5148"))   // rest area
     if (style.getImage(ICON_TOLL) == null)
-        style.addImage(ICON_TOLL, badgeBitmap("\u20AC", "#8A7A3F"))   // toll (€)
+        style.addImage(ICON_TOLL, glyphBitmap("\u20AC", "#7A6A2F"))   // toll (€)
     if (style.getImage(ICON_BORDER) == null)
-        style.addImage(ICON_BORDER, badgeBitmap("\u2691", "#5B5480"))  // border flag
+        style.addImage(ICON_BORDER, glyphBitmap("\u2691", "#4C4573"))  // border flag
     if (style.getImage(ICON_LEVELX) == null)
-        style.addImage(ICON_LEVELX, badgeBitmap("\u2715", "#9C3B3B"))  // level crossing X
+        style.addImage(ICON_LEVELX, glyphBitmap("\u2715", "#B03030"))  // level crossing X
     if (style.getImage(ICON_BUMP) == null)
-        style.addImage(ICON_BUMP, badgeBitmap("\u2229", "#96693C"))    // speed bump ∩
+        style.addImage(ICON_BUMP, glyphBitmap("\u2229", "#A9662B"))    // speed bump ∩
 }
 
 /** A small rounded badge with a glyph/letter centred on it — used for the extra
  *  POI icons (fuel, charging, hospital, rest). */
+/** Box-free POI glyph: the symbol itself in its colour, with a soft white halo
+ *  so it stays legible over any map background. Used for most POIs; only parking
+ *  (its own bitmap) and hospital (a blue box) keep a filled background. */
+private fun glyphBitmap(glyph: String, colorHex: String): Bitmap {
+    val s = 64; val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
+    val c = Canvas(bmp); val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    p.textSize = 42f; p.textAlign = Paint.Align.CENTER; p.isFakeBoldText = true
+    val fm = p.fontMetrics
+    val y = s / 2f - (fm.ascent + fm.descent) / 2f
+    // white halo behind the glyph for contrast on light or dark map tiles
+    p.style = Paint.Style.STROKE; p.strokeWidth = 6f
+    p.color = AndroidColor.WHITE; p.alpha = 220
+    c.drawText(glyph, s / 2f, y, p)
+    // the glyph itself
+    p.style = Paint.Style.FILL; p.alpha = 255
+    p.color = AndroidColor.parseColor(colorHex)
+    c.drawText(glyph, s / 2f, y, p)
+    return bmp
+}
+
 private fun badgeBitmap(glyph: String, colorHex: String): Bitmap {
     // Muted map badge: white glyph on a desaturated background, drawn at 64px so
     // it stays crisp when scaled. Slightly translucent with a thin light outline

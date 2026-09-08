@@ -909,6 +909,10 @@ class MonitorService : Service() {
             .putStringSet("available_extra_pois", extra).apply()
     }
 
+    /** POI details near a tapped map point, for the navigation info popup. */
+    fun poiDetailsAt(lat: Double, lon: Double): com.rfsat.dms.fusion.PoiDetails? =
+        osmMap?.poiDetailsAt(lat, lon)
+
     /** Live POI availability from the currently-loaded map DB, for the Settings
      *  screen. If no region is loaded yet (e.g. no GPS fix), it opens the
      *  last-used / any-installed region on the caller's thread so Settings can

@@ -24,6 +24,16 @@ data class DoublePair(val lat: Double, val lon: Double)
 
 /** Map-display features near a point: speed-limit segment polylines, parking
  *  points, and speed-camera points. See OsmMap.overlayNear(). */
+/** Details of a POI the user tapped on the map. */
+data class PoiDetails(
+    val type: String,                    // e.g. "Fuel station"
+    val name: String?,                   // may be null (many OSM POIs are unnamed)
+    val lat: Double,
+    val lon: Double,
+    val distanceM: Double,               // from the tapped point
+    val attributes: Map<String, String>, // brand/operator/capacity/... as stored
+)
+
 data class MapOverlay(
     val speedLimitLines: List<List<DoublePair>>,
     val parking: List<DoublePair>,
@@ -264,6 +274,60 @@ class OsmMap private constructor(private val db: SQLiteDatabase) {
 
     /** Points (lat,lon) from a table that has a lat/lon column, within a bbox.
      *  Returns empty if the table doesn't exist (older .db without extra POIs). */
+    /** Details of the POI nearest to a tapped point, for the map info popup.
+     *  Searches every POI table within radiusM and returns the closest, with the
+     *  name/attributes the table actually stores. Null if nothing is near. */
+    fun poiDetailsAt(lat: Double, lon: Double, radiusM: Double = 120.0): PoiDetails? {
+        // table -> (display type, extra columns to read as "label:col" pairs)
+        val specs = listOf(
+            Triple("fuel", "Fuel station", listOf("name", "brand", "operator")),
+            Triple("charging", "EV charging", listOf("name", "network", "capacity")),
+            Triple("hospital", "Hospital", listOf("name", "emergency", "kind")),
+            Triple("rest_area", "Rest area", listOf("name", "kind")),
+            Triple("level_crossing", "Railway crossing", listOf("name", "barrier")),
+            Triple("speed_bump", "Speed bump", listOf("kind")),
+            Triple("toll_booth", "Toll booth", listOf("name")),
+            Triple("border_control", "Border crossing", listOf("name")),
+            Triple("parking_lot", "Parking", listOf("name", "kind", "access", "fee",
+                                                    "capacity", "maxstay", "hours")),
+            Triple("speed_camera", "Speed camera", listOf("maxspeed", "kind")),
+        )
+        val dLat = radiusM / 111_320.0
+        val dLon = radiusM / (111_320.0 *
+            Math.cos(Math.toRadians(lat)).coerceAtLeast(0.01))
+        var best: PoiDetails? = null
+        var bestD = Double.MAX_VALUE
+        for ((table, typeLabel, cols) in specs) {
+            runCatching {
+                val hasTable = db.rawQuery(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                    arrayOf(table)).use { it.moveToNext() }
+                if (!hasTable) return@runCatching
+                val sel = (listOf("lat", "lon") + cols).joinToString(", ")
+                db.rawQuery(
+                    "SELECT $sel FROM $table " +
+                    "WHERE lat >= ? AND lat <= ? AND lon >= ? AND lon <= ?",
+                    arrayOf((lat - dLat).toString(), (lat + dLat).toString(),
+                            (lon - dLon).toString(), (lon + dLon).toString())
+                ).use { c ->
+                    while (c.moveToNext()) {
+                        val pla = c.getDouble(0); val plo = c.getDouble(1)
+                        val d = distMeters(lat, lon, pla, plo)
+                        if (d > radiusM || d >= bestD) continue
+                        val attrs = LinkedHashMap<String, String>()
+                        cols.forEachIndexed { i, col ->
+                            val v = runCatching { c.getString(2 + i) }.getOrNull()
+                            if (!v.isNullOrBlank() && v != "null") attrs[col] = v
+                        }
+                        bestD = d
+                        best = PoiDetails(typeLabel, attrs["name"], pla, plo, d, attrs)
+                    }
+                }
+            }
+        }
+        return best
+    }
+
     /** Points from a POI table that lie AHEAD in the direction of travel, within
      *  aheadM metres — mirrors CameraMonitor.camerasAhead but generic, for the
      *  level-crossing / speed-bump approach warnings. Returns (lat,lon,distM)

@@ -48,6 +48,9 @@ fun NavScreen(
     headingFlow: StateFlow<Float>? = null,
     speedLimitProvider: (() -> Int?)? = null,
     mapOverlayProvider: ((Double, Double) -> MapOverlayData?)? = null,
+    // Looks up POI details at a tapped point (type/name/attributes), for the
+    // tap-for-info popup. Returns null when nothing is near the tap.
+    poiInfoProvider: ((Double, Double) -> com.rfsat.dms.fusion.PoiDetails?)? = null,
     cameraWarningFlow: StateFlow<String?>? = null,   // same as Detector's warning
     hazardWarningFlow: StateFlow<String?>? = null,   // level crossing / speed bump
     cameraArContent: (@Composable (Modifier) -> Unit)? = null
@@ -88,6 +91,18 @@ fun NavScreen(
     // but around the GPS position while navigating (so it follows the drive).
     var mapCenter by remember { mutableStateOf<GeoPoint?>(null) }
     var overlayData by remember { mutableStateOf<MapOverlayData?>(null) }
+    // Tap-for-info: the tapped point, and the POI found there (if any).
+    var tappedPoint by remember { mutableStateOf<GeoPoint?>(null) }
+    var poiInfo by remember {
+        mutableStateOf<com.rfsat.dms.fusion.PoiDetails?>(null) }
+    LaunchedEffect(tappedPoint) {
+        val p = tappedPoint
+        if (p == null || poiInfoProvider == null) return@LaunchedEffect
+        val found = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            poiInfoProvider.invoke(p.lat, p.lon)
+        }
+        poiInfo = found          // null clears the panel when tapping empty map
+    }
     val overlayAnchor: GeoPoint? =
         if (routing.phase == RoutingPhase.NAVIGATING)
             livePos?.let { GeoPoint(it.first, it.second) }
@@ -136,6 +151,7 @@ fun NavScreen(
                     orientation = orientation, headingDeg = heading.toDouble(),
                     recenterKey = recenterState.value, mapData = overlayData,
                     onCenterChanged = { mapCenter = it },
+                    onMapTap = { p -> tappedPoint = p },
                     modifier = Modifier.fillMaxSize())
             }
         }
@@ -150,6 +166,8 @@ fun NavScreen(
             RibbonHud(guidance)
         // Current speed with units, high-contrast, always visible (bottom-left).
         CurrentSpeedOverlay(liveSpeedKmh, currentLimitKmh)
+        // Tap-for-info panel for a POI the user tapped on the map.
+        poiInfo?.let { info -> PoiInfoPanel(info) { poiInfo = null } }
 
         // on-map action buttons (right side). The MODE button is always present
         // (cycles all five views like the orientation/layer buttons); the
@@ -435,6 +453,41 @@ private fun CameraArBase(g: Guidance?, cameraContent: (@Composable (Modifier) ->
             Text(g.nextStep.instruction, color = EnactOnSurface, fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 70.dp))
+    }
+}
+
+@Composable
+private fun BoxScope.PoiInfoPanel(
+    info: com.rfsat.dms.fusion.PoiDetails, onDismiss: () -> Unit
+) {
+    // Compact card above the bottom edge: type, name, the attributes the map data
+    // actually stores, and the coordinates. Tap ✕ to dismiss.
+    Column(Modifier.align(Alignment.BottomCenter)
+            .padding(start = 12.dp, end = 12.dp, bottom = 84.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(androidx.compose.ui.graphics.Color(0xF0102A24))
+            .padding(horizontal = 14.dp, vertical = 10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(info.type, color = EnactGreen, fontSize = 14.sp,
+                fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Text("\u2715", color = EnactOnSurfaceDim, fontSize = 15.sp,
+                modifier = Modifier.clickable { onDismiss() }
+                    .padding(start = 10.dp))
+        }
+        info.name?.takeIf { it.isNotBlank() }?.let {
+            Text(it, color = EnactOnSurface, fontSize = 14.sp,
+                fontWeight = FontWeight.Bold)
+        }
+        // stored attributes (brand, operator, capacity, access, fee, hours, …)
+        info.attributes.forEach { (k, v) ->
+            if (k != "name") {
+                Text("${k.replace('_', ' ')}: $v",
+                    color = EnactOnSurfaceDim, fontSize = 12.sp)
+            }
+        }
+        Text(String.format("%.5f, %.5f  ·  %.0f m away",
+                info.lat, info.lon, info.distanceM),
+            color = EnactOnSurfaceDim, fontSize = 11.sp)
     }
 }
 
