@@ -1,5 +1,13 @@
 # DBM Changelog
 
+## v1.20.121 — map projection switches immediately with the mode button
+- Switching the map mode (2D top-down / 2.5D perspective / 3D) with the on-map
+  mode button changed the target tilt but nothing applied it, so the projection
+  only actually changed later when the recenter button was pressed. The camera
+  update was triggered only by a recenter request or an orientation change.
+- A tilt change is now its own trigger: the new projection is animated in
+  immediately, keeping the user's current target, zoom and bearing (a recenter
+  still takes priority, and FREE orientation keeps the user's own bearing).
 ## v1.20.120 — fix: POI info windows stopped opening
 - Regression from v1.20.116: adding the price/tariff fields extended the columns
   poiDetailsAt() selects (hours, fuel_types, charge, socket, fee_cond). Maps built

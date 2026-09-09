@@ -75,6 +75,8 @@ fun MapLibreBase(
     val loadedStyle = remember { mutableStateOf<String?>(null) }
     val didInitialCamera = remember { mutableStateOf(false) }
     val lastRecenterKey = remember { mutableStateOf(recenterKey) }
+    // Tracks the applied tilt so a 2D/2½D/3D switch is detected and applied.
+    val lastTilt = remember { mutableStateOf(tiltDegrees) }
     val lastOrientation = remember { mutableStateOf(orientation) }
 
     DisposableEffect(lifecycleOwner) {
@@ -151,11 +153,12 @@ fun MapLibreBase(
                     updateData(it, route, ownLocation, ownIcon, destination, mapData)
                 }
             }
-            // Camera is updated ONLY on an explicit recenter request or an
-            // orientation-mode change — never on ordinary recomposition, so the
-            // user's pan/zoom is preserved.
+            // Camera is updated ONLY on an explicit recenter request, an
+            // orientation-mode change, or a TILT change (switching 2D / 2½D / 3D)
+            // — never on ordinary recomposition, so the user's pan/zoom survives.
             val recenterRequested = recenterKey != lastRecenterKey.value
             val orientationChanged = orientation != lastOrientation.value
+            val tiltChanged = kotlin.math.abs(tiltDegrees - lastTilt.value) > 0.5
             if (recenterRequested) {
                 val c = ownLocation ?: route?.firstOrNull()
                 if (c != null) {
@@ -166,6 +169,17 @@ fun MapLibreBase(
                             .bearing(bearingFor(orientation, headingDeg)).build()))
                 }
                 lastRecenterKey.value = recenterKey
+            } else if (tiltChanged) {
+                // Mode switched (2D / 2½D / 3D): apply the new tilt right away,
+                // keeping the user's current target, zoom and bearing.
+                val cur = map.cameraPosition
+                map.animateCamera(CameraUpdateFactory.newCameraPosition(
+                    CameraPosition.Builder()
+                        .target(cur.target ?: LatLng(0.0, 0.0)).zoom(cur.zoom)
+                        .tilt(tiltDegrees)
+                        .bearing(if (orientation == MapOrientation.FREE) cur.bearing
+                                 else bearingFor(orientation, headingDeg))
+                        .build()))
             } else if (orientationChanged && orientation != MapOrientation.FREE) {
                 // keep current target/zoom, only change bearing
                 val cur = map.cameraPosition
@@ -183,6 +197,7 @@ fun MapLibreBase(
                         .tilt(cur.tilt).bearing(headingDeg).build()))
             }
             lastOrientation.value = orientation
+            lastTilt.value = tiltDegrees
         }
     }
 }
