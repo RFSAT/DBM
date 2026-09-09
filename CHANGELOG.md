@@ -1,5 +1,14 @@
 # DBM Changelog
 
+## v1.20.120 — fix: POI info windows stopped opening
+- Regression from v1.20.116: adding the price/tariff fields extended the columns
+  poiDetailsAt() selects (hours, fuel_types, charge, socket, fee_cond). Maps built
+  before that change do not have those columns, so SQLite failed the whole SELECT
+  with "no such column" for EVERY POI table — the error was swallowed, no POI was
+  ever found, and the info window never opened.
+- poiDetailsAt() now inspects each table with PRAGMA table_info and selects only
+  the columns that actually exist, so the info window works with BOTH older maps
+  (without the price fields) and rebuilt maps (with them, showing tariffs).
 ## v1.20.119 — Austria and Spain fuel-price sources added
 - AUSTRIA: E-Control Spritpreisrechner (api.e-control.at), keyless, statutory
   price-transparency database, queried directly by lat/lon. Diesel, Super 95, CNG.

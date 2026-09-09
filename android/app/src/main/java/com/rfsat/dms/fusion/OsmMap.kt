@@ -310,7 +310,17 @@ class OsmMap private constructor(private val db: SQLiteDatabase) {
                     "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
                     arrayOf(table)).use { it.moveToNext() }
                 if (!hasTable) return@runCatching
-                val sel = (listOf("lat", "lon") + cols).joinToString(", ")
+                // Only select columns this .db actually HAS. Maps built before the
+                // price/tariff fields were added lack hours/charge/socket/etc., and
+                // naming a missing column fails the whole SELECT — which would make
+                // every POI lookup return nothing and the info panel never open.
+                val present = HashSet<String>()
+                db.rawQuery("PRAGMA table_info($table)", null).use { pc ->
+                    val ni = pc.getColumnIndex("name")
+                    while (pc.moveToNext()) present.add(pc.getString(ni))
+                }
+                val useCols = cols.filter { it in present }
+                val sel = (listOf("lat", "lon") + useCols).joinToString(", ")
                 db.rawQuery(
                     "SELECT $sel FROM $table " +
                     "WHERE lat >= ? AND lat <= ? AND lon >= ? AND lon <= ?",
@@ -322,7 +332,7 @@ class OsmMap private constructor(private val db: SQLiteDatabase) {
                         val d = distMeters(lat, lon, pla, plo)   // tap -> POI (pick)
                         if (d > radiusM || d >= bestD) continue
                         val attrs = LinkedHashMap<String, String>()
-                        cols.forEachIndexed { i, col ->
+                        useCols.forEachIndexed { i, col ->
                             val v = runCatching { c.getString(2 + i) }.getOrNull()
                             if (!v.isNullOrBlank() && v != "null") attrs[col] = v
                         }
