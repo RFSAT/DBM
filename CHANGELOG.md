@@ -1,5 +1,16 @@
 # DBM Changelog
 
+## v1.20.125 — brand list matched to shipped logos; generic icon otherwise
+- The brand table now lists EXACTLY the 33 brands we ship a logo for. Brands with
+  no artwork (Mamidoil, ELIN, Coral, Jetoil, Cyclon, Aegean, ETEKA, Silk Oil,
+  Kaoil) were removed, so every station that is not one of the 33 shows the
+  generic distributor icon.
+- A brand icon is now registered ONLY when its drawable is actually found, and
+  the per-station icon lookup only uses a brand icon that was registered.
+  Previously a brand named in the table but missing its file would have rendered
+  NOTHING for that station rather than falling back.
+- Greek-script aliases kept for the shipped Greek brands (ΕΚΟ/EKO-ELDA, ΑΒΙΝ,
+  ΡΕΒΟΙΛ).
 ## v1.20.124 — Greek petrol brands; safer brand matching
 - Added Greek brands: EKO, AVIN, Revoil, ELIN, Coral, Jetoil, Cyclon, Aegean,
   ETEKA, Silk Oil, Mamidoil, Kaoil. Greek-script spellings used in OSM

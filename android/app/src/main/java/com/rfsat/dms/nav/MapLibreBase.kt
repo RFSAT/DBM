@@ -266,12 +266,16 @@ private fun registerOverlayIcons(style: Style, ctx: android.content.Context?) {
         style.addImage(ICON_FUEL, glyphBitmap("\u26FD", "#2F6096"))   // fuel pump
     // Real brand LOGOS when supplied as drawables (see FuelBrands.drawableName);
     // otherwise a brand-coloured chip; unbranded stations use ICON_FUEL above.
+    // Register a brand icon ONLY when its logo drawable is actually present.
+    // Brands without artwork (and every unrecognised brand) then resolve to the
+    // generic distributor icon, because the per-feature icon lookup falls back
+    // to ICON_FUEL when the named image doesn't exist in the style.
     for (k in FuelBrands.allKeys()) {
         val id = FuelBrands.iconId(k)
-        if (style.getImage(id) != null) continue
-        val logo = ctx?.let { FuelBrands.loadLogo(it, k) }
-        style.addImage(id, logo ?: fuelBrandBitmap(
-            FuelBrands.colourFor(k), FuelBrands.letterFor(k)))
+        if (style.getImage(id) != null) { FuelBrands.markAvailable(k); continue }
+        val logo = ctx?.let { FuelBrands.loadLogo(it, k) } ?: continue
+        style.addImage(id, logo)
+        FuelBrands.markAvailable(k)
     }
     if (style.getImage(ICON_CHG) == null)
         style.addImage(ICON_CHG, glyphBitmap("\u26A1", "#2E7D5B"))    // charging bolt
@@ -591,7 +595,9 @@ private fun updateData(
                 mapData.fuel.map { it to null as String? }
             }
             FeatureCollection.fromFeatures(src.map { (pt, brand) ->
-                val key = FuelBrands.keyFor(brand)
+                // Only use a brand icon whose logo is actually registered —
+                // naming a missing image would draw NOTHING for that station.
+                val key = FuelBrands.keyFor(brand)?.takeIf { FuelBrands.hasLogo(it) }
                 Feature.fromGeometry(Point.fromLngLat(pt.lon, pt.lat)).also { f ->
                     f.addStringProperty("icon",
                         if (key != null) FuelBrands.iconId(key) else ICON_FUEL)
@@ -627,65 +633,52 @@ private fun updateData(
  */
 internal object FuelBrands {
     // brand (lowercased, as OSM writes it) -> (background, letter)
+    // EXACTLY the brands we ship a logo for (res/drawable/fuel_logo_<key>.png).
+    // Anything not listed here — or listed but with no drawable present — falls
+    // back to the generic distributor icon. Keep this in step with the artwork.
     private val table: List<Triple<String, String, String>> = listOf(
-        Triple("shell", "#D4231E", "S"),      // Shell red
-        Triple("bp", "#0B7A3B", "B"),         // BP green
-        Triple("aral", "#0B3F8C", "A"),       // Aral blue
-        Triple("total", "#E4322B", "T"),      // Total/TotalEnergies red
-        Triple("totalenergies", "#E4322B", "T"),
-        Triple("esso", "#1B4EA0", "E"),       // Esso blue
-        Triple("omv", "#0B3F8C", "O"),        // OMV blue
-        Triple("eni", "#F5C518", "E"),        // Eni yellow
         Triple("agip", "#F5C518", "A"),
-        Triple("repsol", "#E8621F", "R"),     // Repsol orange
-        Triple("cepsa", "#C8102E", "C"),
-        Triple("q8", "#00A0DF", "Q"),
-        Triple("lukoil", "#C8102E", "L"),
-        Triple("petrol", "#0B7A3B", "P"),
-        Triple("orlen", "#C8102E", "O"),
-        Triple("circle k", "#E8621F", "C"),
-        Triple("intermarché", "#C8102E", "I"),
-        Triple("carrefour", "#0B5FA5", "C"),
-        Triple("leclerc", "#0B5FA5", "L"),
+        Triple("aral", "#0B3F8C", "A"),
         Triple("avia", "#C8102E", "A"),
+        Triple("avin", "#C8102E", "AV"),        // Greek
+        Triple("bp", "#0B7A3B", "B"),
+        Triple("carrefour", "#0B5FA5", "C"),
+        Triple("cepsa", "#C8102E", "C"),
+        Triple("circle k", "#E8621F", "C"),
+        Triple("eko", "#F5A800", "EKO"),        // Greek
+        Triple("eni", "#F5C518", "E"),
+        Triple("esso", "#1B4EA0", "E"),
+        Triple("gulf", "#E8621F", "G"),
+        Triple("intermarché", "#C8102E", "I"),
+        Triple("ip", "#0B7A3B", "IP"),
         Triple("jet", "#F5C518", "J"),
-        Triple("tamoil", "#C8102E", "T"),
+        Triple("leclerc", "#0B5FA5", "L"),
+        Triple("lukoil", "#C8102E", "L"),
         Triple("mol", "#0B7A3B", "M"),
         Triple("neste", "#00A0DF", "N"),
+        Triple("omv", "#0B3F8C", "O"),
+        Triple("orlen", "#C8102E", "O"),
+        Triple("petrol", "#0B7A3B", "P"),
         Triple("preem", "#F5C518", "P"),
-        Triple("statoil", "#E8621F", "S"),
-        Triple("gulf", "#E8621F", "G"),
-        Triple("texaco", "#C8102E", "T"),
-        Triple("ip", "#0B7A3B", "IP"),
+        Triple("q8", "#00A0DF", "Q"),
+        Triple("repsol", "#E8621F", "R"),
+        Triple("revoil", "#004B93", "RV"),      // Greek
+        Triple("shell", "#D4231E", "S"),
         Triple("socar", "#00A0DF", "S"),
-        // --- Greek market -------------------------------------------------
-        Triple("eko", "#F5A800", "EKO"),        // EKO (HELLENiQ) yellow/blue
-        Triple("avin", "#C8102E", "AVIN"),      // AVIN OIL
-        Triple("revoil", "#004B93", "RV"),      // Revoil blue
-        Triple("elin", "#0B7A3B", "ELIN"),      // ELIN green
-        Triple("coral", "#D4231E", "C"),        // Coral (Shell licensee in GR)
-        Triple("jetoil", "#E8621F", "J"),
-        Triple("cyclon", "#004B93", "CY"),
-        Triple("aegean", "#00A0DF", "AE"),      // Aegean Oil
-        Triple("eteka", "#C8102E", "ET"),
-        Triple("silk oil", "#8E44AD", "SO"),
-        Triple("mamidoil", "#004B93", "M"),
-        Triple("kaoil", "#0B7A3B", "K"),
+        Triple("statoil", "#E8621F", "S"),
+        Triple("tamoil", "#C8102E", "T"),
+        Triple("texaco", "#C8102E", "T"),
+        Triple("total", "#E4322B", "T"),
+        Triple("totalenergies", "#E4322B", "T"),
     )
 
     /** OSM in Greece frequently writes brands in GREEK script. Map those to the
      *  latin key so both spellings resolve to the same logo/chip (and so the
      *  drawable name stays ASCII). */
     private val aliases: Map<String, String> = mapOf(
-        "εκο" to "eko", "εκο-ελδα" to "eko",
+        "εκο" to "eko", "εκο-ελδα" to "eko", "eko-elda" to "eko",
         "αβιν" to "avin", "αβίν" to "avin",
         "ρεβοιλ" to "revoil", "ρεβόιλ" to "revoil",
-        "ελιν" to "elin", "ελίν" to "elin",
-        "κοραλ" to "coral", "κοράλ" to "coral",
-        "τζετοιλ" to "jetoil",
-        "σικλον" to "cyclon", "κυκλων" to "cyclon",
-        "αιγαιον" to "aegean", "αιγαίον" to "aegean",
-        "ετεκα" to "eteka",
         "σελλ" to "shell", "μπι πι" to "bp",
     )
 
@@ -726,6 +719,12 @@ internal object FuelBrands {
     fun allKeys(): List<String> = table.map { it.first }.distinct()
 
     fun iconId(key: String) = "dbm-ic-fuel-$key"
+
+    /** Brands whose logo drawable was found and registered with the map style.
+     *  Anything not in here renders with the generic distributor icon. */
+    private val available = java.util.Collections.synchronizedSet(HashSet<String>())
+    fun markAvailable(key: String) { available.add(key) }
+    fun hasLogo(key: String) = available.contains(key)
 
     /** Drawable resource name expected for a brand's real logo, e.g.
      *  "shell" -> res/drawable/fuel_logo_shell.png  (or .webp / .xml vector).
