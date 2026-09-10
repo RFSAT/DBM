@@ -637,6 +637,16 @@ internal object FuelBrands {
     // Anything not listed here — or listed but with no drawable present — falls
     // back to the generic distributor icon. Keep this in step with the artwork.
     private val table: List<Triple<String, String, String>> = listOf(
+        // --- Greek market (logos shipped) ---------------------------------
+        Triple("aegean", "#00A0DF", "AE"),      // Aegean Oil
+        Triple("coral", "#D4231E", "C"),        // Coral (Shell licensee in GR)
+        Triple("cyclon", "#004B93", "CY"),
+        Triple("elin", "#0B7A3B", "ELIN"),
+        Triple("eteka", "#C8102E", "ET"),
+        Triple("jetoil", "#E8621F", "JO"),
+        Triple("kaoil", "#0B7A3B", "K"),
+        Triple("silk oil", "#8E44AD", "SO"),
+        // --- rest ---------------------------------------------------------
         Triple("agip", "#F5C518", "A"),
         Triple("aral", "#0B3F8C", "A"),
         Triple("avia", "#C8102E", "A"),
@@ -679,6 +689,13 @@ internal object FuelBrands {
         "εκο" to "eko", "εκο-ελδα" to "eko", "eko-elda" to "eko",
         "αβιν" to "avin", "αβίν" to "avin",
         "ρεβοιλ" to "revoil", "ρεβόιλ" to "revoil",
+        "ελιν" to "elin", "ελίν" to "elin",
+        "κοραλ" to "coral", "κοράλ" to "coral",
+        "τζετοιλ" to "jetoil", "jet oil" to "jetoil",
+        "κυκλων" to "cyclon", "σικλον" to "cyclon",
+        "αιγαιον" to "aegean", "aegean oil" to "aegean",
+        "ετεκα" to "eteka",
+        "καοιλ" to "kaoil",
         "σελλ" to "shell", "μπι πι" to "bp",
     )
 

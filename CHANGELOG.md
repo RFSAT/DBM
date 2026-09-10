@@ -1,5 +1,12 @@
 # DBM Changelog
 
+## v1.20.126 — brand table matched to the 41 shipped logos
+- Restored the Greek brands now that artwork is supplied: Aegean, Coral, Cyclon,
+  ELIN, ETEKA, Jetoil, Kaoil, Silk Oil. The table is now an exact 1:1 match with
+  the 41 logo files in res/drawable (nothing missing, nothing orphaned).
+- Greek-script aliases extended for the restored brands (ΕΛΙΝ, ΚΟΡΑΛ, ΤΖΕΤΟΙΛ,
+  ΚΥΚΛΩΝ, ΑΙΓΑΙΟΝ, ΕΤΕΚΑ, ΚΑΟΙΛ) plus "Jet Oil" and "Aegean Oil" spellings.
+- Mamidoil intentionally absent, so those stations use the generic icon.
 ## v1.20.125 — brand list matched to shipped logos; generic icon otherwise
 - The brand table now lists EXACTLY the 33 brands we ship a logo for. Brands with
   no artwork (Mamidoil, ELIN, Coral, Jetoil, Cyclon, Aegean, ETEKA, Silk Oil,
