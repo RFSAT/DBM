@@ -657,17 +657,63 @@ internal object FuelBrands {
         Triple("gulf", "#E8621F", "G"),
         Triple("texaco", "#C8102E", "T"),
         Triple("ip", "#0B7A3B", "IP"),
-        Triple("sokar", "#00A0DF", "S"),
-        Triple("ekoenergo", "#0B7A3B", "E"),
+        Triple("socar", "#00A0DF", "S"),
+        // --- Greek market -------------------------------------------------
+        Triple("eko", "#F5A800", "EKO"),        // EKO (HELLENiQ) yellow/blue
+        Triple("avin", "#C8102E", "AVIN"),      // AVIN OIL
+        Triple("revoil", "#004B93", "RV"),      // Revoil blue
+        Triple("elin", "#0B7A3B", "ELIN"),      // ELIN green
+        Triple("coral", "#D4231E", "C"),        // Coral (Shell licensee in GR)
+        Triple("jetoil", "#E8621F", "J"),
+        Triple("cyclon", "#004B93", "CY"),
+        Triple("aegean", "#00A0DF", "AE"),      // Aegean Oil
+        Triple("eteka", "#C8102E", "ET"),
+        Triple("silk oil", "#8E44AD", "SO"),
+        Triple("mamidoil", "#004B93", "M"),
+        Triple("kaoil", "#0B7A3B", "K"),
+    )
+
+    /** OSM in Greece frequently writes brands in GREEK script. Map those to the
+     *  latin key so both spellings resolve to the same logo/chip (and so the
+     *  drawable name stays ASCII). */
+    private val aliases: Map<String, String> = mapOf(
+        "εκο" to "eko", "εκο-ελδα" to "eko",
+        "αβιν" to "avin", "αβίν" to "avin",
+        "ρεβοιλ" to "revoil", "ρεβόιλ" to "revoil",
+        "ελιν" to "elin", "ελίν" to "elin",
+        "κοραλ" to "coral", "κοράλ" to "coral",
+        "τζετοιλ" to "jetoil",
+        "σικλον" to "cyclon", "κυκλων" to "cyclon",
+        "αιγαιον" to "aegean", "αιγαίον" to "aegean",
+        "ετεκα" to "eteka",
+        "σελλ" to "shell", "μπι πι" to "bp",
     )
 
     /** Normalised key for a brand string, or null when we have no match. */
     fun keyFor(brand: String?): String? {
-        val b = brand?.trim()?.lowercase() ?: return null
-        if (b.isEmpty()) return null
-        // exact first, then "starts with" so "Shell Express" -> shell
-        table.firstOrNull { it.first == b }?.let { return it.first }
-        return table.firstOrNull { b.startsWith(it.first) || it.first in b }?.first
+        val raw = brand?.trim()?.lowercase() ?: return null
+        if (raw.isEmpty()) return null
+        // Greek (or other) spelling -> latin key
+        aliases[raw]?.let { return it }
+        // exact match wins
+        table.firstOrNull { it.first == raw }?.let { return it.first }
+        // Then word-boundary matching. A plain "contains" is unsafe for short
+        // keys — "eko" would match "Ekoenergo", "ip" would match "Philips" —
+        // so require the key to appear as a whole word (or the start of one).
+        val words = raw.split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }
+        for ((k, _, _) in table) {
+            if (k.contains(' ')) {                 // multi-word key, e.g. "circle k"
+                if (raw.contains(k)) return k
+            } else if (words.any { it == k }) {
+                return k
+            }
+        }
+        // finally, allow a prefix match only for keys of 4+ chars, so
+        // "Shell Express" -> shell but short keys stay strict.
+        for ((k, _, _) in table) {
+            if (k.length >= 4 && words.any { it.startsWith(k) }) return k
+        }
+        return null
     }
 
     fun colourFor(key: String): String =

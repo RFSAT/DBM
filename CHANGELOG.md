@@ -1,5 +1,16 @@
 # DBM Changelog
 
+## v1.20.124 — Greek petrol brands; safer brand matching
+- Added Greek brands: EKO, AVIN, Revoil, ELIN, Coral, Jetoil, Cyclon, Aegean,
+  ETEKA, Silk Oil, Mamidoil, Kaoil. Greek-script spellings used in OSM
+  (ΕΚΟ, ΑΒΙΝ, ΡΕΒΟΙΛ, ΕΛΙΝ, ΚΟΡΑΛ...) are aliased to the same latin key, so both
+  resolve to one logo and the drawable name stays ASCII.
+- Corrected two bad entries: "sokar" -> "socar" (which does operate in Greece),
+  and removed the erroneous "ekoenergo".
+- Brand matching hardened: the old plain "contains" test mislabelled unrelated
+  names (Ekoenergo -> EKO, Philips -> IP). Matching is now whole-word, with
+  prefix matching only for keys of 4+ characters, so "Shell Express" and
+  "EKO-ELDA" still resolve while false matches do not.
 ## v1.20.123 — real brand logos for petrol stations (drop-in artwork)
 - Fuel station icons now use the REAL brand logo when the app ships one: any
   drawable named fuel_logo_<brand> (e.g. fuel_logo_shell.png) is picked up
