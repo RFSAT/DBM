@@ -127,7 +127,7 @@ fun MapLibreBase(
                 }
                 loadStyle(m, styleSpec) { style ->
                     styleHolder.value = style; loadedStyle.value = styleSpec
-                    ensureLayers(style)
+                    ensureLayers(style, context)
                     updateData(style, route, ownLocation, ownIcon, destination, mapData)
                     // initial camera ONCE (centre on user or route start)
                     val c = ownLocation ?: route?.firstOrNull()
@@ -145,7 +145,7 @@ fun MapLibreBase(
             if (loadedStyle.value != styleSpec) {
                 loadStyle(map, styleSpec) { style ->
                     styleHolder.value = style; loadedStyle.value = styleSpec
-                    ensureLayers(style)
+                    ensureLayers(style, context)
                     updateData(style, route, ownLocation, ownIcon, destination, mapData)
                 }
             } else {
@@ -249,7 +249,7 @@ private fun loadStyle(map: MapLibreMap, spec: String, onLoaded: (Style) -> Unit)
  * so no asset files are bundled). A rounded blue "P" for parking, a red disc with
  * a simple camera glyph for speed cameras. Idempotent — only adds once per style.
  */
-private fun registerOverlayIcons(style: Style) {
+private fun registerOverlayIcons(style: Style, ctx: android.content.Context?) {
     if (style.getImage(ICON_PARKING) == null)
         style.addImage(ICON_PARKING, parkingBitmap())
     if (style.getImage(ICON_CAMERA) == null)
@@ -264,6 +264,15 @@ private fun registerOverlayIcons(style: Style) {
         style.addImage(ICON_OWN_ARROW, ownArrowBitmap())
     if (style.getImage(ICON_FUEL) == null)
         style.addImage(ICON_FUEL, glyphBitmap("\u26FD", "#2F6096"))   // fuel pump
+    // Real brand LOGOS when supplied as drawables (see FuelBrands.drawableName);
+    // otherwise a brand-coloured chip; unbranded stations use ICON_FUEL above.
+    for (k in FuelBrands.allKeys()) {
+        val id = FuelBrands.iconId(k)
+        if (style.getImage(id) != null) continue
+        val logo = ctx?.let { FuelBrands.loadLogo(it, k) }
+        style.addImage(id, logo ?: fuelBrandBitmap(
+            FuelBrands.colourFor(k), FuelBrands.letterFor(k)))
+    }
     if (style.getImage(ICON_CHG) == null)
         style.addImage(ICON_CHG, glyphBitmap("\u26A1", "#2E7D5B"))    // charging bolt
     if (style.getImage(ICON_HOSP) == null)
@@ -438,7 +447,7 @@ private fun cameraBitmap(): Bitmap {
     return bmp
 }
 
-private fun ensureLayers(style: Style) {
+private fun ensureLayers(style: Style, ctx: android.content.Context? = null) {
     if (style.getSource(ROUTE_SRC) == null) {
         style.addSource(GeoJsonSource(ROUTE_SRC))
         style.addLayer(LineLayer(ROUTE_CASING, ROUTE_SRC).withProperties(
@@ -455,7 +464,7 @@ private fun ensureLayers(style: Style) {
     }
     // Parking + camera get recognizable ICONS (a "P" and a camera glyph),
     // registered as style images and drawn via SymbolLayers.
-    registerOverlayIcons(style)
+    registerOverlayIcons(style, ctx)
     if (style.getSource(PARK_SRC) == null) {
         style.addSource(GeoJsonSource(PARK_SRC))
         style.addLayer(SymbolLayer(PARK_LYR, PARK_SRC).withProperties(
@@ -474,7 +483,6 @@ private fun ensureLayers(style: Style) {
     }
     // extra POI layers (fuel / charging / hospital / rest area)
     for ((src, lyr, icon) in listOf(
-        Triple(FUEL_SRC, FUEL_LYR, ICON_FUEL),
         Triple(CHG_SRC, CHG_LYR, ICON_CHG),
         Triple(HOSP_SRC, HOSP_LYR, ICON_HOSP),
         Triple(REST_SRC, REST_LYR, ICON_REST),
@@ -490,6 +498,17 @@ private fun ensureLayers(style: Style) {
                 PropertyFactory.iconAllowOverlap(true),
                 PropertyFactory.iconIgnorePlacement(true)))
         }
+    }
+    // Fuel gets its OWN layer: the icon is chosen PER FEATURE from the "icon"
+    // property, so each station shows its brand chip (or the generic pump).
+    if (style.getSource(FUEL_SRC) == null) {
+        style.addSource(GeoJsonSource(FUEL_SRC))
+        style.addLayer(SymbolLayer(FUEL_LYR, FUEL_SRC).withProperties(
+            PropertyFactory.iconImage(
+                org.maplibre.android.style.expressions.Expression.get("icon")),
+            PropertyFactory.iconSize(1.3f),
+            PropertyFactory.iconAllowOverlap(true),
+            PropertyFactory.iconIgnorePlacement(true)))
     }
     // markers on top
     if (style.getSource(DEST_SRC) == null) {
@@ -564,8 +583,21 @@ private fun updateData(
             FeatureCollection.fromFeatures(pts.map {
                 Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)) })
         else empty
+    // Fuel: each feature carries the icon id for its brand (or the generic pump),
+    // which the data-driven layer resolves per station.
     style.getSourceAs<GeoJsonSource>(FUEL_SRC)?.setGeoJson(
-        pointFc(PoiType.FUEL in en, mapData?.fuel))
+        if (PoiType.FUEL in en && mapData != null) {
+            val src = mapData.fuelBrands.ifEmpty {
+                mapData.fuel.map { it to null as String? }
+            }
+            FeatureCollection.fromFeatures(src.map { (pt, brand) ->
+                val key = FuelBrands.keyFor(brand)
+                Feature.fromGeometry(Point.fromLngLat(pt.lon, pt.lat)).also { f ->
+                    f.addStringProperty("icon",
+                        if (key != null) FuelBrands.iconId(key) else ICON_FUEL)
+                }
+            })
+        } else empty)
     style.getSourceAs<GeoJsonSource>(CHG_SRC)?.setGeoJson(
         pointFc(PoiType.CHARGING in en, mapData?.charging))
     style.getSourceAs<GeoJsonSource>(HOSP_SRC)?.setGeoJson(
@@ -580,4 +612,141 @@ private fun updateData(
         pointFc(PoiType.LEVEL_CROSSING in en, mapData?.levelCrossing))
     style.getSourceAs<GeoJsonSource>(BUMP_SRC)?.setGeoJson(
         pointFc(PoiType.SPEED_BUMP in en, mapData?.speedBump))
+}
+
+/**
+ * Brand-coloured fuel markers.
+ *
+ * We deliberately do NOT bundle company logos: those are trademarks, and
+ * sourcing properly-licensed artwork per brand is a legal question rather than a
+ * technical one. Instead each major brand gets its recognisable house COLOUR
+ * plus its initial — which is what a driver actually picks out at a glance, is
+ * free of licensing issues, works offline and costs no APK size.
+ *
+ * Unknown/absent brands fall back to the neutral pump glyph.
+ */
+internal object FuelBrands {
+    // brand (lowercased, as OSM writes it) -> (background, letter)
+    private val table: List<Triple<String, String, String>> = listOf(
+        Triple("shell", "#D4231E", "S"),      // Shell red
+        Triple("bp", "#0B7A3B", "B"),         // BP green
+        Triple("aral", "#0B3F8C", "A"),       // Aral blue
+        Triple("total", "#E4322B", "T"),      // Total/TotalEnergies red
+        Triple("totalenergies", "#E4322B", "T"),
+        Triple("esso", "#1B4EA0", "E"),       // Esso blue
+        Triple("omv", "#0B3F8C", "O"),        // OMV blue
+        Triple("eni", "#F5C518", "E"),        // Eni yellow
+        Triple("agip", "#F5C518", "A"),
+        Triple("repsol", "#E8621F", "R"),     // Repsol orange
+        Triple("cepsa", "#C8102E", "C"),
+        Triple("q8", "#00A0DF", "Q"),
+        Triple("lukoil", "#C8102E", "L"),
+        Triple("petrol", "#0B7A3B", "P"),
+        Triple("orlen", "#C8102E", "O"),
+        Triple("circle k", "#E8621F", "C"),
+        Triple("intermarché", "#C8102E", "I"),
+        Triple("carrefour", "#0B5FA5", "C"),
+        Triple("leclerc", "#0B5FA5", "L"),
+        Triple("avia", "#C8102E", "A"),
+        Triple("jet", "#F5C518", "J"),
+        Triple("tamoil", "#C8102E", "T"),
+        Triple("mol", "#0B7A3B", "M"),
+        Triple("neste", "#00A0DF", "N"),
+        Triple("preem", "#F5C518", "P"),
+        Triple("statoil", "#E8621F", "S"),
+        Triple("gulf", "#E8621F", "G"),
+        Triple("texaco", "#C8102E", "T"),
+        Triple("ip", "#0B7A3B", "IP"),
+        Triple("sokar", "#00A0DF", "S"),
+        Triple("ekoenergo", "#0B7A3B", "E"),
+    )
+
+    /** Normalised key for a brand string, or null when we have no match. */
+    fun keyFor(brand: String?): String? {
+        val b = brand?.trim()?.lowercase() ?: return null
+        if (b.isEmpty()) return null
+        // exact first, then "starts with" so "Shell Express" -> shell
+        table.firstOrNull { it.first == b }?.let { return it.first }
+        return table.firstOrNull { b.startsWith(it.first) || it.first in b }?.first
+    }
+
+    fun colourFor(key: String): String =
+        table.first { it.first == key }.second
+
+    fun letterFor(key: String): String =
+        table.first { it.first == key }.third
+
+    /** All keys, so every brand icon can be registered once with the style. */
+    fun allKeys(): List<String> = table.map { it.first }.distinct()
+
+    fun iconId(key: String) = "dbm-ic-fuel-$key"
+
+    /** Drawable resource name expected for a brand's real logo, e.g.
+     *  "shell" -> res/drawable/fuel_logo_shell.png  (or .webp / .xml vector).
+     *  Drop the licensed artwork in with these names and it is picked up
+     *  automatically — no code change needed. */
+    fun drawableName(key: String): String {
+        // Transliterate accents first, otherwise "intermarché" would become
+        // "intermarch" (the é dropped) and silently never match a drawable.
+        val ascii = java.text.Normalizer.normalize(key, java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{Mn}+"), "")
+        return "fuel_logo_" +
+            ascii.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_')
+    }
+
+    /** Load a brand's real logo if the app ships one, scaled to the map icon
+     *  size on a transparent square. Returns null when no such drawable exists,
+     *  so the caller falls back to the coloured chip. */
+    fun loadLogo(ctx: android.content.Context, key: String): Bitmap? {
+        val name = drawableName(key)
+        val resId = runCatching {
+            ctx.resources.getIdentifier(name, "drawable", ctx.packageName)
+        }.getOrDefault(0)
+        if (resId == 0) return null
+        val src = runCatching {
+            androidx.core.content.ContextCompat.getDrawable(ctx, resId)
+        }.getOrNull() ?: return null
+
+        val s = 64
+        val out = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
+        val c = Canvas(out)
+        // white rounded plate behind the logo so light-on-transparent marks stay
+        // legible over any map background
+        val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        p.color = AndroidColor.WHITE; p.alpha = 235
+        c.drawRoundRect(RectF(2f, 2f, s - 2f, s - 2f), 14f, 14f, p)
+        p.color = AndroidColor.parseColor("#B0BEC5"); p.alpha = 200
+        p.style = Paint.Style.STROKE; p.strokeWidth = 2f
+        c.drawRoundRect(RectF(2f, 2f, s - 2f, s - 2f), 14f, 14f, p)
+        // fit the logo inside with padding, preserving aspect ratio
+        val pad = 9
+        val w = src.intrinsicWidth.coerceAtLeast(1)
+        val h = src.intrinsicHeight.coerceAtLeast(1)
+        val box = s - 2 * pad
+        val scale = minOf(box.toFloat() / w, box.toFloat() / h)
+        val dw = (w * scale).toInt().coerceAtLeast(1)
+        val dh = (h * scale).toInt().coerceAtLeast(1)
+        val left = (s - dw) / 2
+        val top = (s - dh) / 2
+        src.setBounds(left, top, left + dw, top + dh)
+        src.draw(c)
+        return out
+    }
+}
+
+/** A round brand chip: the brand's house colour with its initial in white. */
+private fun fuelBrandBitmap(colorHex: String, letter: String): Bitmap {
+    val s = 64; val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
+    val c = Canvas(bmp); val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    p.color = AndroidColor.parseColor(colorHex)
+    c.drawCircle(s / 2f, s / 2f, s / 2f - 5f, p)
+    p.color = AndroidColor.parseColor("#FFFFFF"); p.alpha = 210
+    p.style = Paint.Style.STROKE; p.strokeWidth = 3f
+    c.drawCircle(s / 2f, s / 2f, s / 2f - 5f, p)
+    p.style = Paint.Style.FILL; p.color = AndroidColor.WHITE; p.alpha = 255
+    p.textSize = if (letter.length > 1) 26f else 34f
+    p.textAlign = Paint.Align.CENTER; p.isFakeBoldText = true
+    val fm = p.fontMetrics
+    c.drawText(letter, s / 2f, s / 2f - (fm.ascent + fm.descent) / 2f, p)
+    return bmp
 }

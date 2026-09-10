@@ -39,6 +39,9 @@ data class MapOverlay(
     val parking: List<DoublePair>,
     val cameras: List<DoublePair>,
     val fuel: List<DoublePair> = emptyList(),
+    // Fuel stations with their brand (when OSM has one), so the map can draw a
+    // brand-coloured marker instead of a generic pump.
+    val fuelBrands: List<Pair<DoublePair, String?>> = emptyList(),
     val charging: List<DoublePair> = emptyList(),
     val hospital: List<DoublePair> = emptyList(),
     val restArea: List<DoublePair> = emptyList(),
@@ -260,6 +263,7 @@ class OsmMap private constructor(private val db: SQLiteDatabase) {
         // rest_area) all share the same "points in bbox" query.
         val cams = queryPoiPoints("speed_camera", lat, lon, marginDeg)
         val fuel = queryPoiPoints("fuel", lat, lon, marginDeg)
+        val fuelBrands = queryFuelBrands(lat, lon, marginDeg)
         val charging = queryPoiPoints("charging", lat, lon, marginDeg)
         val hospital = queryPoiPoints("hospital", lat, lon, marginDeg)
         val restArea = queryPoiPoints("rest_area", lat, lon, marginDeg)
@@ -268,8 +272,51 @@ class OsmMap private constructor(private val db: SQLiteDatabase) {
         val levelCrossing = queryPoiPoints("level_crossing", lat, lon, marginDeg)
         val speedBump = queryPoiPoints("speed_bump", lat, lon, marginDeg)
 
-        return MapOverlay(limits, park, cams, fuel, charging, hospital, restArea,
-                          tollBooth, borderControl, levelCrossing, speedBump)
+        return MapOverlay(
+            speedLimitLines = limits, parking = park, cameras = cams,
+            fuel = fuel, fuelBrands = fuelBrands, charging = charging,
+            hospital = hospital, restArea = restArea, tollBooth = tollBooth,
+            borderControl = borderControl, levelCrossing = levelCrossing,
+            speedBump = speedBump)
+    }
+
+    /** Fuel stations with their brand, for brand-coloured map markers. Returns
+     *  empty if the table or the brand column is absent (older maps). */
+    private fun queryFuelBrands(
+        lat: Double, lon: Double, marginDeg: Double, cap: Int = 500
+    ): List<Pair<DoublePair, String?>> {
+        val out = ArrayList<Pair<DoublePair, String?>>()
+        runCatching {
+            val hasTable = db.rawQuery(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='fuel'",
+                null).use { it.moveToNext() }
+            if (!hasTable) return emptyList()
+            val present = HashSet<String>()
+            db.rawQuery("PRAGMA table_info(fuel)", null).use { pc ->
+                val ni = pc.getColumnIndex("name")
+                while (pc.moveToNext()) present.add(pc.getString(ni))
+            }
+            // brand may be missing on very old maps; fall back to name
+            val brandCol = when {
+                "brand" in present -> "brand"
+                "name" in present -> "name"
+                else -> null
+            } ?: return emptyList()
+            db.rawQuery(
+                "SELECT lat, lon, $brandCol FROM fuel " +
+                "WHERE lat >= ? AND lat <= ? AND lon >= ? AND lon <= ?",
+                arrayOf((lat - marginDeg).toString(), (lat + marginDeg).toString(),
+                        (lon - marginDeg).toString(), (lon + marginDeg).toString())
+            ).use { c ->
+                var n = 0
+                while (c.moveToNext() && n < cap) {
+                    out.add(DoublePair(c.getDouble(0), c.getDouble(1)) to
+                            c.getString(2))
+                    n++
+                }
+            }
+        }.onFailure { DLog.e(TAG, "fuel brand query failed", it) }
+        return out
     }
 
     /** Points (lat,lon) from a table that has a lat/lon column, within a bbox.

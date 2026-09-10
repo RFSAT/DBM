@@ -371,6 +371,9 @@ class MainActivity : ComponentActivity() {
                                     parking = cv(o.parking),
                                     cameras = cv(o.cameras),
                                     fuel = cv(o.fuel),
+                                    fuelBrands = o.fuelBrands.map {
+                                        com.rfsat.dms.nav.GeoPoint(
+                                            it.first.lat, it.first.lon) to it.second },
                                     charging = cv(o.charging),
                                     hospital = cv(o.hospital),
                                     restArea = cv(o.restArea),

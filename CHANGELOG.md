@@ -1,5 +1,26 @@
 # DBM Changelog
 
+## v1.20.123 — real brand logos for petrol stations (drop-in artwork)
+- Fuel station icons now use the REAL brand logo when the app ships one: any
+  drawable named fuel_logo_<brand> (e.g. fuel_logo_shell.png) is picked up
+  automatically and drawn on a white rounded plate, scaled with aspect ratio
+  preserved, so it stays legible over any map background.
+- Fallback chain: real logo -> brand-coloured chip -> universal pump glyph for
+  stations whose brand cannot be identified.
+- No logo artwork is bundled: company logos are trademarks, so the licensed files
+  must be supplied. See the brand list in FuelBrands for the expected filenames.
+## v1.20.122 — brand-identified petrol stations on the map
+- Fuel stations are now drawn with a BRAND-COLOURED chip (house colour + initial)
+  instead of a uniform pump glyph, so Shell/BP/Aral/Total/OMV/Repsol/Q8/Orlen and
+  ~30 other majors are identifiable at a glance. The brand comes from the OSM
+  "brand" tag already stored in the map data; unknown or unbranded stations keep
+  the neutral pump icon.
+- Implemented as a data-driven SymbolLayer (icon chosen per feature) with the
+  brand carried through OsmMap.overlayNear -> MapOverlayData. Falls back safely on
+  older maps without a brand column.
+- Deliberately NOT using company logos: those are trademarks and licensing them
+  per brand is a legal decision, not a technical one. House colours carry the same
+  at-a-glance recognition with no licensing exposure and no APK size cost.
 ## v1.20.121 — map projection switches immediately with the mode button
 - Switching the map mode (2D top-down / 2.5D perspective / 3D) with the on-map
   mode button changed the target tilt but nothing applied it, so the projection

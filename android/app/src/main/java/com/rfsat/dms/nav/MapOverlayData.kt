@@ -12,6 +12,8 @@ data class MapOverlayData(
     val parking: List<GeoPoint> = emptyList(),
     val cameras: List<GeoPoint> = emptyList(),
     val fuel: List<GeoPoint> = emptyList(),
+    // Fuel stations paired with their brand, for brand-coloured markers.
+    val fuelBrands: List<Pair<GeoPoint, String?>> = emptyList(),
     val charging: List<GeoPoint> = emptyList(),
     val hospital: List<GeoPoint> = emptyList(),
     val restArea: List<GeoPoint> = emptyList(),
