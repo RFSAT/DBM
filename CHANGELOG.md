@@ -1,5 +1,18 @@
 # DBM Changelog
 
+## v1.20.127 — fuel icon fixes: Ellinoil, duplicates, EV box, plate-less logos
+- ELLINOIL stations showed the generic icon: the brand is written "Ellinoil"
+  (double L) which does not prefix-match the "elin" key. Added aliases for
+  Ellinoil / Elinoil / Ελληνοϊλ / Ελινοιλ / ΕΛΙΝ.
+- DUPLICATE icons at one forecourt (a branded one plus a plain one, seen at
+  Revoil 37.97346,23.85322 and EKO 37.93468,23.87952): OSM often maps a station
+  BOTH as an area and as a node inside it, so the extractor emits two rows, and
+  when only one carries the brand tag both icons were drawn. Co-located stations
+  (within ~45 m) are now merged, keeping the row that knows the brand.
+- EV charging icon now drawn in a box so it stands out on the map.
+- Logos that are strong self-contained symbols (BP, Shell, Aegean, ETEKA, EKO,
+  Jetoil) are drawn WITHOUT the white plate and with less padding, so the mark
+  itself is bigger; wordmark logos keep the plate for legibility.
 ## v1.20.126 — brand table matched to the 41 shipped logos
 - Restored the Greek brands now that artwork is supplied: Aegean, Coral, Cyclon,
   ELIN, ETEKA, Jetoil, Kaoil, Silk Oil. The table is now an exact 1:1 match with

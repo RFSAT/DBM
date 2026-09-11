@@ -316,7 +316,35 @@ class OsmMap private constructor(private val db: SQLiteDatabase) {
                 }
             }
         }.onFailure { DLog.e(TAG, "fuel brand query failed", it) }
-        return out
+        return dedupeStations(out)
+    }
+
+    /** OSM often maps a petrol station BOTH as an area (way) and as a node inside
+     *  it, so the extractor emits two rows for one forecourt. If only one carries
+     *  the brand tag you would see a branded icon and a plain one at the same
+     *  spot. Merge points within ~45 m, keeping the one that HAS a brand. */
+    private fun dedupeStations(
+        input: List<Pair<DoublePair, String?>>
+    ): List<Pair<DoublePair, String?>> {
+        if (input.size < 2) return input
+        val kept = ArrayList<Pair<DoublePair, String?>>(input.size)
+        for (cand in input) {
+            var merged = false
+            for (i in kept.indices) {
+                val k = kept[i]
+                if (distMeters(k.first.lat, k.first.lon,
+                               cand.first.lat, cand.first.lon) <= 45.0) {
+                    // same forecourt — prefer whichever row knows the brand
+                    if (k.second.isNullOrBlank() && !cand.second.isNullOrBlank()) {
+                        kept[i] = cand
+                    }
+                    merged = true
+                    break
+                }
+            }
+            if (!merged) kept.add(cand)
+        }
+        return kept
     }
 
     /** Points (lat,lon) from a table that has a lat/lon column, within a bbox.

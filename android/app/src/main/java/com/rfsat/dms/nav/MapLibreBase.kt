@@ -278,7 +278,7 @@ private fun registerOverlayIcons(style: Style, ctx: android.content.Context?) {
         FuelBrands.markAvailable(k)
     }
     if (style.getImage(ICON_CHG) == null)
-        style.addImage(ICON_CHG, glyphBitmap("\u26A1", "#2E7D5B"))    // charging bolt
+        style.addImage(ICON_CHG, badgeBitmap("\u26A1", "#2E7D32"))  // boxed: more visible    // charging bolt
     if (style.getImage(ICON_HOSP) == null)
         style.addImage(ICON_HOSP, badgeBitmap("H", "#1565C0"))        // hospital H
     if (style.getImage(ICON_REST) == null)
@@ -690,6 +690,10 @@ internal object FuelBrands {
         "αβιν" to "avin", "αβίν" to "avin",
         "ρεβοιλ" to "revoil", "ρεβόιλ" to "revoil",
         "ελιν" to "elin", "ελίν" to "elin",
+        // ELIN is the fuel brand of ELINOIL / ELLINOIL ("Ελληνοϊλ"); OSM uses
+        // several spellings and "ellinoil" does NOT prefix-match "elin".
+        "ellinoil" to "elin", "elinoil" to "elin",
+        "ελληνοϊλ" to "elin", "ελληνοιλ" to "elin", "ελινοιλ" to "elin",
         "κοραλ" to "coral", "κοράλ" to "coral",
         "τζετοιλ" to "jetoil", "jet oil" to "jetoil",
         "κυκλων" to "cyclon", "σικλον" to "cyclon",
@@ -735,6 +739,11 @@ internal object FuelBrands {
     /** All keys, so every brand icon can be registered once with the style. */
     fun allKeys(): List<String> = table.map { it.first }.distinct()
 
+    /** Brands whose logo is a distinct, self-contained symbol (no text to make
+     *  legible), so it looks better drawn directly on the map without a plate. */
+    private val noPlateBrands = setOf(
+        "bp", "shell", "aegean", "eteka", "eko", "jetoil")
+
     fun iconId(key: String) = "dbm-ic-fuel-$key"
 
     /** Brands whose logo drawable was found and registered with the map style.
@@ -772,16 +781,22 @@ internal object FuelBrands {
         val s = 64
         val out = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
         val c = Canvas(out)
-        // white rounded plate behind the logo so light-on-transparent marks stay
-        // legible over any map background
+        // Most logos are wordmarks that need a light plate to stay legible over
+        // the map. Brands whose mark is a strong, self-contained symbol read
+        // better WITHOUT one, so they are drawn straight onto the map.
+        val plate = key !in noPlateBrands
         val p = Paint(Paint.ANTI_ALIAS_FLAG)
-        p.color = AndroidColor.WHITE; p.alpha = 235
-        c.drawRoundRect(RectF(2f, 2f, s - 2f, s - 2f), 14f, 14f, p)
-        p.color = AndroidColor.parseColor("#B0BEC5"); p.alpha = 200
-        p.style = Paint.Style.STROKE; p.strokeWidth = 2f
-        c.drawRoundRect(RectF(2f, 2f, s - 2f, s - 2f), 14f, 14f, p)
-        // fit the logo inside with padding, preserving aspect ratio
-        val pad = 9
+        if (plate) {
+            p.color = AndroidColor.WHITE; p.alpha = 235
+            c.drawRoundRect(RectF(2f, 2f, s - 2f, s - 2f), 14f, 14f, p)
+            p.color = AndroidColor.parseColor("#B0BEC5"); p.alpha = 200
+            p.style = Paint.Style.STROKE; p.strokeWidth = 2f
+            c.drawRoundRect(RectF(2f, 2f, s - 2f, s - 2f), 14f, 14f, p)
+            p.style = Paint.Style.FILL
+        }
+        // fit the logo inside, preserving aspect ratio. Plate-less marks get less
+        // padding so the symbol itself renders as large as possible.
+        val pad = if (plate) 9 else 3
         val w = src.intrinsicWidth.coerceAtLeast(1)
         val h = src.intrinsicHeight.coerceAtLeast(1)
         val box = s - 2 * pad
