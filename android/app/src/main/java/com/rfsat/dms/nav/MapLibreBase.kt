@@ -278,7 +278,7 @@ private fun registerOverlayIcons(style: Style, ctx: android.content.Context?) {
         FuelBrands.markAvailable(k)
     }
     if (style.getImage(ICON_CHG) == null)
-        style.addImage(ICON_CHG, badgeBitmap("\u26A1", "#2E7D32"))  // boxed: more visible    // charging bolt
+        style.addImage(ICON_CHG, badgeBitmap("\u26A1", "#4CAF50"))   // boxed, lighter green
     if (style.getImage(ICON_HOSP) == null)
         style.addImage(ICON_HOSP, badgeBitmap("H", "#1565C0"))        // hospital H
     if (style.getImage(ICON_REST) == null)
@@ -510,7 +510,9 @@ private fun ensureLayers(style: Style, ctx: android.content.Context? = null) {
         style.addLayer(SymbolLayer(FUEL_LYR, FUEL_SRC).withProperties(
             PropertyFactory.iconImage(
                 org.maplibre.android.style.expressions.Expression.get("icon")),
-            PropertyFactory.iconSize(1.3f),
+            // ~10% smaller than the other POI badges: brand logos read larger
+            // than a glyph at the same nominal size, so they looked oversized.
+            PropertyFactory.iconSize(1.17f),
             PropertyFactory.iconAllowOverlap(true),
             PropertyFactory.iconIgnorePlacement(true)))
     }

@@ -1,5 +1,11 @@
 # DBM Changelog
 
+## v1.20.128 — smaller fuel icons, lighter EV badge
+- Petrol-station icons reduced ~10% (iconSize 1.3 -> 1.17). Brand logos fill more
+  of their bitmap than a glyph does, so at the same nominal size they looked
+  oversized next to the other POI badges.
+- EV charging badge background lightened (#2E7D32 -> #4CAF50) so the white bolt
+  reads more clearly.
 ## v1.20.127 — fuel icon fixes: Ellinoil, duplicates, EV box, plate-less logos
 - ELLINOIL stations showed the generic icon: the brand is written "Ellinoil"
   (double L) which does not prefix-match the "elin" key. Added aliases for
