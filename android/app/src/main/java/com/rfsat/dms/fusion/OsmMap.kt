@@ -372,7 +372,10 @@ class OsmMap private constructor(private val db: SQLiteDatabase) {
             Triple("parking_lot", "Parking",
                    listOf("name", "kind", "access", "fee", "charge", "fee_cond",
                           "capacity", "maxstay", "hours")),
-            Triple("speed_camera", "Speed camera", listOf("maxspeed", "kind")),
+            // direction/trafficDeg are absent on pre-v6 maps; the PRAGMA column
+            // filter below drops whichever are missing.
+            Triple("speed_camera", "Speed camera",
+                   listOf("maxspeed", "kind", "direction", "trafficDeg")),
         )
         val dLat = radiusM / 111_320.0
         val dLon = radiusM / (111_320.0 *
@@ -429,7 +432,12 @@ class OsmMap private constructor(private val db: SQLiteDatabase) {
     /** Points from a POI table that lie AHEAD in the direction of travel, within
      *  aheadM metres — mirrors CameraMonitor.camerasAhead but generic, for the
      *  level-crossing / speed-bump approach warnings. Returns (lat,lon,distM)
-     *  sorted nearest-first; empty if the table doesn't exist. */
+     *  sorted nearest-first; empty if the table doesn't exist.
+     *
+     *  headingDeg must be a TRUE COMPASS bearing (0 = north), the frame
+     *  bearingDegTo() returns — NOT the math-frame heading match() takes. These
+     *  hazards sit across the carriageway and affect both directions, so no
+     *  direction tag is consulted beyond the ahead cone. */
     fun hazardsAhead(table: String, lat: Double, lon: Double, headingDeg: Float,
                      aheadM: Double): List<Triple<Double, Double, Double>> {
         val out = ArrayList<Triple<Double, Double, Double>>(4)

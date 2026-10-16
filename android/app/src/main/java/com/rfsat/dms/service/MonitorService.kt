@@ -383,8 +383,20 @@ class MonitorService : Service() {
                     lastFusePos = pos
                     selectRegionForLocation(lat, lon)
 
-                    checkCamerasAhead(lat, lon, heading, bestSpeedKmh())
-                    checkHazardsAhead(lat, lon, heading, bestSpeedKmh())
+                    // `heading` above is a MATH-frame angle (0 = east, counter-
+                    // clockwise) because that is the frame OsmMap.match() works
+                    // in. The approach warnings compare against true compass
+                    // bearings, so they get a compass heading: the GNSS course
+                    // when it is fresh (smoother), else the displacement angle
+                    // converted with compass = 90 - math.
+                    val headingCompass = when {
+                        speed.headingFresh -> speed.heading.value.toDouble()
+                        !heading.isNaN() -> (90.0 - heading + 360.0) % 360.0
+                        else -> Double.NaN
+                    }
+
+                    checkCamerasAhead(lat, lon, headingCompass, bestSpeedKmh())
+                    checkHazardsAhead(lat, lon, headingCompass, bestSpeedKmh())
 
                     val mr = osmMap?.match(lat, lon, heading)
                     val mapLimit = mr?.mapLimit ?: -1
@@ -748,7 +760,12 @@ class MonitorService : Service() {
         return false   // stopped but not yet scanned here -> let the scan run
     }
 
-    /** Record that a sign scan has now run at the current stop location. */
+    /**
+     * Advance warning for the nearest mapped speed camera ahead. [heading] is a
+     * TRUE COMPASS bearing (0 = north). CameraMonitor drops cameras that measure
+     * the opposite direction, so nothing on the other carriageway is announced;
+     * every camera still appears on the map.
+     */
     private fun checkCamerasAhead(lat: Double, lon: Double, heading: Double, spd: Int) {
         if (!cameraEnabled || heading.isNaN()) return
         val cm = osmMap?.cameras ?: return
@@ -772,8 +789,9 @@ class MonitorService : Service() {
     }
 
     // Level-crossing / speed-bump approach warning. Gated by the same-style
-    // hazard settings; reuses the ahead-in-direction-of-travel query. Level
-    // crossings take priority over bumps when both are near.
+    // hazard settings; reuses the ahead-in-direction-of-travel query, so
+    // [heading] is likewise a TRUE COMPASS bearing. Level crossings take
+    // priority over bumps when both are near.
     private fun checkHazardsAhead(lat: Double, lon: Double, heading: Double, spd: Int) {
         val map = osmMap
         if (map == null || heading.isNaN()) return

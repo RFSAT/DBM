@@ -1,5 +1,32 @@
 # DBM Changelog
 
+## v1.20.129 — speed cameras: all on the map, warnings only for your direction
+- Every speed camera in the area is still DRAWN on the map; the approach WARNING
+  is now limited to cameras that measure the driver's own direction of travel, so
+  the camera on the opposite carriageway stays silent.
+- Fixed a frame mismatch that made the existing "ahead of us" test meaningless:
+  MonitorService derives heading as a MATH angle (0 = east, counter-clockwise,
+  the frame OsmMap.match works in) but CameraMonitor.camerasAhead and
+  OsmMap.hazardsAhead compared it against TRUE COMPASS bearings (0 = north).
+  Both approach warnings now receive a compass heading — the GNSS course when
+  fresh, else the displacement angle converted with compass = 90 - math. This
+  also affected the level-crossing / speed-bump warnings.
+- SpeedMonitor gained `headingFresh`, so the GNSS course (which defaults to north
+  and only refreshes while moving) is only trusted when recent.
+- New map schema 6: `speed_camera` gains wayDeg / oneway / trafficDeg, the
+  monitored-traffic bearing resolved at build time from the camera's parent way
+  (direction=forward/backward against the way as drawn, or the travel direction
+  of a one-way carriageway — each carriageway of a dual carriageway is its own
+  one-way way). The app probes for the column, so schema 5 maps keep working.
+- Where the direction cannot be established honestly — camera on no way,
+  direction=both, or a two-way road carrying only a compass facing (which per the
+  OSM wiki is the way the camera FACES and cannot separate the carriageways) —
+  trafficDeg is NULL and the app WARNS ANYWAY. Going quiet on a guess would be
+  the dangerous failure.
+- Tapping a camera on the map now shows its direction too.
+- build_europe/validate_maps accept schema 5 and 6; `--force --skip-base`
+  upgrades existing maps without re-running the slow speed-limit stage.
+
 ## v1.20.128 — smaller fuel icons, lighter EV badge
 - Petrol-station icons reduced ~10% (iconSize 1.3 -> 1.17). Brand logos fill more
   of their bitmap than a glyph does, so at the same nominal size they looked

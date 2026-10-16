@@ -71,6 +71,23 @@ what's already shipping and fixing only what testing reveals.
   which needs bbox added to the pipeline (cheap — the base converter already
   computes it). Awaiting confirmation before building.
 
+## KNOWN LIMITATION — camera direction on maps older than schema 6 (v1.20.129)
+
+Speed-camera approach warnings are restricted to cameras that measure the
+driver's own direction of travel. That decision needs `speed_camera.trafficDeg`,
+added in map schema 6. On a schema 5 map the app falls back to the raw OSM
+facing tag, which can only rule out a camera watching a crossing road — a camera
+on the opposite carriageway will still be announced. Rebuild/upgrade the maps
+(`build_europe.py --force --skip-base`) to get the full behaviour.
+
+Even on schema 6, `trafficDeg` is NULL where the data cannot settle it: a camera
+mapped off the road network, `direction=both`, or a two-way road carrying only a
+compass facing. Those cameras are warned about regardless — deliberately, since a
+missed warning is worse than a surplus one. Expect a minority of cameras per
+region to resolve (the build prints the count, and meta carries
+`speed_camera_directed`); it is highest on motorways, where the one-way
+carriageway tagging the resolution relies on is the norm.
+
 ## DEFERRED — separate projects, NOT "close now" items
 
 - **AGP 9 migration.** Still on the 8.x line (compileSdk 36 works under AGP

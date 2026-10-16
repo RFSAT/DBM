@@ -33,6 +33,9 @@ Usage:
 
 Requires (all in the same folder as this script, i.e. the map folder):
   - add_parking.py            (imported; adds parking + speed cameras)
+  - add_pois.py               (imported; adds fuel/charging/hospital/rest area —
+                               optional stage 3; skipped if already present or
+                               with --skip-pois; absence does not fail the build)
   - osm_to_speedlimitdb.py    (run as the base speed-limit stage)
   - pyosmium                  (pip install osmium)
 """
@@ -159,14 +162,104 @@ def load_state(d):
     p = os.path.join(d, STATE_FILE)
     if os.path.exists(p):
         try:
-            return json.load(open(p))
+            return json.load(open(p, encoding="utf-8"))
         except Exception:
             return {}
-    return {}
+    # No build state (fresh folder, or it was reset/lost). Seed each region's
+    # version + sha from a previously PUBLISHED index.json in the same folder, so
+    # a rebuild continues the version sequence instead of resetting everyone to 1
+    # — otherwise phones holding the old v1 never see the new maps as an update.
+    return _seed_state_from_index(d)
+
+
+def _seed_state_from_index(d):
+    idx = os.path.join(d, "index.json")
+    if not os.path.exists(idx):
+        return {}
+    try:
+        cat = json.load(open(idx, encoding="utf-8"))
+    except Exception:
+        return {}
+    seeded = {}
+    for r in cat.get("regions", []):
+        rid = r.get("id")
+        if not rid:
+            continue
+        # Carry forward version + sha only. src_sig is deliberately omitted so the
+        # region is treated as "needs rebuild" (the .db content is about to change);
+        # _record_result then bumps the version because the new sha won't match.
+        seeded[rid] = {
+            "name": r.get("name"),
+            "parent": r.get("parent"),
+            "db_sha256": r.get("sha256", ""),
+            "version": int(r.get("version", 0) or 0),
+        }
+    if seeded:
+        print(f"note: no {STATE_FILE} found — seeded versions for "
+              f"{len(seeded)} region(s) from the existing index.json so rebuilt "
+              f"maps get a higher version.", flush=True)
+    return seeded
 
 
 def save_state(d, state):
     json.dump(state, open(os.path.join(d, STATE_FILE), "w"), indent=2)
+
+
+# Cache of the PUBLISHED index.json (the version phones currently hold), read once
+# and used to anchor new versions so a rebuild is always seen as an update.
+_PUBLISHED = None
+
+
+def _published_index(d):
+    """{rid: {version, dataDate, sha256}} from the index.json in the build folder
+    — treated as the currently-published catalogue. Read once and cached."""
+    global _PUBLISHED
+    if _PUBLISHED is not None:
+        return _PUBLISHED
+    _PUBLISHED = {}
+    idx = os.path.join(d, "index.json")
+    if os.path.exists(idx):
+        try:
+            cat = json.load(open(idx, encoding="utf-8"))
+            for r in cat.get("regions", []):
+                rid = r.get("id")
+                if rid:
+                    _PUBLISHED[rid] = {
+                        "version": int(r.get("version", 0) or 0),
+                        "dataDate": r.get("dataDate", ""),
+                        "sha256": r.get("sha256", ""),
+                    }
+        except Exception:
+            pass
+    return _PUBLISHED
+
+
+def _next_version(d, rid, new_date, new_sha, prev_state_version):
+    """Decide a region's version so updates ALWAYS work, robust to a lost/reset
+    build state (which kept resetting everyone to 1). Rules:
+      - Anchor to the PUBLISHED index.json version (what phones currently have).
+      - If the new data is NEWER (by dataDate) or CHANGED (by sha256), publish a
+        HIGHER number than both the published and the prior state version.
+      - Otherwise keep the published version (no spurious bump).
+      - Never go backwards.
+    A --min-version floor (DBM_MIN_VERSION) can force at least a given number.
+    """
+    pub = _published_index(d).get(rid, {})
+    pub_ver = int(pub.get("version", 0) or 0)
+    pub_date = pub.get("dataDate", "")
+    pub_sha = pub.get("sha256", "")
+    floor = int(os.environ.get("DBM_MIN_VERSION", "0") or "0")
+
+    base = max(pub_ver, int(prev_state_version or 0), floor)
+    changed = (new_sha != pub_sha) or (str(new_date) > str(pub_date))
+    if base == 0:
+        # brand-new region never published before
+        return max(1, floor)
+    if changed:
+        # newer/changed data -> must exceed what's out there so the app updates
+        return base + 1 if (new_sha != pub_sha or str(new_date) > str(pub_date)) \
+            else base
+    return base
 
 
 def write_manifest(d, base_url, state):
@@ -183,7 +276,7 @@ def write_manifest(d, base_url, state):
         db_path = os.path.join(d, f"{rid}.db")
         if not os.path.exists(db_path):
             continue
-        regions.append({
+        entry = {
             "id": rid,
             "name": info.get("name") or EUROPE_REGIONS.get(rid, rid.capitalize()),
             "country": EUROPE_REGIONS.get(info.get("parent") or rid, rid.capitalize()),
@@ -196,7 +289,13 @@ def write_manifest(d, base_url, state):
             "dbSchemaVersion": int(info.get("schema") or 5),
             "counts": info.get("counts", {}),
             "bbox": info.get("bbox", ""),
-        })
+        }
+        # Compression: only advertise it if the .db.gz actually exists on disk, so
+        # the app never tries to fetch a .gz that isn't deployed.
+        if info.get("compressed") and os.path.exists(db_path + ".gz"):
+            entry["compressed"] = True
+            entry["compressedSize"] = info.get("compressed_size", 0)
+        regions.append(entry)
     manifest = {
         "schemaVersion": 1,
         "baseUrl": base_url.rstrip("/"),
@@ -252,6 +351,15 @@ def verify_db(db_path):
         findings["parking_lot"] = count("parking_lot")
         findings["parking_curb"] = count("parking_curb")
         findings["speed_camera"] = count("speed_camera")
+        # optional extra POIs (present only after add_pois has run)
+        findings["fuel"] = count("fuel")
+        findings["charging"] = count("charging")
+        findings["hospital"] = count("hospital")
+        findings["rest_area"] = count("rest_area")
+        findings["level_crossing"] = count("level_crossing")
+        findings["speed_bump"] = count("speed_bump")
+        findings["toll_booth"] = count("toll_booth")
+        findings["border_control"] = count("border_control")
         # sanity: coordinates within plausible European bounds
         bad = None
         try:
@@ -264,14 +372,98 @@ def verify_db(db_path):
     finally:
         con.close()
     # Full-feature DB must have ALL THREE: speed limits (segments), plus the
-    # parking/camera tables present (schema 5). A missing segments table means
-    # the base speed-limit stage didn't run — that's a hard fail.
-    ok = (findings.get("schema_version") == "5"
+    # parking/camera tables present. Schema 5 = roads + parking + cameras; 6 adds
+    # the cameras' resolved travel direction. Both are complete, so either passes.
+    # A missing segments table means the base speed-limit stage didn't run —
+    # that's a hard fail.
+    ok = (str(findings.get("schema_version")) in ("5", "6")
           and findings.get("segments") not in (None, 0)
           and findings.get("speed_camera") is not None
           and findings.get("parking_lot") is not None
           and (findings.get("cameras_out_of_bounds") in (0, None)))
     return ok, findings
+
+
+def _pois_already_done(db_path):
+    """True if this db already has the extra POIs extracted (meta marker set and
+    at least the tables present), so the POI stage can be skipped to avoid a
+    second full PBF scan."""
+    try:
+        con = sqlite3.connect(db_path)
+        try:
+            m = dict(con.execute("SELECT key,value FROM meta").fetchall())
+            if m.get("poi_extracted") != "1":
+                return False
+            # confirm the tables actually exist (guards a stale marker)
+            names = {r[0] for r in con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            return {"fuel", "charging", "hospital", "rest_area"}.issubset(names)
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return False
+
+
+def _run_pois(pbf, db_path, region_name, emit, progress_cb):
+    """Step 3: extract the extra POIs (fuel/charging/hospital/rest area) into the
+    db. Skips the work if this db already has them (avoids a second PBF scan).
+    Best-effort: if the add_pois module or pyosmium is unavailable, it logs and
+    returns without failing the build — base + parking data remain valid."""
+    if os.environ.get("DBM_SKIP_POIS") == "1":
+        print("  [3/3] extra POIs: skipped (--skip-pois)", flush=True)
+        return
+    if _pois_already_done(db_path):
+        emit("pois", "extra POIs already present — skipping")
+        print("  [3/3] extra POIs: already present, skipped", flush=True)
+        return
+    try:
+        import add_pois
+    except ImportError as e:
+        print(f"  [3/3] extra POIs: add_pois not available ({e}) — skipped",
+              flush=True)
+        return
+    emit("pois")
+    print(f"\n  [3/3] extra POIs (fuel/charging/hospital/rest)", flush=True)
+    try:
+        add_pois.run(pbf, db_path,
+                     progress_cb=(lambda ph, ln: emit(ph, ln))
+                     if progress_cb is not None else None)
+    except SystemExit as e:
+        # add_pois.run calls sys.exit on missing pyosmium; downgrade to a warning
+        # so the overall build still completes with base + parking data.
+        print(f"  [3/3] extra POIs skipped: {e}", flush=True)
+
+
+def _run_parking_pois(pbf, db_path, region_name, add_parking, emit, progress_cb):
+    """Steps 2+3 in ONE pass: parking+cameras AND the extra POIs, via
+    add_parking_pois.run(). Falls back to the two separate stages if that module
+    (or pyosmium) is unavailable, so a missing file never breaks the build. POIs
+    are skipped here entirely if --skip-pois was given (then only parking runs)."""
+    skip_pois = os.environ.get("DBM_SKIP_POIS") == "1"
+    if not skip_pois:
+        try:
+            import add_parking_pois
+            print("  [2/2 combined] parking + cameras + POIs (single pass)",
+                  flush=True)
+            emit("parking+pois")
+            add_parking_pois.run(
+                pbf, db_path,
+                progress_cb=(lambda ph, ln: emit(ph, ln))
+                if progress_cb is not None else None)
+            return
+        except ImportError:
+            print("  note: add_parking_pois not available — running the two "
+                  "stages separately", flush=True)
+        except SystemExit as e:
+            print(f"  combined pass unavailable ({e}) — running stages separately",
+                  flush=True)
+    # Fallback (or --skip-pois): the original two-stage flow.
+    emit("parking")
+    print("  [2/3] parking + cameras", flush=True)
+    add_parking.run(pbf, db_path,
+                    progress_cb=(lambda ph, ln: emit(ph, ln))
+                    if progress_cb is not None else None)
+    _run_pois(pbf, db_path, region_name, emit, progress_cb)
 
 
 def process_one(pbf, region_id, region_name, add_parking, skip_base, log_fh=None,
@@ -302,13 +494,14 @@ def process_one(pbf, region_id, region_name, add_parking, skip_base, log_fh=None
 
     if skip_base:
         if not os.path.exists(final_db):
-            sys.exit(f"--skip-base given but {final_db} does not exist. Run the "
-                     f"base speed-limit conversion first, or drop --skip-base.")
-        emit("parking")
-        print(f"\n  [2/2] parking + cameras", flush=True)
-        add_parking.run(pbf, final_db,
-                        progress_cb=(lambda ph, ln: emit(ph, ln))
-                        if progress_cb is not None else None)
+            # Raised, not sys.exit: in a parallel run this is ONE region's
+            # problem, and SystemExit would bypass the worker's error handling
+            # and take the whole sweep down with it.
+            raise RuntimeError(
+                f"--skip-base given but {final_db} does not exist. Run the "
+                f"base speed-limit conversion first, or drop --skip-base.")
+        _run_parking_pois(pbf, final_db, region_name, add_parking, emit,
+                          progress_cb)
         return final_db
 
     if not BASE_CONVERTER:
@@ -351,11 +544,7 @@ def process_one(pbf, region_id, region_name, add_parking, skip_base, log_fh=None
         subprocess.run(cmd, check=True, stdout=log_fh, stderr=subprocess.STDOUT)
     else:
         subprocess.run(cmd, check=True)
-    emit("parking")
-    print(f"\n  [2/2] parking + cameras", flush=True)
-    add_parking.run(pbf, work_db,
-                    progress_cb=(lambda ph, ln: emit(ph, ln))
-                    if progress_cb is not None else None)
+    _run_parking_pois(pbf, work_db, region_name, add_parking, emit, progress_cb)
     # both steps done — atomically promote to the final name
     os.replace(work_db, final_db)     # atomic on the same filesystem
     return final_db
@@ -509,6 +698,19 @@ class _Dashboard:
                 if self._fallback_last.get(rid) != ph and ph:
                     self._fallback_last[rid] = ph
                     print(f"  · {rid:28s} {ph}", flush=True)
+        elif kind in ("done", "error"):
+            # The worker has signalled it finished this region. Free its live slot
+            # NOW (and drop it from the active set) so a queued region can take the
+            # row immediately — don't wait for the future to be reaped, which can
+            # lag the queue message and leave finished regions pinned in the list
+            # (showing e.g. "pois: done") while new ones can't appear. The
+            # authoritative finish() (recording + the permanent ✓/✗ line) still
+            # runs when the future is reaped; it's a no-op on the slot by then.
+            self.active.pop(rid, None)
+            for i in range(len(self.slots)):
+                if self.slots[i] == rid:
+                    self.slots[i] = None
+                    break
 
     def finish(self, rid, res, ok):
         self.active.pop(rid, None)
@@ -520,11 +722,29 @@ class _Dashboard:
         if ok:
             self.done += 1
             f = res.get("findings", {})
-            summary = (f"{_fmt(f.get('segments'))} roads · "
-                       f"{_fmt(f.get('parking_lot'))} parking · "
-                       f"{_fmt(f.get('speed_camera'))} cams · "
-                       f"{res['elapsed']:.0f}s")
-            line = f"  \u2713 {rid:28s} {summary}"
+            # Fixed, aligned columns — every feature type is always in the same
+            # position (zeros shown) so regions line up and are comparable at a
+            # glance. Each is "label=<count>" with a right-padded count.
+            def _n(key):
+                try:
+                    return int(f.get(key) or 0)
+                except (TypeError, ValueError):
+                    return 0
+            cells = [
+                ("roads", _n("segments"), 7),
+                ("park",  _n("parking_lot"), 5),
+                ("cam",   _n("speed_camera"), 4),
+                ("fuel",  _n("fuel"), 4),
+                ("chrg",  _n("charging"), 4),
+                ("hosp",  _n("hospital"), 4),
+                ("rest",  _n("rest_area"), 4),
+                ("xing",  _n("level_crossing"), 5),
+                ("bump",  _n("speed_bump"), 6),
+                ("toll",  _n("toll_booth"), 4),
+                ("bord",  _n("border_control"), 4),
+            ]
+            summary = " ".join(f"{lbl}={v:>{w},}" for lbl, v, w in cells)
+            line = f"  \u2713 {rid:26s} {summary}  {res['elapsed']:.0f}s"
         else:
             self.failed += 1
             line = (f"  \u2717 FAILED {rid:28s} {res.get('error','?')} "
@@ -615,9 +835,11 @@ def _record_result(d, base_url, state, rid, name, parent, sig, res):
     Shared by the sequential and parallel paths so resumability is identical."""
     findings = res["findings"]
     prev = state.get(rid, {})
-    version = prev.get("version", 0)
-    if prev.get("db_sha256") != res["sha"]:
-        version = version + 1 if version else 1
+    # Version anchored to the published index.json + data date, so a rebuild with
+    # newer/changed data always outranks what phones hold (fixes the "stuck at 1"
+    # problem where a reset build state reset every version to 1).
+    version = _next_version(d, rid, res.get("data_date", ""), res["sha"],
+                            prev.get("version", 0))
     state[rid] = {
         "src_sig": sig,
         "name": name,
@@ -629,10 +851,31 @@ def _record_result(d, base_url, state, rid, name, parent, sig, res):
         "schema": findings.get("schema_version"),
         "counts": {k: findings.get(k) for k in
                    ("segments", "with_maxspeed", "parking_lot",
-                    "parking_curb", "speed_camera")},
+                    "parking_curb", "speed_camera",
+                    "fuel", "charging", "hospital", "rest_area",
+                    "level_crossing", "speed_bump", "toll_booth",
+                    "border_control")},
         "bbox": res.get("bbox", ""),
         "processed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
+    # Optional gzip for deployment: produce <rid>.db.gz alongside the .db so the
+    # server can host the compressed form and the app streams+decompresses it.
+    # sha256/sizeBytes in the manifest stay as the DECOMPRESSED values, so the
+    # app verifies the final .db regardless of transport compression.
+    if os.environ.get("DBM_COMPRESS") == "1":
+        db_path = os.path.join(d, f"{rid}.db")
+        gz_path = db_path + ".gz"
+        try:
+            import gzip as _gzip, shutil as _shutil
+            with open(db_path, "rb") as fin, \
+                 _gzip.open(gz_path, "wb", compresslevel=9) as fout:
+                _shutil.copyfileobj(fin, fout, length=1 << 20)
+            state[rid]["compressed"] = True
+            state[rid]["compressed_size"] = os.path.getsize(gz_path)
+        except OSError as e:
+            print(f"  warn: gzip failed for {rid}: {e} — serving uncompressed",
+                  flush=True)
+            state[rid]["compressed"] = False
     save_state(d, state)
     return write_manifest(d, base_url, state)
 
@@ -667,6 +910,23 @@ def main():
     ap.add_argument("--skip-base", action="store_true",
                     help="skip the speed-limit stage; <region>.db must already "
                          "have a segments table (advanced/debug only)")
+    ap.add_argument("--skip-pois", action="store_true",
+                    help="skip the extra-POI stage (fuel/charging/hospital/rest "
+                         "area). The base speed-limit + parking/camera data is "
+                         "still built. Use if pyosmium POI extraction is unwanted.")
+    ap.add_argument("--min-version", type=int, default=0,
+                    help="force every (re)built region to at least this version "
+                         "number. Use once to jump past a manually-corrected "
+                         "index.json version (e.g. --min-version 5 when your maps "
+                         "are currently v4).")
+    ap.add_argument("--no-compress", dest="compress", action="store_false",
+                    help="do NOT gzip the maps. By default each built <region>.db "
+                         "is also written as <region>.db.gz and marked in "
+                         "index.json, so the server hosts the compressed form and "
+                         "the app decompresses on download (~60-70%% smaller; "
+                         "sha256 stays the decompressed value). Pass this to keep "
+                         "plain uncompressed .db only (e.g. for local testing).")
+    ap.set_defaults(compress=True)
     ap.add_argument("--jobs", "-j", type=int, default=max(1, (os.cpu_count() or 2) - 1),
                     help="process this many regions in parallel (default: CPU "
                          "cores - 1). 1 = sequential with full per-region console "
@@ -679,6 +939,18 @@ def main():
                          "your terminal can't repaint cleanly. (The dashboard also "
                          "auto-disables when output is redirected to a file.)")
     a = ap.parse_args()
+
+    # Propagate --skip-pois via env so parallel worker processes (spawned) inherit
+    # it; _run_pois reads DBM_SKIP_POIS.
+    if a.skip_pois:
+        os.environ["DBM_SKIP_POIS"] = "1"
+    # Compression is on by default (--no-compress opts out).
+    if a.compress:
+        os.environ["DBM_COMPRESS"] = "1"
+    else:
+        os.environ.pop("DBM_COMPRESS", None)
+    if a.min_version and a.min_version > 0:
+        os.environ["DBM_MIN_VERSION"] = str(a.min_version)
 
     d = os.path.abspath(a.dir)
     sys.path.insert(0, d)
@@ -845,6 +1117,7 @@ def main():
     # Build the work list: regions that actually need (re)building, after the
     # up-to-date skip. Each entry carries everything a worker needs.
     todo = []
+    poi_topup = []      # up-to-date regions that only need the POI stage added
     for rid in sorted(candidates):
         info = candidates[rid]
         pbf = info["pbf"]
@@ -853,10 +1126,76 @@ def main():
         prev = state.get(rid, {})
         if not a.force and prev.get("src_sig") == sig and os.path.exists(f"{rid}.db"):
             label = f"{name} ({rid})"
-            print(f"  {label:<40s}  up-to-date, skipping (source unchanged)")
-            skipped_uptodate.append(rid)
+            # Source unchanged AND base/parking already built. But if this db was
+            # built before POI extraction existed, it still lacks the extra POIs —
+            # add just those (a quick top-up) rather than a full rebuild or an
+            # outright skip. If it already has POIs, it's genuinely up to date.
+            if not _pois_already_done(f"{rid}.db"):
+                print(f"  {label:<40s}  up-to-date; adding missing POIs")
+                poi_topup.append((rid, info, pbf, name))
+            else:
+                print(f"  {label:<40s}  up-to-date, skipping (source unchanged)")
+                skipped_uptodate.append(rid)
             continue
         todo.append((rid, info, pbf, name, sig))
+
+    # Process SMALLEST maps first (biggest last), by source .pbf size. With many
+    # parallel workers this lets the large majority of regions finish quickly and
+    # leaves only the few giants (Germany, France, Italy...) running at the end —
+    # so the completed-map count climbs fast instead of stalling on a giant early.
+    def _pbf_size(entry):
+        try:
+            return os.path.getsize(entry[2])   # entry = (rid, info, pbf, name, sig)
+        except OSError:
+            return 0
+    todo.sort(key=_pbf_size)
+
+    # Run the POI top-ups (in-process, sequential — each is just a PBF POI scan on
+    # an existing db, no base/parking rework). After each, RE-RECORD the region so
+    # its new size/sha/version and the refreshed manifest are written — otherwise
+    # the .db grows but index.json / .build_state.json never change.
+    if poi_topup and not getattr(a, "skip_pois", False):
+        poi_topup.sort(key=lambda e: (os.path.getsize(e[2])
+                                      if os.path.exists(e[2]) else 0))
+        print(f"\nAdding POIs to {len(poi_topup)} up-to-date region(s):", flush=True)
+        for idx_tu, (rid, info, pbf, name) in enumerate(poi_topup, 1):
+            print(f"\n  [{idx_tu}/{len(poi_topup)}] POI scan: {name} ({rid})",
+                  flush=True)
+            db_path = f"{rid}.db"
+            # live single-line progress, repainted in place as the PBF is scanned.
+            # _t0 is bound as a default arg so each region's timer is independent
+            # (a plain closure would share the loop's last _t0).
+            _t0 = time.time()
+
+            def _poi_progress(phase, line="", _t0=_t0):
+                el = int(time.time() - _t0)
+                msg = (line or phase).strip()
+                sys.stdout.write(f"\r      {el:4d}s  {msg[:90]:<90s}")
+                sys.stdout.flush()
+
+            try:
+                _run_pois(pbf, db_path, name, _poi_progress, _poi_progress)
+                sys.stdout.write("\n")   # finish the in-place line
+            except Exception as e:
+                sys.stdout.write("\n")
+                print(f"  POI top-up FAILED for {rid}: {e}", flush=True)
+                failed.append(rid)
+                continue
+            # Re-verify + re-hash and re-record so state + index.json reflect the
+            # now-larger db (and bump its version so the app re-downloads it).
+            ok, findings = verify_db(db_path)
+            res = {
+                "findings": findings, "sha": sha256_of(db_path),
+                "size": os.path.getsize(db_path), "data_date": pbf_date(pbf),
+                "bbox": db_meta(db_path).get("bbox", ""),
+            }
+            sig = src_signature(pbf)
+            n_listed = _record_result(d, a.base_url, state, rid, name,
+                                      info["parent"], sig, res)
+            print(f"    recorded: v{state[rid]['version']}, "
+                  f"{res['size']/1e6:.1f} MB; index.json now {n_listed} region(s)",
+                  flush=True)
+            processed.append(rid)
 
     jobs = max(1, a.jobs)
     if jobs > 1 and len(todo) > 1:
@@ -1014,6 +1353,46 @@ def main():
     if not (added_ids or removed_ids or reprocessed):
         print("  none")
 
+    # With --compress, guarantee EVERY deployed map is gzipped — including regions
+    # that were skipped as up-to-date this run (they weren't rebuilt, so their
+    # .gz might be missing or stale). This makes "build_europe --compress" a
+    # one-command produce-compressed-maps step (no separate pack step needed).
+    if os.environ.get("DBM_COMPRESS") == "1":
+        import gzip as _gzip, shutil as _shutil
+        swept = 0
+        for rid in list(state.keys()):
+            db_path = os.path.join(d, f"{rid}.db")
+            if not os.path.exists(db_path):
+                continue
+            gz_path = db_path + ".gz"
+            fresh = (os.path.exists(gz_path) and
+                     os.path.getmtime(gz_path) >= os.path.getmtime(db_path))
+            if fresh:
+                # make sure state/manifest still reflect it
+                if not state[rid].get("compressed"):
+                    state[rid]["compressed"] = True
+                    state[rid]["compressed_size"] = os.path.getsize(gz_path)
+                    swept += 1
+                continue
+            try:
+                tmp = gz_path + ".part"
+                with open(db_path, "rb") as fin, \
+                     _gzip.open(tmp, "wb", compresslevel=9) as fout:
+                    _shutil.copyfileobj(fin, fout, length=1 << 20)
+                if os.path.exists(gz_path):
+                    os.remove(gz_path)
+                os.replace(tmp, gz_path)
+                state[rid]["compressed"] = True
+                state[rid]["compressed_size"] = os.path.getsize(gz_path)
+                swept += 1
+            except OSError as e:
+                print(f"  warn: compress-sweep failed for {rid}: {e}", flush=True)
+        if swept:
+            save_state(d, state)
+            write_manifest(d, a.base_url, state)
+            print(f"\ncompress-sweep: ensured .db.gz for {swept} region(s) "
+                  f"(incl. up-to-date ones); index.json refreshed.")
+
     print(f"\nRun outcome:")
     print(f"  processed now   : {len(processed)}")
     print(f"  up-to-date skip : {len(skipped_uptodate)}")
@@ -1021,34 +1400,59 @@ def main():
 
     # Full per-region table + feature totals across everything in the manifest.
     print(f"\nAll regions in index.json ({regions_listed}):")
-    print(f"  {'region':28s} {'roads':>9s} {'w/lim':>8s} {'parking':>8s} "
-          f"{'curb':>6s} {'cams':>6s} {'MB':>7s}")
-    tot = {"segments": 0, "with_maxspeed": 0, "parking_lot": 0,
-           "parking_curb": 0, "speed_camera": 0, "bytes": 0}
+    # Full per-region breakdown: roads/parking + every POI type, one aligned row
+    # per map, so the completion report shows exactly what was extracted for each.
+    # Each column has its own width (roads/segments can reach millions) and a
+    # leading space, so values never run together.
+    cols = [("roads", "segments", 10), ("w/lim", "with_maxspeed", 10),
+            ("park", "parking_lot", 8), ("curb", "parking_curb", 7),
+            ("cams", "speed_camera", 6), ("fuel", "fuel", 7),
+            ("chrg", "charging", 7), ("hosp", "hospital", 6),
+            ("rest", "rest_area", 6), ("xing", "level_crossing", 7),
+            ("bump", "speed_bump", 8), ("toll", "toll_booth", 6),
+            ("bord", "border_control", 6)]
+    hdr = f"  {'region':24s}" + "".join(f" {h:>{w}s}" for h, _, w in cols) + \
+          f" {'MB':>8s}"
+    print(hdr)
+    print("  " + "-" * (len(hdr) - 2))
+    tot = {key: 0 for _, key, _ in cols}
+    tot["bytes"] = 0
+
     def _i(v):
         try: return int(v)
         except (TypeError, ValueError): return 0
+
     for rid in sorted(state.keys()):
         if not os.path.exists(os.path.join(d, f"{rid}.db")):
             continue
         info = state[rid]
         c = info.get("counts", {})
-        seg = _i(c.get("segments")); wl = _i(c.get("with_maxspeed"))
-        pl = _i(c.get("parking_lot")); pc = _i(c.get("parking_curb"))
-        cam = _i(c.get("speed_camera")); mb = info.get("db_size", 0) / 1e6
-        tot["segments"] += seg; tot["with_maxspeed"] += wl
-        tot["parking_lot"] += pl; tot["parking_curb"] += pc
-        tot["speed_camera"] += cam; tot["bytes"] += info.get("db_size", 0)
-        print(f"  {info.get('name', rid)[:28]:28s} {seg:>9,} {wl:>8,} "
-              f"{pl:>8,} {pc:>6,} {cam:>6,} {mb:>7.1f}")
-    print(f"  {'-'*28} {'-'*9} {'-'*8} {'-'*8} {'-'*6} {'-'*6} {'-'*7}")
-    print(f"  {'TOTAL':28s} {tot['segments']:>9,} {tot['with_maxspeed']:>8,} "
-          f"{tot['parking_lot']:>8,} {tot['parking_curb']:>6,} "
-          f"{tot['speed_camera']:>6,} {tot['bytes']/1e6:>7.1f}")
+        vals = [(key, w, _i(c.get(key))) for _, key, w in cols]
+        for key, _w, v in vals:
+            tot[key] += v
+        tot["bytes"] += info.get("db_size", 0)
+        mb = info.get("db_size", 0) / 1e6
+        row = f"  {info.get('name', rid)[:24]:24s}" + \
+              "".join(f" {v:>{w},}" for _key, w, v in vals) + f" {mb:>8.1f}"
+        print(row)
+
+    print("  " + "-" * (len(hdr) - 2))
+    trow = f"  {'TOTAL':24s}" + \
+           "".join(f" {tot[key]:>{w},}" for _, key, w in cols) + \
+           f" {tot['bytes']/1e6:>8.1f}"
+    print(trow)
 
     print(f"\nUpload every changed .db AND index.json to {a.base_url}")
     print("(data files FIRST, index.json LAST — see SERVER-DEPLOYMENT.md)")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        # Gentle stop on Ctrl+C — no traceback. Regions already finished are
+        # recorded in index.json/.build_state.json; any in-progress .db.part is
+        # cleaned on the next run. Just re-run the same command to continue.
+        print("\nInterrupted by user (Ctrl+C) — stopped. Finished regions are "
+              "saved; re-run the same command to continue.", file=sys.stderr)
+        sys.exit(130)

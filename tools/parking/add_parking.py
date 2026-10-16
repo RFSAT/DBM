@@ -30,12 +30,16 @@ Requires: pyosmium  (pip install osmium)
 """
 
 import argparse
+import math
 import os
 import sqlite3
 import struct
 import sys
 
-SCHEMA_VERSION = 5          # v4 parking; v5 adds speed_camera
+SCHEMA_VERSION = 6          # v4 parking; v5 adds speed_camera;
+                            # v6 adds resolved camera direction (wayDeg/oneway/
+                            # trafficDeg) so the app can warn only about cameras
+                            # facing the driver's own direction of travel.
 COORD_SCALE = 1e7
 
 # --- tag interpretation -----------------------------------------------------
@@ -99,6 +103,11 @@ def lot_tags(tags):
         "capacity": cap,
         "maxstay":  tags.get("maxstay"),
         "hours":    tags.get("opening_hours"),
+        # "charge" carries the actual tariff string when a mapper recorded one
+        # (e.g. "EUR 2.00/hour"); fee:conditional carries time-based variants.
+        # Sparsely mapped in OSM, but real pricing where present.
+        "charge":   tags.get("charge"),
+        "fee_cond": tags.get("fee:conditional"),
     }
 
 
@@ -123,6 +132,170 @@ def camera_tags(tags):
         "direction": tags.get("direction"),
         "kind": tags.get("enforcement"),
     }
+
+
+# --- camera direction resolution --------------------------------------------
+# A camera only measures traffic travelling one way along the road (except where
+# tagged direction=both). To warn ONLY about cameras pointed at the driver's own
+# carriageway, the app needs the bearing of the MONITORED TRAFFIC — which the raw
+# `direction` tag does not reliably give:
+#
+#   * direction=forward|backward is relative to how the parent way was drawn, so
+#     it is meaningless without that way.
+#   * a compass direction=<deg|cardinal> on a camera node is, per the OSM wiki,
+#     "the way the camera faces" — which is parallel to the road but may point
+#     WITH the monitored traffic (rear-facing housings, common in the UK) or
+#     AGAINST it (front-plate housings, common on the continent). Facing alone
+#     therefore cannot tell the two carriageways apart.
+#
+# What IS unambiguous is the parent way: if the camera sits on a ONE-WAY way
+# (each carriageway of a dual carriageway is its own one-way way), the traffic it
+# sees can only be going that way. So this stage resolves, per camera:
+#
+#   wayDeg     bearing of the parent highway at the camera, as drawn
+#   oneway     'yes' | '-1' | 'no' for that way
+#   trafficDeg bearing of the monitored traffic, or NULL when undeterminable
+#
+# trafficDeg = NULL means "cannot tell", and the app MUST still warn (fail open):
+# suppressing a warning on a guess would be a safety regression.
+
+CARDINAL_DEG = {
+    "n": 0.0, "nne": 22.5, "ne": 45.0, "ene": 67.5,
+    "e": 90.0, "ese": 112.5, "se": 135.0, "sse": 157.5,
+    "s": 180.0, "ssw": 202.5, "sw": 225.0, "wsw": 247.5,
+    "w": 270.0, "wnw": 292.5, "nw": 315.0, "nnw": 337.5,
+    "north": 0.0, "northeast": 45.0, "east": 90.0, "southeast": 135.0,
+    "south": 180.0, "southwest": 225.0, "west": 270.0, "northwest": 315.0,
+}
+
+
+def parse_compass(value):
+    """Parse an OSM direction value as a compass bearing (deg, 0=N), or None.
+
+    Accepts a number ("270", "270.5") or a cardinal/intercardinal name ("SW").
+    Returns None for forward/backward/both and anything unparseable.
+    """
+    if value is None:
+        return None
+    s = str(value).strip().lower()
+    if not s:
+        return None
+    if s in CARDINAL_DEG:
+        return CARDINAL_DEG[s]
+    try:
+        return float(s) % 360.0
+    except ValueError:
+        return None
+
+
+def oneway_value(tags):
+    """'yes' (traffic runs along the way as drawn), '-1' (against), or 'no'.
+
+    Also applies the two implicit cases OSM treats as one-way without the tag:
+    roundabouts and `highway=motorway` (both documented as implying oneway=yes).
+    Everything else without an explicit tag is reported as 'no' — guessing here
+    would cost a real warning.
+    """
+    ow = str(tags.get("oneway", "")).strip().lower()
+    if ow in ("yes", "true", "1"):
+        return "yes"
+    if ow in ("-1", "reverse", "backward"):
+        return "-1"
+    if ow in ("no", "false", "0"):
+        return "no"
+    if str(tags.get("junction", "")).strip().lower() in ("roundabout", "circular"):
+        return "yes"
+    if str(tags.get("highway", "")).strip().lower() == "motorway":
+        return "yes"
+    return "no"
+
+
+def bearing_deg(lat1, lon1, lat2, lon2):
+    """Initial compass bearing (deg, 0=N, clockwise) from point 1 to point 2."""
+    dlon = math.radians(lon2 - lon1)
+    la1 = math.radians(lat1)
+    la2 = math.radians(lat2)
+    y = math.sin(dlon) * math.cos(la2)
+    x = math.cos(la1) * math.sin(la2) - math.sin(la1) * math.cos(la2) * math.cos(dlon)
+    return (math.degrees(math.atan2(y, x)) + 360.0) % 360.0
+
+
+def resolve_traffic_deg(direction, way_deg, oneway):
+    """Bearing of the traffic a camera monitors, or None when undeterminable.
+
+    None is the honest answer in two common cases — a camera not on any way, and
+    a camera on a two-way road with only a compass `direction` (facing cannot be
+    mapped to a carriageway) — and the app treats None as "warn anyway".
+    """
+    if way_deg is None:
+        return None
+    d = str(direction).strip().lower() if direction else ""
+    if d == "forward":
+        return way_deg % 360.0
+    if d == "backward":
+        return (way_deg + 180.0) % 360.0
+    if d == "both":
+        return None                       # monitors both directions: always warn
+    if oneway == "yes":
+        return way_deg % 360.0            # one-way carriageway: unambiguous
+    if oneway == "-1":
+        return (way_deg + 180.0) % 360.0
+    return None
+
+
+def scan_way_for_cameras(w, tags, cam_ids, cam_way):
+    """Record each speed-camera node's parent-way bearing and oneway status.
+
+    Called from the way phase (nodes always precede ways in a .pbf, so cam_ids is
+    complete by then). Deliberately cheap: a set lookup per node ref and, only on
+    a hit, two coordinate reads — no geometry list is built, because doing that
+    for every highway way is what made dense extracts crawl.
+
+    An entry already resolved from a one-way parent is not overwritten by a
+    later two-way parent, so the most informative parent wins.
+    """
+    if not cam_ids or "highway" not in tags:
+        return
+    nodes = w.nodes
+    n = len(nodes)
+    if n < 2:
+        return
+    ow = oneway_value(tags)
+    for i in range(n):
+        ref = nodes[i].ref
+        if ref not in cam_ids:
+            continue
+        prev = cam_way.get(ref)
+        if prev is not None and prev[1] in ("yes", "-1"):
+            continue
+        j = i - 1 if i > 0 else i
+        k = i + 1 if i < n - 1 else i
+        if j == k:
+            continue
+        a, b = nodes[j], nodes[k]
+        try:
+            if not (a.location.valid() and b.location.valid()):
+                continue
+            cam_way[ref] = (bearing_deg(a.lat, a.lon, b.lat, b.lon), ow)
+        except Exception:
+            continue
+
+
+def camera_rows_resolved(cam_rows, cam_way):
+    """Append (wayDeg, oneway, trafficDeg) to each 10-column camera row.
+
+    Returns (rows13, resolved_count) — the count is how many cameras ended up
+    with a usable monitored-traffic bearing, which is worth printing.
+    """
+    out = []
+    resolved = 0
+    for r in cam_rows:
+        way_deg, ow = cam_way.get(r[0], (None, None))
+        td = resolve_traffic_deg(r[4], way_deg, ow)
+        if td is not None:
+            resolved += 1
+        out.append(tuple(r) + (way_deg, ow, td))
+    return out, resolved
 
 
 def pack_coords(coords):
@@ -176,6 +349,8 @@ CREATE TABLE parking_lot(
   capacity INTEGER,
   maxstay  TEXT,
   hours    TEXT,          -- opening_hours syntax
+  charge   TEXT,          -- tariff string when mapped (e.g. "EUR 2.00/hour")
+  fee_cond TEXT,          -- fee:conditional (time-based variants)
   lat REAL, lon REAL,     -- representative point, for distance ranking
   minLat REAL, maxLat REAL, minLon REAL, maxLon REAL
 );
@@ -189,7 +364,11 @@ CREATE TABLE speed_camera(
   maxspeed  INTEGER,     -- enforced limit if tagged, else NULL
   direction TEXT,        -- forward | backward | both | compass, if tagged
   kind      TEXT,        -- enforcement type if tagged on the node (maxspeed/average_speed)
-  minLat REAL, maxLat REAL, minLon REAL, maxLon REAL
+  minLat REAL, maxLat REAL, minLon REAL, maxLon REAL,
+  -- v6: resolved direction (see "camera direction resolution" above)
+  wayDeg     REAL,       -- bearing of the parent highway at the camera, as drawn
+  oneway     TEXT,       -- 'yes' | '-1' | 'no' for that way; NULL if not on one
+  trafficDeg REAL        -- bearing of the MONITORED traffic; NULL = cannot tell
 );
 CREATE INDEX idx_cam_bbox ON speed_camera(minLat, maxLat);
 """
@@ -315,6 +494,10 @@ def run(pbf, db_path, progress_cb=None):
             self.curb_rows = []
             self.lot_rows = []
             self.cam_rows = []
+            # camera node ids, and id -> (parent way bearing, oneway), filled in
+            # the way phase so each camera's monitored direction can be resolved.
+            self.cam_ids = set()
+            self.cam_way = {}
 
         def _lot(self, o, coords):
             info = lot_tags(dict(o.tags))
@@ -324,6 +507,7 @@ def run(pbf, db_path, progress_cb=None):
             self.lot_rows.append((
                 o.id, info["name"], info["kind"], info["access"], info["fee"],
                 info["capacity"], info["maxstay"], info["hours"],
+                info["charge"], info["fee_cond"],
                 sum(c[0] for c in coords) / len(coords),
                 sum(c[1] for c in coords) / len(coords),
                 mnla, mxla, mnlo, mxlo))
@@ -343,6 +527,7 @@ def run(pbf, db_path, progress_cb=None):
                 self.cam_rows.append((
                     n.id, lat, lon, cam["maxspeed"], cam["direction"], cam["kind"],
                     lat - m, lat + m, lon - m, lon + m))
+                self.cam_ids.add(n.id)
                 stats["cam"] += 1
 
         def way(self, w):
@@ -356,6 +541,10 @@ def run(pbf, db_path, progress_cb=None):
             if len(coords) < 2:
                 return
             tags = dict(w.tags)
+
+            # Resolve the carriageway direction of any camera sitting on this way
+            # (cheap; skipped entirely for non-highway ways).
+            scan_way_for_cameras(w, tags, self.cam_ids, self.cam_way)
 
             self._lot(w, coords)
 
@@ -384,19 +573,22 @@ def run(pbf, db_path, progress_cb=None):
     con.executemany(
         "INSERT INTO parking_curb VALUES(" + ",".join("?" * 17) + ")", h.curb_rows)
     con.executemany(
-        "INSERT INTO parking_lot VALUES(" + ",".join("?" * 14) + ")", h.lot_rows)
+        "INSERT INTO parking_lot VALUES(" + ",".join("?" * 16) + ")", h.lot_rows)
+    cam_rows13, cam_resolved = camera_rows_resolved(h.cam_rows, h.cam_way)
     con.executemany(
-        "INSERT INTO speed_camera VALUES(" + ",".join("?" * 10) + ")", h.cam_rows)
+        "INSERT INTO speed_camera VALUES(" + ",".join("?" * 13) + ")", cam_rows13)
     set_meta(con, "parking_curb_rows", stats["curb"])
     set_meta(con, "parking_lot_rows", stats["lot"])
     set_meta(con, "speed_camera_rows", stats["cam"])
+    set_meta(con, "speed_camera_directed", cam_resolved)
     set_meta(con, "schema_version", SCHEMA_VERSION)
     con.commit()
     print("Database written.\n", flush=True)
 
     print(f"parking_lot  : {stats['lot']:>7} features")
     print(f"parking_curb : {stats['curb']:>7} side-records")
-    print(f"speed_camera : {stats['cam']:>7} cameras")
+    print(f"speed_camera : {stats['cam']:>7} cameras "
+          f"({cam_resolved} with a resolved travel direction)")
     if stats["curb"] == 0:
         print("\nNo curbside restriction data in this region. That is common —")
         print("the app must present this as 'no data', never as 'no restrictions'.")
@@ -413,4 +605,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        # Gentle stop on Ctrl+C: no traceback. Any partial DB is left for
+        # build_europe to clean/redo; a standalone run just exits.
+        import sys as _sys
+        print("\nInterrupted by user (Ctrl+C) — stopped.", file=_sys.stderr)
+        _sys.exit(130)

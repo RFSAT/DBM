@@ -35,6 +35,16 @@ class SpeedMonitor(context: Context) {
     /** Course over ground in degrees (0=N, 90=E), updated when moving. */
     val heading: StateFlow<Float> = _heading
 
+    // Written on the location callback thread, read from the monitoring loop.
+    @Volatile private var headingAtMs = 0L
+
+    /** True while [heading] holds a recent GNSS course. It defaults to 0 (north)
+     *  and is only refreshed while moving, so anything that steers on direction
+     *  of travel — the speed-camera and hazard approach warnings — must check
+     *  this before trusting it. */
+    val headingFresh: Boolean
+        get() = headingAtMs != 0L && System.currentTimeMillis() - headingAtMs < HEADING_STALE_MS
+
     /** When true, each GNSS fix is written to the diagnostic log as a
      *  machine-parseable line. Off by default (it records a precise location
      *  trace — personal data — so it is opt-in for development use). */
@@ -61,6 +71,7 @@ class SpeedMonitor(context: Context) {
                 // since bearing is noisy at a standstill.
                 if (it.hasBearing() && it.hasSpeed() && it.speed > 1.0f) {
                     _heading.value = it.bearing
+                    headingAtMs = System.currentTimeMillis()
                 }
                 if (logTrace) {
                     val spd = if (it.hasSpeed()) (it.speed * 3.6f).toInt() else -1
@@ -86,6 +97,8 @@ class SpeedMonitor(context: Context) {
 
     companion object {
         const val STALE_MS = 4000L
+        /** A GNSS course older than this is no longer taken as our heading. */
+        const val HEADING_STALE_MS = 4000L
         private const val TAG = "SpeedMonitor"
     }
 }

@@ -43,7 +43,9 @@ import os
 import sqlite3
 import sys
 
-FINAL_SCHEMA = 5
+FINAL_SCHEMA = 6          # 5 = roads+parking+cameras; 6 adds the cameras'
+                          # resolved travel direction
+ACCEPTED_SCHEMAS = ("5", "6")
 REQUIRED_TABLES = ("meta", "segments", "parking_lot", "parking_curb",
                    "speed_camera")
 # Rough Europe bounds (with margin for overseas territories the data may include,
@@ -141,10 +143,15 @@ def check_db_internal(rid, db_path, f):
         sv = meta_get(con, "schema_version")
         if sv is None:
             f.warn(rid, "meta.schema_version missing")
-        elif str(sv) != str(FINAL_SCHEMA):
-            f.error(rid, f"schema_version={sv}, expected {FINAL_SCHEMA} "
+        elif str(sv) not in ACCEPTED_SCHEMAS:
+            f.error(rid, f"schema_version={sv}, expected one of "
+                         f"{'/'.join(ACCEPTED_SCHEMAS)} "
                          f"(a value of 3 means only speed limits were written — "
                          f"parking/cameras stage did not complete)")
+        elif str(sv) != str(FINAL_SCHEMA):
+            f.warn(rid, f"schema_version={sv}: usable, but rebuilt maps carry "
+                        f"{FINAL_SCHEMA} (cameras get a resolved travel "
+                        f"direction, so warnings can skip the other carriageway)")
 
         counts = {t: count(con, t) for t in REQUIRED_TABLES if table_exists(con, t)}
         segs = counts.get("segments", 0)

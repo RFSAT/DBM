@@ -1392,6 +1392,11 @@ class MainActivity : ComponentActivity() {
                 "Data comes from OpenStreetMap and may be incomplete or outdated.",
                 color = EnactWarning, fontSize = 10.sp,
                 modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
+            Text("All cameras in the area are shown on the map. Warnings are " +
+                "given only for cameras measuring your own direction of travel, " +
+                "where the map data records it.",
+                color = EnactOnSurfaceDim, fontSize = 10.sp,
+                modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
             CameraDistanceControl()
         }
     }

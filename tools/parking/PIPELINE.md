@@ -2,20 +2,45 @@
 
 Every final `<region>.db` contains ALL THREE feature sets:
   * speed limits   (segments table)      — osm_to_speedlimitdb.py  (schema 3)
-  * parking        (parking_lot/_curb)   — add_parking.py          (-> schema 5)
-  * speed cameras  (speed_camera)        — add_parking.py          (-> schema 5)
+  * parking        (parking_lot/_curb)   — add_parking.py          (-> schema 6)
+  * speed cameras  (speed_camera)        — add_parking.py          (-> schema 6)
 
 ## The two stages compose (order matters)
 
 1. `osm_to_speedlimitdb.py` creates the DB fresh: `segments` + `meta`, schema 3.
    It DROPs/creates its tables, so it MUST run first.
 2. `add_parking.py` opens that DB, ADDs parking_lot/parking_curb/speed_camera,
-   and upserts schema_version -> 5. It never touches `segments`, so speed limits
+   and upserts schema_version -> 6. It never touches `segments`, so speed limits
    are preserved.
 
 Both pack coordinates identically (little-endian int32 x 1e7), matching the
 app's unpackCoords. Verified: running them in this order yields one DB with all
-three feature sets and schema 5.
+three feature sets and schema 6.
+
+## Schema 6 — camera direction (what changed, and the upgrade path)
+
+Schema 6 adds three columns to `speed_camera`: `wayDeg`, `oneway` and
+`trafficDeg`. The last one is the bearing of the traffic a camera actually
+measures, resolved during extraction from the camera's parent way (direction=
+forward/backward against the way as drawn, or the travel direction of a one-way
+carriageway). The app uses it to warn ONLY about cameras facing the driver's own
+direction, so the camera on the far carriageway stays silent — while every
+camera still appears on the map.
+
+`trafficDeg` is NULL whenever it cannot be determined honestly (camera not on a
+way; direction=both; a two-way road carrying only a compass facing, which cannot
+tell the carriageways apart). The app treats NULL as "warn anyway": going quiet
+on a guess would be the dangerous failure.
+
+Schema 5 maps keep working — the app probes for the column and falls back to the
+raw facing tag. To upgrade existing maps WITHOUT re-running the slow speed-limit
+stage:
+
+    python build_europe.py --dir . --base-url <url> --force --skip-base
+
+That re-runs only the one-pass parking+cameras+POIs stage per region (one PBF
+read each, no node-location index rebuild for speed limits), rewrites the camera
+table with the new columns, and republishes index.json with bumped versions.
 
 ## One command for all of Europe
 

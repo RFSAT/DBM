@@ -579,6 +579,9 @@ private fun updateData(
             FeatureCollection.fromFeatures(mapData.parking.map {
                 Feature.fromGeometry(Point.fromLngLat(it.lon, it.lat)) })
         else empty)
+    // EVERY camera in view is drawn, whichever direction it measures — the
+    // direction filter belongs to the approach warning (CameraMonitor), not to
+    // the map, where seeing the cameras on both carriageways is the point.
     style.getSourceAs<GeoJsonSource>(CAM_SRC)?.setGeoJson(
         if (PoiType.SPEED_CAMERAS in en && mapData != null)
             FeatureCollection.fromFeatures(mapData.cameras.map {
