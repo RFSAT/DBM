@@ -47,6 +47,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.text.style.TextAlign
+import com.rfsat.dms.detect.FollowingDistanceMonitor
 import com.rfsat.dms.detect.SignDetector
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -1264,7 +1265,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             CollapsibleSection("Following distance") {
-                StoppingDistanceSlider()
+                FollowingGapControl()
                 CacheEvictionSlider()
                 MirrorIntervalSliders()
                 LaneCalibrationSliders()
@@ -2349,25 +2350,109 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** How close is "too close": the criterion for the required following gap,
+     *  plus its parameter. Time gap is the default (the two-second rule); fixed
+     *  distance and the older stopping-distance basis remain available. */
     @Composable
-    private fun StoppingDistanceSlider() {
+    private fun FollowingGapControl() {
         val prefs = remember { getSharedPreferences("dbm", MODE_PRIVATE) }
+        val modes = FollowingDistanceMonitor.GapMode.entries
+        var mode by remember {
+            mutableStateOf(
+                runCatching {
+                    FollowingDistanceMonitor.GapMode.valueOf(
+                        prefs.getString("follow_gap_mode", null)
+                            ?: FollowingDistanceMonitor.GapMode.TIME.name)
+                }.getOrDefault(FollowingDistanceMonitor.GapMode.TIME))
+        }
+        var gapSec by remember {
+            mutableStateOf(prefs.getFloat("follow_time_gap_s",
+                FollowingDistanceMonitor.DEFAULT_TIME_GAP_S)) }
+        var gapM by remember {
+            mutableStateOf(prefs.getFloat("follow_fixed_gap_m",
+                FollowingDistanceMonitor.DEFAULT_FIXED_GAP_M)) }
         var pct by remember { mutableStateOf(prefs.getInt("stop_dist_pct", 100).toFloat()) }
+
         Column(Modifier.fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp)).background(EnactSurface)
                 .padding(horizontal = 12.dp, vertical = 8.dp)) {
-            Text("Required gap: ${pct.toInt()} % of computed stopping distance",
-                color = EnactOnSurface, fontSize = 13.sp)
-            Text("100 % = dry-road stopping distance at current speed\n" +
-                "(1 s reaction + braking). Increase for wet roads or extra margin.",
-                color = EnactOnSurfaceDim, fontSize = 11.sp)
-            Slider(value = pct, onValueChange = { pct = it },
-                onValueChangeFinished = {
-                    val v = pct.toInt()
-                    prefs.edit().putInt("stop_dist_pct", v).apply()
-                    service?.setStoppingDistanceFactor(v)
-                },
-                valueRange = 50f..200f, steps = 14)
+            Text("Warn when the gap is below", color = EnactOnSurface, fontSize = 13.sp)
+            Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                modes.forEach { m ->
+                    val label = when (m) {
+                        FollowingDistanceMonitor.GapMode.TIME -> "Time"
+                        FollowingDistanceMonitor.GapMode.DISTANCE -> "Distance"
+                        FollowingDistanceMonitor.GapMode.STOPPING -> "Stopping"
+                    }
+                    Box(Modifier.padding(end = 6.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (m == mode) EnactGreen.copy(alpha = 0.85f)
+                                        else Color(0x33FFFFFF))
+                            .clickable {
+                                mode = m
+                                service?.setFollowGapMode(m)
+                                    ?: prefs.edit()
+                                        .putString("follow_gap_mode", m.name).apply()
+                            }
+                            .padding(horizontal = 10.dp, vertical = 5.dp)) {
+                        Text(label,
+                            color = if (m == mode) Color.Black else EnactOnSurfaceDim,
+                            fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+            when (mode) {
+                FollowingDistanceMonitor.GapMode.TIME -> {
+                    Text("Time gap: %.1f s".format(gapSec),
+                        color = EnactOnSurface, fontSize = 13.sp,
+                        modifier = Modifier.padding(top = 6.dp))
+                    Text("The usual rule is 2 s (3 s or more in rain). At 100 km/h " +
+                        "that is a ${(gapSec * 100 / 3.6f).toInt()} m gap.",
+                        color = EnactOnSurfaceDim, fontSize = 11.sp)
+                    Slider(value = gapSec, onValueChange = { gapSec = it },
+                        onValueChangeFinished = {
+                            prefs.edit().putFloat("follow_time_gap_s", gapSec).apply()
+                            service?.setFollowTimeGap(gapSec)
+                        },
+                        valueRange = FollowingDistanceMonitor.MIN_TIME_GAP_S..
+                                     FollowingDistanceMonitor.MAX_TIME_GAP_S,
+                        steps = 5)        // 1.0 .. 4.0 in 0.5 s steps
+                }
+                FollowingDistanceMonitor.GapMode.DISTANCE -> {
+                    Text("Fixed gap: ${gapM.toInt()} m",
+                        color = EnactOnSurface, fontSize = 13.sp,
+                        modifier = Modifier.padding(top = 6.dp))
+                    Text("The same distance at every speed. Simple, but a gap that " +
+                        "is ample in town is short on a motorway.",
+                        color = EnactOnSurfaceDim, fontSize = 11.sp)
+                    Slider(value = gapM, onValueChange = { gapM = it },
+                        onValueChangeFinished = {
+                            prefs.edit().putFloat("follow_fixed_gap_m", gapM).apply()
+                            service?.setFollowFixedGap(gapM)
+                        },
+                        valueRange = FollowingDistanceMonitor.MIN_FIXED_GAP_M..
+                                     FollowingDistanceMonitor.MAX_FIXED_GAP_M,
+                        steps = 21)       // 10 .. 120 m in 5 m steps
+                }
+                FollowingDistanceMonitor.GapMode.STOPPING -> {
+                    Text("Stopping distance: ${pct.toInt()} %",
+                        color = EnactOnSurface, fontSize = 13.sp,
+                        modifier = Modifier.padding(top = 6.dp))
+                    Text("100 % = full dry-road stopping distance at the current " +
+                        "speed (1 s reaction + braking).\nThat is the distance to " +
+                        "halt before something STANDING STILL, so it asks for a " +
+                        "much larger gap than the 2 s rule — about 87 m at " +
+                        "100 km/h. Choose it only if you want that margin.",
+                        color = EnactOnSurfaceDim, fontSize = 11.sp)
+                    Slider(value = pct, onValueChange = { pct = it },
+                        onValueChangeFinished = {
+                            val v = pct.toInt()
+                            prefs.edit().putInt("stop_dist_pct", v).apply()
+                            service?.setStoppingDistanceFactor(v)
+                        },
+                        valueRange = 50f..200f, steps = 14)
+                }
+            }
         }
         Spacer(Modifier.height(8.dp))
     }

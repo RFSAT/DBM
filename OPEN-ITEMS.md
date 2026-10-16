@@ -88,6 +88,25 @@ region to resolve (the build prints the count, and meta carries
 `speed_camera_directed`); it is highest on motorways, where the one-way
 carriageway tagging the resolution relies on is the norm.
 
+## TO VERIFY ON-DEVICE — following-distance warnings (v1.20.130)
+
+The over-warning had a demonstrable cause (the stopping-distance criterion) and
+the default is now a 2 s time gap, but two of the supporting changes need real
+road confirmation:
+
+- **Own-lane test in metres.** It should stop adjacent-lane and oncoming vehicles
+  being taken as the lead. The risk runs the other way too: a mount yawed more
+  than ~1° shifts the scene enough to reject the genuine lead at 60 m+. If
+  warnings go quiet on a straight motorway, calibrate lane centring first
+  (Settings → lane centring) before suspecting the threshold.
+- **Curve widening from yaw rate.** YawRateMonitor picks its axis by energy, so
+  only the magnitude is used and the budget widens symmetrically on a bend. If
+  false leads appear specifically on curves, that widening is the place to look.
+
+A better long-term source for own-lane membership is LaneAnalyzer's detected
+markings, which would replace the geometric budget with the actual lane edges;
+the two analyzers are currently independent.
+
 ## DEFERRED — separate projects, NOT "close now" items
 
 - **AGP 9 migration.** Still on the 8.x line (compileSdk 36 works under AGP

@@ -1,5 +1,44 @@
 # DBM Changelog
 
+## v1.20.130 — following distance: configurable gap, and why it over-warned
+- The required gap is now CONFIGURABLE (Settings → Following distance): a time
+  gap (default, 2.0 s, adjustable 1.0–4.0 s), a fixed distance (10–120 m), or the
+  previous stopping-distance basis with its 50–200 % factor.
+- FIXED the cause of warnings at plainly safe distances: the only criterion was
+  the full dry-road STOPPING distance, v·t_react + v²/2a. That is the distance
+  needed to halt before something STANDING STILL; it ignores that the vehicle
+  ahead is also moving and also travels its own braking distance. It demanded
+  87 m at 100 km/h and 119 m at 120 km/h — gaps of 3.1 s and 3.6 s — so anything
+  from 2 s to 3.6 s was flagged as unsafe. The default is now the 2 s rule.
+- Own-lane membership is tested in METRES, not as a fixed image-centre window.
+  The old ±0.15-of-frame-width filter spans ±3.3 m at 20 m but ±10 m at 60 m, so
+  at range it accepted two lanes either side — and oncoming traffic — as "the
+  vehicle ahead". The lateral offset now comes from the same pinhole geometry as
+  the distance (and is independent of the focal factor, since it cancels).
+- The lane test widens on a bend by the offset the road itself produces
+  (d²/2R from yaw rate and speed), so a genuine lead on a motorway curve is not
+  rejected; it uses the yaw rate's MAGNITUDE only, because YawRateMonitor
+  auto-detects its axis and its sign carries no reliable direction.
+- The lane test uses the existing lane-centring calibration, so an off-centre or
+  slightly yawed mount no longer biases it. A mount yawed more than ~1° should be
+  calibrated (Settings → lane centring) or the real lead can be missed at range.
+- The lead is now the NEAREST candidate by estimated distance, not the widest
+  box: a truck at 40 m has a wider box than a car at 35 m, and the old rule
+  picked the truck.
+- Distance is the median of the last 700 ms. At 60 m a car is only ~19 px wide in
+  a 720-px frame, so ±2 px of box jitter is ±10 % of the distance.
+- Focal self-calibration no longer accepts samples from a MOVING lead. Its
+  premise is a stationary lead; a lead at 37 % of own speed alone yielded a 1.6×
+  correction, and since most traffic one closes on is moving, the factor drifted
+  upward and made every distance read long — warnings then arrive late. Samples
+  must now close within 25 % of own speed, and the factor stays in 0.70–1.20.
+- The warning text now states both gaps in metres AND seconds plus the criterion
+  in force, e.g. "≈42 m (1.5 s) gap, ≥56 m needed at 100 km/h — 2.0 s rule", so
+  an evidence record can be judged without re-deriving what produced it.
+- The hazard and plate-reading gates now use the same required gap as the
+  warning; one of them recomputed the stopping distance and ignored the user's
+  setting, so the gates disagreed.
+
 ## v1.20.129 — speed cameras: all on the map, warnings only for your direction
 - Every speed camera in the area is still DRAWN on the map; the approach WARNING
   is now limited to cameras that measure the driver's own direction of travel, so

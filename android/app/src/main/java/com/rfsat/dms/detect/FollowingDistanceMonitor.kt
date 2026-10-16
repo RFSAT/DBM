@@ -15,20 +15,149 @@ import kotlin.math.abs
  * (typical phone main-camera horizontal FOV ~58–70°) and W_vehicle = 1.8 m.
  * Accuracy is ±20–30 % — adequate for a graded warning, not for measurement.
  *
- * Required (stopping) distance at speed v:
- *   d_stop = v * t_react + v² / (2 a)
- * with t_react = 1.0 s and a = 6.5 m/s² (dry-road service braking), the whole
- * result scaled by the user's stopping-distance factor (50–200 %) from
- * Settings — e.g. 150 % for wet conditions or a cautious margin.
+ * REQUIRED GAP — configurable, because the right criterion is not universal:
  *
- * The lead vehicle is the vehicle-class detection whose box is horizontally
- * centred (own lane) with the largest width (nearest). Events require the
- * condition to persist PERSIST_MS to ride out single-frame box jitter.
+ *   TIME (default)  gap = v * timeGapSec, the ordinary two-second rule.
+ *   DISTANCE        a constant metre figure the driver sets.
+ *   STOPPING        v * t_react + v² / (2a), scaled by [factor].
+ *
+ * TIME is the default, and STOPPING is NOT, because the full stopping distance
+ * is what you need to halt before a STATIONARY obstacle: it ignores that the
+ * vehicle ahead is also moving and also travels its own braking distance. Used
+ * as a following criterion it demands 87 m at 100 km/h and 119 m at 120 km/h —
+ * a 3.1 s and 3.6 s gap — so it flagged plainly safe motorway gaps as unsafe.
+ * The mode is kept for drivers who want that margin deliberately.
+ *
+ * LEAD SELECTION. Candidates are vehicle-class detections near the image centre;
+ * of those, the one estimated NEAREST becomes the lead (by distance, not by box
+ * width — a distant truck has a wider box than a near car). A fixed image-centre
+ * window alone is far too permissive at range: ±0.15 of frame width spans ±3.3 m
+ * at 20 m but ±10 m at 60 m, which admits two lanes either side and oncoming
+ * traffic. So own-lane membership is also tested in METRES, from the same
+ * pinhole geometry, with an allowance for mount yaw that grows with distance.
+ *
+ * Events require the condition to persist PERSIST_MS to ride out box jitter.
  */
 class FollowingDistanceMonitor {
 
-    /** Stopping-distance scale factor from Settings (1.0 = textbook dry road). */
+    /** How the required gap is derived. */
+    enum class GapMode { TIME, DISTANCE, STOPPING }
+
+    /** Criterion for the required gap; see the class comment. */
+    @Volatile var gapMode = GapMode.TIME
+
+    /** Headway in seconds for [GapMode.TIME]. */
+    @Volatile var timeGapSec = DEFAULT_TIME_GAP_S
+
+    /** Constant gap in metres for [GapMode.DISTANCE]. */
+    @Volatile var fixedGapM = DEFAULT_FIXED_GAP_M
+
+    /** Stopping-distance scale factor from Settings (1.0 = textbook dry road).
+     *  Applies to [GapMode.STOPPING] only. */
     @Volatile var factor = 1.0f
+
+    /**
+     * The gap the driver should be keeping at [speedKmh], in metres. One place,
+     * so the warning, the hazard gate and the plate-reading gate cannot drift
+     * apart (they previously computed it three times, one of them ignoring the
+     * user's factor).
+     */
+    fun requiredGapM(speedKmh: Int): Float {
+        val v = speedKmh / 3.6f
+        return when (gapMode) {
+            GapMode.TIME -> maxOf(v * timeGapSec, MIN_GAP_M)
+            GapMode.DISTANCE -> fixedGapM
+            GapMode.STOPPING -> (v * REACTION_S + v * v / (2f * DECEL_MS2)) * factor
+        }
+    }
+
+    /** Physical width assumed for a detection's class, which sharpens the
+     *  monocular distance versus one average width for everything. */
+    private fun physicalWidthM(d: Detection): Float = when (d.labelText.lowercase()) {
+        "truck", "bus" -> 2.5f
+        "motorcycle", "motorbike" -> 0.8f
+        else -> VEHICLE_WIDTH_M
+    }
+
+    /** Estimated distance to a detection in metres, or null if its box is too
+     *  small for the estimate to mean anything. */
+    fun distanceTo(d: Detection): Float? {
+        val wNorm = d.right - d.left
+        if (wNorm < MIN_BOX_W) return null
+        return focalFactor * physicalWidthM(d) / wNorm
+    }
+
+    /** Image x of our own lane's centre. Taken from the same mount calibration
+     *  the lane detector uses (lane_center), because a phone clamped off to one
+     *  side puts the road centre away from 0.5 and would otherwise bias every
+     *  lane test below. */
+    @Volatile var centreOffset = 0f
+
+    /** Own lane centre in normalised image x. */
+    private fun laneCentreX() = (0.5f + centreOffset).coerceIn(0.2f, 0.8f)
+
+    /**
+     * Lateral budget in metres for "in our lane" at [distM]. Half a lane plus a
+     * small residual-yaw term, widened on a bend by the offset the road itself
+     * produces: a lead 60 m ahead on a 500 m-radius curve sits d²/(2R) ≈ 3.6 m
+     * to one side, so a fixed budget would reject the genuine lead on every
+     * motorway curve. The curve term uses the MAGNITUDE of the yaw rate only —
+     * YawRateMonitor auto-detects its axis, so its sign carries no reliable
+     * direction and the budget widens symmetrically instead of shifting.
+     */
+    private fun laneBudgetM(distM: Float, yawRateDps: Float, speedKmh: Int): Float {
+        var budget = LANE_HALF_WIDTH_M + distM * YAW_TOL_TAN
+        val v = speedKmh / 3.6f
+        if (v > 3f && abs(yawRateDps) > CURVE_MIN_DPS) {
+            val omega = abs(Math.toRadians(yawRateDps.toDouble()).toFloat())   // rad/s
+            budget += distM * distM * omega / (2f * v)
+        }
+        return budget
+    }
+
+    /**
+     * Whether a detection at [distM] plausibly sits in OUR lane. The lateral
+     * offset follows from the same pinhole model as the distance:
+     *
+     *   lateral_m = (centreX - laneCentreX) * frame_w_px / f_px * d
+     *             = (centreX - laneCentreX) / FOCAL_FACTOR * d
+     *
+     * This is what the old fixed image-centre window could not do: ±0.15 of
+     * frame width is ±3.3 m at 20 m but ±10 m at 60 m, so at range it accepted
+     * two lanes either side — and oncoming traffic — as "the vehicle ahead".
+     */
+    private fun inOwnLane(
+        d: Detection, distM: Float, yawRateDps: Float, speedKmh: Int,
+    ): Boolean {
+        val centre = (d.left + d.right) / 2f
+        val lateralM = abs(centre - laneCentreX()) / focalFactor * distM
+        return lateralM <= laneBudgetM(distM, yawRateDps, speedKmh)
+    }
+
+    /**
+     * The vehicle being followed: the nearest own-lane vehicle-class detection,
+     * or null. Public so every caller gates on the SAME vehicle — the service
+     * previously re-implemented this filter twice with its own rules.
+     *
+     * Nearest by ESTIMATED DISTANCE, not by box width: a truck 50 m away has a
+     * wider box than a car at 30 m, and the old widest-box rule picked the truck.
+     *
+     * [yawRateDps] and [speedKmh] are optional and only widen the lane test on a
+     * bend; omitting them gives the straight-road behaviour.
+     */
+    fun selectLead(
+        detections: List<Detection>, yawRateDps: Float = 0f, speedKmh: Int = 0,
+    ): Detection? {
+        val lo = laneCentreX() - CENTRE_WINDOW
+        val hi = laneCentreX() + CENTRE_WINDOW
+        return detections.asSequence()
+            .filter { it.labelText in VEHICLES }
+            .filter { ((it.left + it.right) / 2f) in lo..hi }
+            .mapNotNull { det -> distanceTo(det)?.let { det to it } }
+            .filter { (det, dist) -> inOwnLane(det, dist, yawRateDps, speedKmh) }
+            .minByOrNull { it.second }
+            ?.first
+    }
 
     /** Focal factor f_px/frame-width; refined at runtime when a vehicle is
      *  tracked over a known closing speed (own speed while the lead is roughly
@@ -37,9 +166,21 @@ class FollowingDistanceMonitor {
     @Volatile var focalFactor = FOCAL_FACTOR
     private val focalSamples = ArrayDeque<Float>()
 
-    /** Feed when own speed is known and a single lead vehicle is tracked: the
-     *  change in estimated distance over dt should match own speed if the lead
-     *  is slow/stopped; the ratio refines the focal factor. */
+    /**
+     * Feed when own speed is known and a single lead vehicle is tracked: the
+     * change in estimated distance over dt should match own speed if the lead is
+     * slow/stopped; the ratio refines the focal factor.
+     *
+     * The validity condition — that the lead is standing still — cannot be
+     * verified from one camera, so it is enforced by REJECTING samples that
+     * disagree with it. A lead moving at a fraction f of own speed closes at
+     * v(1-f) and yields k = focalFactor/(1-f): f = 0.37 alone would hand us a
+     * 1.6x correction, and since most traffic one closes on is moving rather
+     * than parked, a wide acceptance window drifts the focal factor upward and
+     * makes every distance read long — warnings then arrive late. So a sample
+     * must close within [CLOSING_TOL] of own speed, and the result must stay
+     * within [FOCAL_MIN]..[FOCAL_MAX] of the nominal optics.
+     */
     fun calibrateFocal(prevWNorm: Float, curWNorm: Float, dtSec: Float, ownSpeedKmh: Int) {
         if (dtSec < 0.2f || ownSpeedKmh < 25 || prevWNorm < 0.02f || curWNorm < 0.02f) return
         val dPrev = focalFactor * VEHICLE_WIDTH_M / prevWNorm
@@ -47,8 +188,11 @@ class FollowingDistanceMonitor {
         val measuredClosing = (dPrev - dCur) / dtSec            // m/s
         val expected = ownSpeedKmh / 3.6f
         if (measuredClosing <= 0.5f) return
+        // Only a nearly-stationary lead can calibrate: reject anything whose
+        // closing rate is not close to our own speed.
+        if (abs(measuredClosing - expected) > CLOSING_TOL * expected) return
         val k = focalFactor * (expected / measuredClosing)
-        if (k.isFinite() && k in 0.4f..1.6f) {
+        if (k.isFinite() && k in FOCAL_MIN..FOCAL_MAX) {
             focalSamples.addLast(k)
             if (focalSamples.size > 40) focalSamples.removeFirst()
             if (focalSamples.size >= 12) focalFactor = focalSamples.sorted()[focalSamples.size / 2]
@@ -57,6 +201,25 @@ class FollowingDistanceMonitor {
 
     private var tooCloseSinceMs = 0L
     private var lastEventMs = 0L
+
+    /** Recent distance estimates (t, metres) for the median below. */
+    private val distHist = ArrayDeque<Pair<Long, Float>>()
+
+    /**
+     * Median of the last [DIST_SMOOTH_MS] of distance estimates. Box width is
+     * jittery, and the jitter matters most exactly where it hurts: a vehicle at
+     * 60 m is only ~19 px wide in a 720-px frame, so ±2 px of box noise is ±10 %
+     * of the width and so ±10 % of the distance. A median rides that out without
+     * the lag of an average over a longer window; PERSIST_MS still governs how
+     * long the condition must hold before an event.
+     */
+    private fun smoothedDistance(raw: Float, tMs: Long): Float {
+        distHist.addLast(tMs to raw)
+        while (distHist.isNotEmpty() && tMs - distHist.first().first > DIST_SMOOTH_MS)
+            distHist.removeFirst()
+        val xs = distHist.map { it.second }.sorted()
+        return xs[xs.size / 2]
+    }
 
     // --- Lead-vehicle hazard tracking (sway + hard braking) ---
     private val leadCentreHist = ArrayDeque<Pair<Long, Float>>()   // (t, centreX)
@@ -211,42 +374,45 @@ class FollowingDistanceMonitor {
         detections: List<Detection>,
         speedKmh: Int,
         tMs: Long,
+        yawRateDps: Float = 0f,
     ): Pair<RiskEventCandidate?, Float?> {
-        if (speedKmh < MIN_SPEED_KMH) { tooCloseSinceMs = 0; return null to null }
-        val lead = detections
-            .filter { it.labelText in VEHICLES &&
-                      (it.left + it.right) / 2f in 0.35f..0.65f }
-            .maxByOrNull { it.right - it.left } ?: run {
-                tooCloseSinceMs = 0; return null to null
-            }
-
-        val wNorm = lead.right - lead.left
-        if (wNorm < 0.02f) { tooCloseSinceMs = 0; return null to null }
-        // Class-specific physical width sharpens the monocular distance
-        // (algorithm-review recommendation) versus a single average width.
-        val widthM = when (lead.labelText.lowercase()) {
-            "truck", "bus" -> 2.5f
-            "motorcycle", "motorbike" -> 0.8f
-            else -> VEHICLE_WIDTH_M
+        if (speedKmh < MIN_SPEED_KMH) {
+            tooCloseSinceMs = 0; distHist.clear(); return null to null
         }
-        val distM = focalFactor * widthM / wNorm
+        val lead = selectLead(detections, yawRateDps, speedKmh) ?: run {
+            tooCloseSinceMs = 0; distHist.clear(); return null to null
+        }
+        val raw = distanceTo(lead) ?: run {
+            tooCloseSinceMs = 0; distHist.clear(); return null to null
+        }
+        val distM = smoothedDistance(raw, tMs)
 
-        val v = speedKmh / 3.6f
-        val stopM = (v * REACTION_S + v * v / (2f * DECEL_MS2)) * factor
+        val needM = requiredGapM(speedKmh)
 
-        if (distM >= stopM) { tooCloseSinceMs = 0; return null to distM }
+        if (distM >= needM) { tooCloseSinceMs = 0; return null to distM }
 
         if (tooCloseSinceMs == 0L) { tooCloseSinceMs = tMs; return null to distM }
         if (tMs - tooCloseSinceMs < PERSIST_MS) return null to distM
         if (tMs - lastEventMs < EVENT_INTERVAL_MS) return null to distM
         lastEventMs = tMs
 
-        val severe = distM < stopM * 0.6f
+        val severe = distM < needM * 0.6f
+        val v = speedKmh / 3.6f
+        // Both the measured and the required gap, in metres AND seconds, so an
+        // evidence record can be judged after the fact without re-deriving the
+        // criterion that produced it.
+        val haveSec = if (v > 0.1f) distM / v else 0f
+        val why = when (gapMode) {
+            GapMode.TIME -> "%.1f s rule".format(timeGapSec)
+            GapMode.DISTANCE -> "fixed %.0f m".format(fixedGapM)
+            GapMode.STOPPING -> "stopping distance × %.0f%%".format(factor * 100f)
+        }
         return RiskEventCandidate(
             RiskType.UNSAFE_FOLLOWING_DISTANCE,
             if (severe) Severity.CRITICAL else Severity.WARNING,
             0.6f,
-            "≈%.0f m gap, ≥%.0f m needed at %d km/h".format(distM, stopM, speedKmh)
+            "≈%.0f m (%.1f s) gap, ≥%.0f m needed at %d km/h — %s"
+                .format(distM, haveSec, needM, speedKmh, why)
         ) to distM
     }
 
@@ -254,9 +420,43 @@ class FollowingDistanceMonitor {
         val VEHICLES = setOf("car", "truck", "bus", "motorcycle")
         const val VEHICLE_WIDTH_M = 1.8f
         const val FOCAL_FACTOR = 0.9f      // f_px / frame-width
+        // Self-calibration guards (see calibrateFocal).
+        /** How far a sample's closing rate may sit from own speed to count. */
+        const val CLOSING_TOL = 0.25f
+        const val FOCAL_MIN = 0.70f        // ~70 deg horizontal FOV
+        const val FOCAL_MAX = 1.20f        // ~45 deg horizontal FOV
         const val REACTION_S = 1.0f
         const val DECEL_MS2 = 6.5f
         const val MIN_SPEED_KMH = 20
+
+        // --- required-gap defaults and bounds (mirrored by the Settings UI) ---
+        const val DEFAULT_TIME_GAP_S = 2.0f    // the ordinary two-second rule
+        const val MIN_TIME_GAP_S = 1.0f
+        const val MAX_TIME_GAP_S = 4.0f
+        const val DEFAULT_FIXED_GAP_M = 30f
+        const val MIN_FIXED_GAP_M = 10f
+        const val MAX_FIXED_GAP_M = 120f
+        /** Floor for the time-gap mode, so a crawl still needs a car's length. */
+        const val MIN_GAP_M = 6f
+
+        // --- lead selection ---
+        /** Image-centre pre-filter: cheap, and bounds mount error at close range. */
+        const val CENTRE_WINDOW = 0.15f
+        /** Own-lane budget in metres: a vehicle in our 3.5 m lane sits within
+         *  ~1.7 m of its centre even at the extremes, while one in the next lane
+         *  is at least ~1.8 m off, so this separates them. */
+        const val LANE_HALF_WIDTH_M = 1.9f
+        /** Residual lateral budget per metre of distance (~0.9° of mount yaw).
+         *  Deliberately small: anything larger re-admits the adjacent lane at
+         *  range, which is what this test exists to exclude. A mount yawed more
+         *  than that should be calibrated (Settings → lane centring). */
+        const val YAW_TOL_TAN = 0.015f
+        /** Yaw rate above which the lane budget is widened for curvature. */
+        const val CURVE_MIN_DPS = 1.5f
+        /** Boxes narrower than this make the distance estimate meaningless. */
+        const val MIN_BOX_W = 0.02f
+        /** Window for the median distance estimate. */
+        const val DIST_SMOOTH_MS = 700L
         const val PERSIST_MS = 1200L
         const val EVENT_INTERVAL_MS = 10_000L
         // Lead-hazard tuning.

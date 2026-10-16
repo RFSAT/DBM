@@ -296,6 +296,11 @@ class MonitorService : Service() {
             alerter.ttsEnabled = p.getBoolean("alerts_tts", true)
             capturePlate = p.getBoolean("capture_plate", false)
             following.factor = p.getInt("stop_dist_pct", 100) / 100f
+            following.gapMode = gapModeFromPrefs(p)
+            following.timeGapSec = p.getFloat("follow_time_gap_s",
+                FollowingDistanceMonitor.DEFAULT_TIME_GAP_S)
+            following.fixedGapM = p.getFloat("follow_fixed_gap_m",
+                FollowingDistanceMonitor.DEFAULT_FIXED_GAP_M)
             com.rfsat.dms.RiskType.entries.forEach { rt ->
                 if (p.contains("weight_${rt.name}"))
                     scorer.setWeight(rt, p.getInt("weight_${rt.name}", rt.scorePenalty))
@@ -345,6 +350,9 @@ class MonitorService : Service() {
             lanes.horizonOffset = p.getFloat("lane_horizon", 0f)
             lanes.centerOffset = p.getFloat("lane_center", 0f)
             lanes.forwardTilt = p.getFloat("lane_forward_tilt", 0f)
+            // The following-distance lane test needs the same mount centring:
+            // an off-centre clamp moves the road centre away from image centre.
+            following.centreOffset = p.getFloat("lane_center", 0f)
             driver?.rearviewIntervalMs = p.getInt("mirror_rearview_sec", 120) * 1000L
             driver?.sideMirrorIntervalMs = p.getInt("mirror_side_sec", 120) * 1000L
             signCache.evictMisses = p.getInt("cache_evict_misses",
@@ -470,6 +478,41 @@ class MonitorService : Service() {
         following.factor = pct / 100f
     }
 
+    /** Which criterion decides the required following gap. Stored as a name so
+     *  the pref stays readable; an unknown value falls back to the time gap. */
+    private fun gapModeFromPrefs(p: android.content.SharedPreferences):
+            FollowingDistanceMonitor.GapMode =
+        runCatching {
+            FollowingDistanceMonitor.GapMode.valueOf(
+                p.getString("follow_gap_mode", null)
+                    ?: FollowingDistanceMonitor.GapMode.TIME.name)
+        }.getOrDefault(FollowingDistanceMonitor.GapMode.TIME)
+
+    fun setFollowGapMode(mode: FollowingDistanceMonitor.GapMode) {
+        getSharedPreferences("dbm", MODE_PRIVATE).edit()
+            .putString("follow_gap_mode", mode.name).apply()
+        following.gapMode = mode
+        DLog.i(TAG, "following-gap criterion = $mode")
+    }
+
+    /** Headway in seconds used by the time-gap criterion. */
+    fun setFollowTimeGap(sec: Float) {
+        val v = sec.coerceIn(FollowingDistanceMonitor.MIN_TIME_GAP_S,
+                             FollowingDistanceMonitor.MAX_TIME_GAP_S)
+        getSharedPreferences("dbm", MODE_PRIVATE).edit()
+            .putFloat("follow_time_gap_s", v).apply()
+        following.timeGapSec = v
+    }
+
+    /** Constant gap in metres used by the fixed-distance criterion. */
+    fun setFollowFixedGap(metres: Float) {
+        val v = metres.coerceIn(FollowingDistanceMonitor.MIN_FIXED_GAP_M,
+                                FollowingDistanceMonitor.MAX_FIXED_GAP_M)
+        getSharedPreferences("dbm", MODE_PRIVATE).edit()
+            .putFloat("follow_fixed_gap_m", v).apply()
+        following.fixedGapM = v
+    }
+
     /** Mount calibration for lane detection (horizon/tilt and centring),
      *  values in roughly -0.2..+0.2 of frame dimension. */
     fun setLaneCalibration(horizon: Float, center: Float, forwardTilt: Float = 0f) {
@@ -479,6 +522,7 @@ class MonitorService : Service() {
         lanes.horizonOffset = horizon
         lanes.centerOffset = center
         lanes.forwardTilt = forwardTilt
+        following.centreOffset = center
     }
 
     /** Seconds without a mirror glance before a warning (0 = disabled). */
@@ -1010,10 +1054,10 @@ class MonitorService : Service() {
         // Object detection (toggleable).
         val obj = if (detectRoadObjects) road?.analyze(frame, tMs) else null
         // Cheap presence gate for the expensive following-distance pipeline.
-        governor.leadPresent = (obj?.detections ?: emptyList()).any {
-            it.labelText in FollowingDistanceMonitor.VEHICLES &&
-                (it.left + it.right) / 2f in 0.35f..0.65f
-        }
+        // Uses the monitor's own lead selection so the gate and the warning agree
+        // on what counts as the vehicle ahead.
+        governor.leadPresent = following.selectLead(
+            obj?.detections ?: emptyList(), yawRate.yawRateDps, spd) != null
 
         // Lane markings (toggleable), with crossing/shoulder sub-filters.
         var laneLines = emptyList<com.rfsat.dms.LaneLine>()
@@ -1034,10 +1078,7 @@ class MonitorService : Service() {
         // Following distance (toggleable) + focal self-calibration.
         var followEvents = emptyList<RiskEventCandidate>()
         if (detectFollowingDistance && obj != null) {
-            val lead = obj.detections
-                .filter { it.labelText in FollowingDistanceMonitor.VEHICLES &&
-                          (it.left + it.right) / 2f in 0.35f..0.65f }
-                .maxByOrNull { it.right - it.left }
+            val lead = following.selectLead(obj.detections, yawRate.yawRateDps, spd)
             val wNorm = lead?.let { it.right - it.left } ?: 0f
             if (wNorm > 0.02f && prevLeadWNorm > 0.02f && prevLeadTms > 0) {
                 val dt = (tMs - prevLeadTms) / 1000f
@@ -1047,15 +1088,16 @@ class MonitorService : Service() {
                         (prevLeadWNorm * prevLeadWNorm) / dt
             }
             prevLeadWNorm = wNorm; prevLeadTms = tMs
-            val (ev, distM) = following.check(obj.detections, spd, tMs)
+            val (ev, distM) = following.check(obj.detections, spd, tMs,
+                yawRate.yawRateDps)
             ev?.let { followEvents = listOf(it) }
 
-            // Lead-vehicle hazards (sway + hard braking), gated on proximity.
-            val stopM = if (spd >= FollowingDistanceMonitor.MIN_SPEED_KMH) {
-                val v = spd / 3.6f
-                v * FollowingDistanceMonitor.REACTION_S +
-                    v * v / (2f * FollowingDistanceMonitor.DECEL_MS2)
-            } else null
+            // Lead-vehicle hazards (sway + hard braking), gated on proximity
+            // against the SAME required gap the warning uses — this previously
+            // recomputed the stopping distance here and ignored the user's
+            // setting, so the two gates disagreed.
+            val stopM = if (spd >= FollowingDistanceMonitor.MIN_SPEED_KMH)
+                following.requiredGapM(spd) else null
             val (hazEvents, hazLead) = following.checkLeadHazards(lead, distM, stopM, tMs, frame)
             // Plate reading runs whenever a lead is closer than safe distance —
             // independent of hazard events — reading once per vehicle.
