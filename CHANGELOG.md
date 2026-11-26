@@ -1,5 +1,32 @@
 # DBM Changelog
 
+## v1.20.132 — CI produces release artifacts only; living docs brought up to date
+- CI no longer builds a debug APK or archives a lint report on a green build.
+  `./gradlew assembleRelease bundleRelease` is the whole build, so the artifacts
+  are the signed release APK, the AAB, the R8 mapping and the native debug
+  symbols — exactly what a Play submission and its deobfuscation need.
+- Release lint still gates the build: `lint { abortOnError = true;
+  checkReleaseBuilds = true }` makes AGP run `lintVitalRelease` as part of
+  `assembleRelease`, independently of the command line. Its report is uploaded
+  on failure only, which is the only time it is needed.
+- The 16 KB alignment check now reads the release APK only; its fallback to the
+  debug APK is gone with the debug build.
+- Without a keystore (fork / PR) CI builds an unsigned release instead of a
+  debug APK, so the full compile-and-package path is still exercised.
+- OPEN-ITEMS.md and PLAY-COMPLIANCE.md were still marked "current as of
+  v1.20.48" — step 4 of RELEASE-CHECKLIST.md had been skipped for v1.20.129 to
+  v1.20.131. Both are now current, the baseline records that v1.20.19 remains
+  the only Play-accepted live build, and the map-camera work has an on-device
+  verification section like the two releases before it.
+- RELEASE-CHECKLIST.md now states the version rule outright: ONE scheme for
+  everything, so every commit bumps `dmsVersionMinor` whatever it changes — app
+  code, CI, tooling or docs — and the newest pushed commit is always the build to
+  submit to Play. No separate housekeeping, GitHub or Play numbering, and an
+  entry never moves between versions once it is pushed.
+- Checklist step 5 now matches how the work actually lands: changed files go
+  straight into the local working copy and are committed from there; the
+  code-only zip is archival, not the deliverable.
+
 ## v1.20.131 — map navigation controls (PocketGNSS-style)
 - LOCK ON VEHICLE: the map camera now follows the live position, so the driver
   icon stays put and the map scrolls under it. Previously the camera only moved

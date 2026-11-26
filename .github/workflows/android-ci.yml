@@ -35,7 +35,7 @@ jobs:
             echo "KEYSTORE_FILE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
             echo "Release keystore decoded."
           else
-            echo "No KEYSTORE_BASE64 secret — will build debug only."
+            echo "No KEYSTORE_BASE64 secret — will build an unsigned release."
           fi
       - name: Build
         working-directory: android
@@ -65,10 +65,13 @@ jobs:
           chmod +x gradlew
           ./gradlew --version
           if [ -n "$KEYSTORE_FILE" ]; then
-            ./gradlew lint assembleDebug assembleRelease bundleRelease
+            ./gradlew assembleRelease bundleRelease
           else
-            echo "No signing secrets present — building debug only."
-            ./gradlew lint assembleDebug
+            # No keystore (fork / PR): still build the release variant so the
+            # whole compile + package path is exercised. It comes out unsigned,
+            # which is fine — we deliberately never produce a debug APK.
+            echo "No signing secrets present — building unsigned release only."
+            ./gradlew assembleRelease
           fi
       - name: Check 16 KB page alignment of native libraries
         working-directory: android
@@ -84,7 +87,6 @@ jobs:
           # offender — not the same known-benign files every build.
           KNOWN_ACCEPTED="libmlkit_google_ocr_pipeline.so libandroidx.graphics.path.so"
           APK=$(ls app/build/outputs/apk/release/*.apk 2>/dev/null | head -1 || true)
-          if [ -z "$APK" ]; then APK=$(ls app/build/outputs/apk/debug/*.apk 2>/dev/null | head -1 || true); fi
           if [ -z "$APK" ]; then echo "No APK found; skipping."; exit 0; fi
           echo "Checking native library alignment in $APK"
           rm -rf "$RUNNER_TEMP/alncheck"; mkdir -p "$RUNNER_TEMP/alncheck"
@@ -113,8 +115,6 @@ jobs:
             echo "All native libraries are either 16 KB aligned or known-accepted by Play."
           fi
 
-      - uses: actions/upload-artifact@v5
-        with: { name: DBM-apk-debug, path: android/app/build/outputs/apk/debug/*.apk }
       - uses: actions/upload-artifact@v5
         if: always()
         with:
@@ -146,6 +146,12 @@ jobs:
           name: DBM-native-debug-symbols
           path: android/app/build/outputs/native-debug-symbols/release/native-debug-symbols.zip
           if-no-files-found: ignore
+      # Lint reports are not archived on a normal build. lintVitalRelease can
+      # still fail a release build, and then the report is the only way to see
+      # which check blocked it — so it is uploaded on failure only.
       - uses: actions/upload-artifact@v5
-        if: always()
-        with: { name: lint-report, path: android/app/build/reports/lint-results-*.html }
+        if: failure()
+        with:
+          name: lint-report
+          path: android/app/build/reports/lint-results-*.html
+          if-no-files-found: ignore

@@ -1,16 +1,19 @@
-# DBM open items register — current as of v1.20.48
+# DBM open items register — current as of v1.20.132
 
-Baseline: **v1.20.19 was the stable Play-accepted consolidation point**; the tree
-has since advanced to **v1.20.48** with the Europe map pipeline, several UI
-features, R8 minification, and CI hardening. This register is updated per release
+Baseline: **v1.20.19 is still the only Play-accepted, live build**; the tree has
+since advanced to **v1.20.132** with the Europe map pipeline, offline POIs and
+map data, OBD-II, navigation and map-camera controls, several UI features, R8
+minification, and CI hardening. Everything after v1.20.19 is unpublished, so a
+Play submission's release notes have to span the whole range, not one version. This register is updated per release
 (see "Doc maintenance" at the end).
 
 ## Open CODE issues
 
-**None known outstanding at v1.20.48.** The compile error introduced with the
+**None known outstanding at v1.20.132.** The compile error introduced with the
 collapsible-settings work (missing `rememberSaveable` import) was fixed in
 v1.20.44. Balance/annotation checks pass; the real proof remains a green CI
-compile of both debug and release variants.
+compile — of the RELEASE variant, which since v1.20.132 is the only one CI
+builds (no debug APK). That is the stricter check anyway: R8 runs only there.
 
 ## Shipping but UNVERIFIED on-device (features that exist but were never confirmed with real hardware/data)
 
@@ -106,6 +109,23 @@ road confirmation:
 A better long-term source for own-lane membership is LaneAnalyzer's detected
 markings, which would replace the geometric budget with the actual lane edges;
 the two analyzers are currently independent.
+
+## TO VERIFY ON-DEVICE — map camera controls (v1.20.131)
+
+The navigation map now follows the vehicle (lock on by default), hands pan and
+rotate gestures back to the caller, and gained zoom buttons and a view reset.
+Three things only a drive can settle:
+
+- **Follow smoothness.** Following eases the camera once per fix and skips the
+  update when the camera is already within 1.5 m of the vehicle, because the
+  camera-idle callback drives part of the recomposition and an unconditional
+  animation retriggers itself. If the map stutters or creeps, that guard and the
+  450 ms ease are where to look.
+- **Heading-up hold below 5 km/h.** Intended to stop the map spinning at traffic
+  lights. If it feels unresponsive pulling away, the threshold is the knob.
+- **Look-ahead padding** (optional, off by default) uses camera padding, which
+  moves the camera target rather than the icon; confirm the icon lands where
+  expected in 2½D and 3D before recommending it.
 
 ## DEFERRED — separate projects, NOT "close now" items
 

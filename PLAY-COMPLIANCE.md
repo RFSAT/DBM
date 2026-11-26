@@ -1,6 +1,6 @@
 # Google Play compliance — four Console items
 
-**Current as of v1.20.48.** Two of the four are **hard requirements**; two are
+**Current as of v1.20.132.** Two of the four are **hard requirements**; two are
 **optional recommendations**. The Console presents them together, but they carry
 very different urgency and risk. Treat them separately.
 
@@ -94,6 +94,24 @@ The Play Console error also names the file directly
 CI list and that name disagree, trust the Console.
 
 ---
+
+## CI artifacts (changed in v1.20.132)
+
+CI no longer builds a debug APK and no longer archives a lint report on a green
+build. `./gradlew assembleRelease bundleRelease` is the whole build, so the
+artifacts are the signed release APK, the AAB, the R8 mapping and the native
+debug symbols — i.e. exactly what a Play submission and its deobfuscation need.
+
+Two consequences worth remembering here:
+
+- The **16 KB alignment check** now reads the release APK only; its old fallback
+  to the debug APK is gone. If a build ever produces no release APK the check
+  skips rather than silently inspecting a differently-packaged debug build.
+- **Release lint still gates the build.** `lint { abortOnError = true;
+  checkReleaseBuilds = true }` makes AGP run `lintVitalRelease` as part of
+  `assembleRelease`, independently of the command line, so a lint error still
+  fails CI. The report is uploaded on failure only, which is the only time it is
+  needed.
 
 ## The two Console WARNINGS (neither blocks release)
 
