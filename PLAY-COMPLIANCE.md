@@ -1,6 +1,6 @@
 # Google Play compliance — four Console items
 
-**Current as of v1.20.132.** Two of the four are **hard requirements**; two are
+**Current as of v1.20.133.** Two of the four are **hard requirements**; two are
 **optional recommendations**. The Console presents them together, but they carry
 very different urgency and risk. Treat them separately.
 
@@ -57,10 +57,12 @@ v1.20.14.
 | `com.google.mediapipe:tasks-vision` | 0.10.20 — `libmediapipe_tasks_vision_jni.so` 4 KB-aligned | **0.10.26.1** | MediaPipe release notes: all current Google Maven packages are 16 KB-aligned; 0.10.26.1 also restores ARM v7. |
 | `androidx.camera:*` | 1.4.1 — `libimage_processing_util_jni.so`, `libsurface_util_jni.so` | **1.5.0** | AndroidX 16 KB work landed in the 1.5.x line. APIs used here are source-compatible. |
 
-### RESOLVED — Play accepted v1.20.19 (live on Google Play)
+### RESOLVED — Play accepted v1.20.19, and every bundle since
 
-The 16 KB requirement is **satisfied**: Google Play accepted the v1.20.19 bundle
-and it is live. The libraries below were flagged as *possibly* unaligned during
+The 16 KB requirement is **satisfied**: Google Play accepted the v1.20.19 bundle,
+and the live build is now **v1.20.131** — so the requirement has held across the
+map pipeline, POI, navigation and map-camera releases, not just the one bundle
+that first cleared it. The libraries below were flagged as *possibly* unaligned during
 investigation, but the accepted build proves they are not a blocker in practice —
 either they are aligned in the versions shipped, or Play does not reject on them.
 No further action needed unless a future Play re-check flags a specific file.

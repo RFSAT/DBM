@@ -1,5 +1,18 @@
 # DBM Changelog
 
+## v1.20.133 — corrected the record of what is live on Google Play
+- OPEN-ITEMS.md and PLAY-COMPLIANCE.md claimed v1.20.19 was the only
+  Play-accepted build and that everything since was unpublished. That came from
+  a note written in the v1.20.48 era and was wrong: **v1.20.131 is live on
+  Google Play**, v1.20.19 being merely the first bundle accepted. Both docs now
+  say so, and the 16 KB compliance section records that the requirement has held
+  across every bundle since, not just the one that first cleared it.
+- Consequence for release notes: a submission covers one version's changes, not
+  a backlog stretching back to v1.20.19.
+- The v1.20.132 entry below keeps its original wording on purpose — it is pushed
+  history, and RELEASE-CHECKLIST.md forbids rewriting a pushed entry, so a
+  correction belongs to the version that makes it.
+
 ## v1.20.132 — CI produces release artifacts only; living docs brought up to date
 - CI no longer builds a debug APK or archives a lint report on a green build.
   `./gradlew assembleRelease bundleRelease` is the whole build, so the artifacts

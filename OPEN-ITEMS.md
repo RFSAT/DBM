@@ -1,15 +1,14 @@
-# DBM open items register — current as of v1.20.132
+# DBM open items register — current as of v1.20.133
 
-Baseline: **v1.20.19 is still the only Play-accepted, live build**; the tree has
-since advanced to **v1.20.132** with the Europe map pipeline, offline POIs and
-map data, OBD-II, navigation and map-camera controls, several UI features, R8
-minification, and CI hardening. Everything after v1.20.19 is unpublished, so a
-Play submission's release notes have to span the whole range, not one version. This register is updated per release
-(see "Doc maintenance" at the end).
+Baseline: **v1.20.131 is live on Google Play**; v1.20.19 was the first accepted
+build and the stable consolidation point. The tree is at **v1.20.133**, which is
+the first unpublished version, so release notes for the next submission span a
+single version's changes rather than a long backlog. This register is updated
+per release (see "Doc maintenance" at the end).
 
 ## Open CODE issues
 
-**None known outstanding at v1.20.132.** The compile error introduced with the
+**None known outstanding at v1.20.133.** The compile error introduced with the
 collapsible-settings work (missing `rememberSaveable` import) was fixed in
 v1.20.44. Balance/annotation checks pass; the real proof remains a green CI
 compile — of the RELEASE variant, which since v1.20.132 is the only one CI
