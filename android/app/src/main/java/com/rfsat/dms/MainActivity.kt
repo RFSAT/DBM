@@ -1528,6 +1528,8 @@ class MainActivity : ComponentActivity() {
         var layer by remember { mutableStateOf(s.mapLayer) }
         var icon by remember { mutableStateOf(s.ownIcon) }
         var mirror by remember { mutableStateOf(s.windshieldMirror) }
+        var followLock by remember { mutableStateOf(s.followLock) }
+        var lookAhead by remember { mutableStateOf(s.lookAhead) }
         var pois by remember { mutableStateOf(s.enabledPois) }
 
         @Composable
@@ -1623,6 +1625,31 @@ class MainActivity : ComponentActivity() {
             androidx.compose.material3.Switch(checked = mirror,
                 onCheckedChange = { mirror = it; s.windshieldMirror = it })
         }
+
+        Spacer(Modifier.height(6.dp))
+        Text("Map camera", color = EnactLime, fontSize = 12.sp,
+            fontWeight = FontWeight.Bold)
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Text("Lock map on vehicle", color = EnactOnSurface, fontSize = 12.sp,
+                modifier = Modifier.weight(1f))
+            androidx.compose.material3.Switch(checked = followLock,
+                onCheckedChange = { followLock = it; s.followLock = it })
+        }
+        Text("Keeps your icon in place and scrolls the map under it.\n" +
+            "Dragging the map pauses the lock; the \u25C9 button on the map " +
+            "switches it back on.",
+            color = EnactOnSurfaceDim, fontSize = 10.sp,
+            modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Text("Show more road ahead", color = EnactOnSurface, fontSize = 12.sp,
+                modifier = Modifier.weight(1f))
+            androidx.compose.material3.Switch(checked = lookAhead,
+                onCheckedChange = { lookAhead = it; s.lookAhead = it })
+        }
+        Text("Moves your icon below the middle while the map is locked, so " +
+            "more of the road ahead is visible.\nOff keeps it exactly centred.",
+            color = EnactOnSurfaceDim, fontSize = 10.sp,
+            modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
     }
 
     @Composable

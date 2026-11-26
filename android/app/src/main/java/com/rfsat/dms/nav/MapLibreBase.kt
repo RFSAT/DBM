@@ -19,6 +19,8 @@ import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.gestures.MoveGestureDetector
+import org.maplibre.android.gestures.RotateGestureDetector
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
@@ -34,18 +36,23 @@ import org.maplibre.geojson.Point
 
 /**
  * MapLibre map base for navigation. Key behaviours:
- *  - The user's pan/zoom/rotate is NEVER overridden: the camera is set ONCE when
- *    the map first loads (centred on the user), and thereafter only when the
- *    caller explicitly requests a recenter (recenterKey changes) or the
- *    orientation mode dictates a bearing. Panning/zooming the map does not get
- *    reset on recomposition.
+ *  - FOLLOW LOCK ([follow]): the camera keeps the own-location icon in the same
+ *    spot and the map scrolls under it, which is what a driver wants. The lock is
+ *    the caller's state, not the map's: a pan or a rotate gesture is reported
+ *    back ([onUserPan], [onUserRotate]) and the CALLER decides to drop the lock
+ *    or switch orientation, so the camera and the buttons can never disagree
+ *    about what mode the map is in.
+ *  - With the lock off, the user's pan/zoom/rotate is never overridden: the
+ *    camera is set once on first load and thereafter only on an explicit request
+ *    (recenter, reset, zoom button, or a tilt/orientation change). Ordinary
+ *    recomposition never moves it.
  *  - Always shows an own-location marker (icon chosen in settings) that tracks
- *    the live position without moving the camera.
+ *    the live position whether or not the camera follows it.
  *  - Shows a destination marker when navigating.
  *  - Draws the route, plus optional map-data overlays (speed limits / parking /
  *    cameras) supplied by the caller as GeoJSON feature lists.
- *  - Orientation: NORTH_UP pins bearing 0; HEADING_UP follows the vehicle course;
- *    FREE lets the user rotate freely (bearing left as the user set it).
+ *  - Orientation: NORTH_UP pins bearing 0; HEADING_UP turns the map to the
+ *    vehicle's course; FREE leaves the bearing wherever the user put it.
  */
 @Composable
 fun MapLibreBase(
@@ -59,6 +66,13 @@ fun MapLibreBase(
     headingDeg: Double,
     recenterKey: Int,               // increment to request a recenter-on-user
     mapData: MapOverlayData?,       // speed limits / parking / cameras, or null
+    follow: Boolean = false,        // keep the camera on the vehicle
+    speedKmh: Int = 0,              // used to hold the bearing when stopped
+    lookAhead: Boolean = false,     // put the vehicle below centre while following
+    resetKey: Int = 0,              // increment to reset zoom/tilt/bearing
+    zoomTicks: Int = 0,             // signed, cumulative: +1 per zoom-in tap
+    onUserPan: (() -> Unit)? = null,       // user dragged the map
+    onUserRotate: (() -> Unit)? = null,    // user rotated the map
     onCenterChanged: ((GeoPoint) -> Unit)? = null,  // reports map center when idle
     onMapTap: ((GeoPoint) -> Unit)? = null,         // reports a tapped point
     modifier: Modifier = Modifier
@@ -78,6 +92,20 @@ fun MapLibreBase(
     // Tracks the applied tilt so a 2D/2½D/3D switch is detected and applied.
     val lastTilt = remember { mutableStateOf(tiltDegrees) }
     val lastOrientation = remember { mutableStateOf(orientation) }
+    val lastResetKey = remember { mutableStateOf(resetKey) }
+    val lastZoomTicks = remember { mutableStateOf(zoomTicks) }
+    // True between gesture begin and end. While the finger is down the follow
+    // lock must not push the camera, or the map fights the gesture for a frame.
+    val interacting = remember { mutableStateOf(false) }
+    // Bearing last applied by HEADING_UP, held while stopped: a parked vehicle's
+    // GNSS course is noise, and without this the map slowly spins at every
+    // traffic light.
+    val heldBearing = remember { mutableStateOf(headingDeg) }
+    // The latest callbacks, so the listeners registered once below always call
+    // the current lambdas rather than the ones from first composition.
+    val panCb = remember { mutableStateOf(onUserPan) }
+    val rotateCb = remember { mutableStateOf(onUserRotate) }
+    panCb.value = onUserPan; rotateCb.value = onUserRotate
 
     DisposableEffect(lifecycleOwner) {
         val obs = LifecycleEventObserver { _, e ->
@@ -117,6 +145,29 @@ fun MapLibreBase(
                         if (t != null) cb(GeoPoint(t.latitude, t.longitude))
                     }
                 }
+                // Hand gestures back to the caller. These fire ONLY for real
+                // finger gestures, never for the camera animations this file
+                // runs, so following cannot trigger its own unlock.
+                m.addOnMoveListener(object : MapLibreMap.OnMoveListener {
+                    override fun onMoveBegin(d: MoveGestureDetector) {
+                        interacting.value = true
+                        panCb.value?.invoke()      // dragging the map drops the lock
+                    }
+                    override fun onMove(d: MoveGestureDetector) {}
+                    override fun onMoveEnd(d: MoveGestureDetector) {
+                        interacting.value = false
+                    }
+                })
+                m.addOnRotateListener(object : MapLibreMap.OnRotateListener {
+                    override fun onRotateBegin(d: RotateGestureDetector) {
+                        interacting.value = true
+                        rotateCb.value?.invoke()   // turning the map means FREE
+                    }
+                    override fun onRotate(d: RotateGestureDetector) {}
+                    override fun onRotateEnd(d: RotateGestureDetector) {
+                        interacting.value = false
+                    }
+                })
                 // Tap on the map -> report the point so the caller can look up a
                 // POI there and show its details.
                 onMapTap?.let { cb ->
@@ -133,8 +184,11 @@ fun MapLibreBase(
                     val c = ownLocation ?: route?.firstOrNull()
                     if (c != null && !didInitialCamera.value) {
                         m.cameraPosition = CameraPosition.Builder()
-                            .target(LatLng(c.lat, c.lon)).zoom(15.0)
+                            .target(LatLng(c.lat, c.lon)).zoom(DEFAULT_ZOOM)
                             .tilt(tiltDegrees).bearing(bearingFor(orientation, headingDeg))
+                            // The view is usually not laid out yet, so this is
+                            // zero here; the first follow update applies it.
+                            .padding(followPadding(mv, follow, lookAhead, tiltDegrees))
                             .build()
                         didInitialCamera.value = true
                     }
@@ -153,51 +207,111 @@ fun MapLibreBase(
                     updateData(it, route, ownLocation, ownIcon, destination, mapData)
                 }
             }
-            // Camera is updated ONLY on an explicit recenter request, an
-            // orientation-mode change, or a TILT change (switching 2D / 2½D / 3D)
-            // — never on ordinary recomposition, so the user's pan/zoom survives.
+            // The camera moves only for a reason, in this order of priority:
+            // reset, recenter, zoom button, tilt change, orientation change, and
+            // finally the follow lock. Ordinary recomposition moves nothing, so
+            // with the lock off the user's pan/zoom/rotate survives untouched.
+            val resetRequested = resetKey != lastResetKey.value
             val recenterRequested = recenterKey != lastRecenterKey.value
             val orientationChanged = orientation != lastOrientation.value
             val tiltChanged = kotlin.math.abs(tiltDegrees - lastTilt.value) > 0.5
-            if (recenterRequested) {
-                val c = ownLocation ?: route?.firstOrNull()
-                if (c != null) {
+            val zoomDelta = zoomTicks - lastZoomTicks.value
+
+            // Hold the bearing while essentially stopped: a parked vehicle's GNSS
+            // course wanders, and a map that slowly spins at a red light is worse
+            // than one that waits for the car to move.
+            val bearingNow = if (orientation == MapOrientation.HEADING_UP) {
+                if (speedKmh >= HEADING_MIN_KMH) { heldBearing.value = headingDeg; headingDeg }
+                else heldBearing.value
+            } else bearingFor(orientation, headingDeg)
+
+            val cur = map.cameraPosition
+            when {
+                resetRequested -> {
+                    // Back to the defaults for the current view: the vehicle, the
+                    // default zoom, the mode's tilt, and the orientation's bearing.
+                    val c = ownLocation ?: route?.firstOrNull()
                     map.animateCamera(CameraUpdateFactory.newCameraPosition(
                         CameraPosition.Builder()
-                            .target(LatLng(c.lat, c.lon)).zoom(16.0)
-                            .tilt(tiltDegrees)
-                            .bearing(bearingFor(orientation, headingDeg)).build()))
+                            .target(c?.let { LatLng(it.lat, it.lon) }
+                                ?: cur.target ?: LatLng(0.0, 0.0))
+                            .zoom(DEFAULT_ZOOM).tilt(tiltDegrees)
+                            .bearing(bearingNow)
+                            .padding(followPadding(mv, follow, lookAhead, tiltDegrees))
+                            .build()))
+                    lastResetKey.value = resetKey
                 }
-                lastRecenterKey.value = recenterKey
-            } else if (tiltChanged) {
-                // Mode switched (2D / 2½D / 3D): apply the new tilt right away,
-                // keeping the user's current target, zoom and bearing.
-                val cur = map.cameraPosition
-                map.animateCamera(CameraUpdateFactory.newCameraPosition(
-                    CameraPosition.Builder()
-                        .target(cur.target ?: LatLng(0.0, 0.0)).zoom(cur.zoom)
-                        .tilt(tiltDegrees)
-                        .bearing(if (orientation == MapOrientation.FREE) cur.bearing
-                                 else bearingFor(orientation, headingDeg))
-                        .build()))
-            } else if (orientationChanged && orientation != MapOrientation.FREE) {
-                // keep current target/zoom, only change bearing
-                val cur = map.cameraPosition
-                map.animateCamera(CameraUpdateFactory.newCameraPosition(
-                    CameraPosition.Builder()
-                        .target(cur.target ?: LatLng(0.0, 0.0)).zoom(cur.zoom)
-                        .tilt(cur.tilt).bearing(bearingFor(orientation, headingDeg))
-                        .build()))
-            } else if (orientation == MapOrientation.HEADING_UP) {
-                // continuous heading-up: rotate to course without touching zoom/target
-                val cur = map.cameraPosition
-                map.moveCamera(CameraUpdateFactory.newCameraPosition(
-                    CameraPosition.Builder()
-                        .target(cur.target ?: LatLng(0.0, 0.0)).zoom(cur.zoom)
-                        .tilt(cur.tilt).bearing(headingDeg).build()))
+                recenterRequested -> {
+                    val c = ownLocation ?: route?.firstOrNull()
+                    if (c != null) {
+                        map.animateCamera(CameraUpdateFactory.newCameraPosition(
+                            CameraPosition.Builder()
+                                .target(LatLng(c.lat, c.lon)).zoom(RECENTER_ZOOM)
+                                .tilt(tiltDegrees).bearing(bearingNow)
+                                .padding(followPadding(mv, follow, lookAhead, tiltDegrees))
+                                .build()))
+                    }
+                    lastRecenterKey.value = recenterKey
+                }
+                zoomDelta != 0 -> {
+                    // Zoom buttons. zoomBy keeps the current target, so a locked
+                    // map stays locked and a panned one stays where it was.
+                    map.animateCamera(CameraUpdateFactory.zoomBy(zoomDelta.toDouble()), 250)
+                    lastZoomTicks.value = zoomTicks
+                }
+                tiltChanged -> {
+                    // Mode switched (2D / 2½D / 3D): apply the new tilt right away,
+                    // keeping the user's current target, zoom and bearing.
+                    map.animateCamera(CameraUpdateFactory.newCameraPosition(
+                        CameraPosition.Builder()
+                            .target(cur.target ?: LatLng(0.0, 0.0)).zoom(cur.zoom)
+                            .tilt(tiltDegrees)
+                            .bearing(if (orientation == MapOrientation.FREE) cur.bearing
+                                     else bearingNow)
+                            .padding(followPadding(mv, follow, lookAhead, tiltDegrees))
+                            .build()))
+                }
+                orientationChanged && orientation != MapOrientation.FREE -> {
+                    // keep current target/zoom, only change bearing
+                    map.animateCamera(CameraUpdateFactory.newCameraPosition(
+                        CameraPosition.Builder()
+                            .target(cur.target ?: LatLng(0.0, 0.0)).zoom(cur.zoom)
+                            .tilt(cur.tilt).bearing(bearingNow).build()))
+                }
+                // FOLLOW: one combined update per fix, so position and bearing
+                // move together instead of chasing each other. Skipped while a
+                // finger is on the map, and skipped when the camera is already
+                // there — recomposition is driven partly by the camera-idle
+                // callback, so an unconditional ease here would re-trigger
+                // itself and the map would never settle.
+                follow && ownLocation != null && !interacting.value &&
+                    needsFollowUpdate(cur, ownLocation, bearingNow, orientation) -> {
+                    val b = CameraPosition.Builder()
+                        .target(LatLng(ownLocation.lat, ownLocation.lon))
+                        .zoom(cur.zoom).tilt(cur.tilt)
+                        .padding(followPadding(mv, true, lookAhead, tiltDegrees))
+                    // In FREE the user owns the bearing, so following must not
+                    // touch it — only the position.
+                    b.bearing(if (orientation == MapOrientation.FREE) cur.bearing else bearingNow)
+                    map.easeCamera(CameraUpdateFactory.newCameraPosition(b.build()),
+                        FOLLOW_EASE_MS)
+                }
+                // Not following, but heading-up still has to track the course.
+                orientation == MapOrientation.HEADING_UP && !interacting.value &&
+                    kotlin.math.abs(angleDelta(cur.bearing, bearingNow)) > BEARING_EPS_DEG -> {
+                    map.moveCamera(CameraUpdateFactory.newCameraPosition(
+                        CameraPosition.Builder()
+                            .target(cur.target ?: LatLng(0.0, 0.0)).zoom(cur.zoom)
+                            .tilt(cur.tilt).bearing(bearingNow).build()))
+                }
             }
             lastOrientation.value = orientation
             lastTilt.value = tiltDegrees
+            // Keep these in step even when another branch won, so a later change
+            // is measured against what was actually asked for.
+            lastResetKey.value = resetKey
+            lastRecenterKey.value = recenterKey
+            lastZoomTicks.value = zoomTicks
         }
     }
 }
@@ -207,6 +321,67 @@ private fun bearingFor(o: MapOrientation, headingDeg: Double) = when (o) {
     MapOrientation.HEADING_UP -> headingDeg
     MapOrientation.FREE -> 0.0     // only used at first load; then user controls
 }
+
+/**
+ * Whether a follow update is worth issuing: the camera is more than
+ * [FOLLOW_MIN_MOVE_M] from the vehicle, or the bearing is stale. Without this
+ * the map re-animates to where it already is, forever, because finishing an
+ * animation fires the idle callback that causes the next recomposition.
+ */
+private fun needsFollowUpdate(
+    cur: CameraPosition, own: GeoPoint, bearingNow: Double, o: MapOrientation,
+): Boolean {
+    val t = cur.target ?: return true
+    val dLat = (own.lat - t.latitude) * 111_320.0
+    val dLon = (own.lon - t.longitude) * 111_320.0 *
+        kotlin.math.cos(Math.toRadians(own.lat))
+    if (kotlin.math.hypot(dLat, dLon) > FOLLOW_MIN_MOVE_M) return true
+    return o != MapOrientation.FREE &&
+        kotlin.math.abs(angleDelta(cur.bearing, bearingNow)) > BEARING_EPS_DEG
+}
+
+/** Signed smallest difference between two bearings, -180..180. */
+private fun angleDelta(from: Double, to: Double): Double {
+    var d = (to - from) % 360.0
+    if (d > 180.0) d -= 360.0
+    if (d < -180.0) d += 360.0
+    return d
+}
+
+/**
+ * Camera padding as {left, top, right, bottom} in pixels. Padding shifts the
+ * camera's target away from the centre of the view, which is how the vehicle is
+ * put below the middle to show more road ahead: padding the BOTTOM moves the
+ * target down. Returns zeros unless following with look-ahead on, so by default
+ * the icon sits exactly in the middle of the map, and a tilted view gets a
+ * bigger shift because that is where the horizon wastes the most screen.
+ */
+private fun followPadding(
+    view: MapView, follow: Boolean, lookAhead: Boolean, tiltDegrees: Double,
+): DoubleArray {
+    if (!follow || !lookAhead) return doubleArrayOf(0.0, 0.0, 0.0, 0.0)
+    val h = view.height.toDouble()
+    if (h <= 0.0) return doubleArrayOf(0.0, 0.0, 0.0, 0.0)
+    val frac = if (tiltDegrees > 20.0) LOOK_AHEAD_TILTED else LOOK_AHEAD_FLAT
+    return doubleArrayOf(0.0, 0.0, 0.0, h * frac)
+}
+
+/** Zoom used by a view reset. */
+private const val DEFAULT_ZOOM = 15.0
+/** Zoom used when centring on the vehicle. */
+private const val RECENTER_ZOOM = 16.0
+/** Below this speed the map holds its bearing instead of following the course. */
+private const val HEADING_MIN_KMH = 5
+/** Don't re-issue a rotation for less than this, to avoid per-frame jitter. */
+private const val BEARING_EPS_DEG = 1.5
+/** Follow animation length; comfortably shorter than the 1 Hz fix interval. */
+private const val FOLLOW_EASE_MS = 450
+/** Below this camera-to-vehicle gap a follow update is not worth an animation
+ *  (roughly a GNSS jitter radius, and about a pixel at street zoom). */
+private const val FOLLOW_MIN_MOVE_M = 1.5
+/** Share of the view height the vehicle is pushed down by, flat and tilted. */
+private const val LOOK_AHEAD_FLAT = 0.22
+private const val LOOK_AHEAD_TILTED = 0.34
 
 private const val ROUTE_SRC = "dbm-route"; private const val ROUTE_LYR = "dbm-route-l"
 private const val ROUTE_CASING = "dbm-route-c"

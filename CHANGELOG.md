@@ -1,5 +1,36 @@
 # DBM Changelog
 
+## v1.20.131 — map navigation controls (PocketGNSS-style)
+- LOCK ON VEHICLE: the map camera now follows the live position, so the driver
+  icon stays put and the map scrolls under it. Previously the camera only moved
+  on an explicit recenter, so the icon drifted off screen while driving. On by
+  default; the ◉/◎ button on the map shows and toggles the state.
+- Dragging the map suspends the lock for that drive (otherwise the camera snaps
+  back and panning is impossible); the ◉ button or a recenter re-arms it. The
+  stored preference is untouched, so the next drive starts locked.
+- Rotating the map by hand switches orientation to Free, so the hand-set bearing
+  is kept instead of being fought by the automatic mode. The orientation button
+  still cycles North up → Heading up → Free.
+- ZOOM + / − buttons, bottom-right. Pinch-zoom needs two fingers and a glance;
+  a button needs neither.
+- VIEW RESET (⟲): default zoom, the view's own tilt, North up, back on the
+  vehicle, lock re-armed.
+- Heading up now HOLDS its bearing below 5 km/h. A stopped vehicle's GNSS course
+  is noise, and the map used to turn slowly at every red light.
+- Optional "Show more road ahead" (Settings → Navigation → Map camera): while
+  locked, the icon sits below the middle, more so in the tilted 2½D/3D views
+  where a centred vehicle spends the top of the screen on the horizon. Off by
+  default — the icon stays exactly centred.
+- Follow updates are issued only when the camera is actually away from the
+  vehicle or the bearing is stale. The camera-idle callback drives part of the
+  recomposition, so an unconditional animation here would retrigger itself and
+  the map would never settle.
+- Camera branches now have one explicit priority order (reset → recenter → zoom
+  → tilt → orientation → follow), and each request key is consumed exactly once.
+- Gesture handover uses MapLibre's OnMoveListener/OnRotateListener, which fire
+  only for real finger gestures, so the app's own camera animations can never
+  look like a user gesture and unlock the map.
+
 ## v1.20.130 — following distance: configurable gap, and why it over-warned
 - The required gap is now CONFIGURABLE (Settings → Following distance): a time
   gap (default, 2.0 s, adjustable 1.0–4.0 s), a fixed distance (10–120 m), or the

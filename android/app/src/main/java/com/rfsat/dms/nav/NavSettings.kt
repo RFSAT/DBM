@@ -70,6 +70,28 @@ class NavSettings(ctx: Context) {
         get() = p.getBoolean("mirror", false)
         set(v) { p.edit().putBoolean("mirror", v).apply() }
 
+    /**
+     * Keep the map locked on the vehicle, so the own-location icon stays put and
+     * the map scrolls under it. This is the PREFERENCE, not the live state:
+     * dragging the map suspends following for that drive (otherwise the camera
+     * would snap back and panning would be impossible), and the lock button or a
+     * recenter re-arms it. Default on — a navigation map that lets the vehicle
+     * walk off the screen is not much use.
+     */
+    var followLock: Boolean
+        get() = p.getBoolean("follow_lock", true)
+        set(v) { p.edit().putBoolean("follow_lock", v).apply() }
+
+    /**
+     * Shift the vehicle below the centre of the map while following, which trades
+     * the view behind for more road ahead. Off by default: the icon sits exactly
+     * in the middle. Most useful with the 2½D and 3D views, where a centred
+     * vehicle spends the top half of the screen on the horizon.
+     */
+    var lookAhead: Boolean
+        get() = p.getBoolean("look_ahead", false)
+        set(v) { p.edit().putBoolean("look_ahead", v).apply() }
+
     var theme: NavTheme
         get() = get("theme", NavTheme.AUTO) { NavTheme.valueOf(it) }
         set(v) { p.edit().putString("theme", v.name).apply() }

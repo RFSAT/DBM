@@ -67,6 +67,14 @@ fun NavScreen(
     var base by remember { mutableStateOf(settings.base) }
     var mapLayer by remember { mutableStateOf(settings.mapLayer) }
     var orientation by remember { mutableStateOf(settings.orientation) }
+    // Follow lock. `settings.followLock` is the preference the driver set; this
+    // is whether it is ACTIVE right now, because dragging the map has to suspend
+    // following (or the camera would snap back and panning would be impossible)
+    // without forgetting that the lock is wanted on the next drive.
+    var followActive by remember { mutableStateOf(settings.followLock) }
+    // Bumped to ask the map for a view reset / a zoom step.
+    var resetKey by remember { mutableIntStateOf(0) }
+    var zoomTicks by remember { mutableIntStateOf(0) }
     val ownIcon = settings.ownIcon
     val overlays = settings.overlays
     val mirror = settings.windshieldMirror
@@ -177,6 +185,20 @@ fun NavScreen(
                     styleSpec = MapStyles.styleFor(mapLayer),
                     orientation = orientation, headingDeg = heading.toDouble(),
                     recenterKey = recenterState.value, mapData = overlayData,
+                    follow = followActive, speedKmh = liveSpeedKmh,
+                    lookAhead = settings.lookAhead,
+                    resetKey = resetKey, zoomTicks = zoomTicks,
+                    // Dragging the map means "let me look elsewhere": following
+                    // stops until the driver asks for it back.
+                    onUserPan = { followActive = false },
+                    // Turning the map by hand means the driver wants that
+                    // bearing kept, so automatic orientation steps aside.
+                    onUserRotate = {
+                        if (orientation != MapOrientation.FREE) {
+                            orientation = MapOrientation.FREE
+                            settings.orientation = MapOrientation.FREE
+                        }
+                    },
                     onCenterChanged = { mapCenter = it },
                     onMapTap = { p -> tappedPoint = p },
                     modifier = Modifier.fillMaxSize())
@@ -223,7 +245,19 @@ fun NavScreen(
             }
             if (onMap) {
                 Spacer(Modifier.height(8.dp))
-                RoundBtn("◎") { recenterState.value = recenterState.value + 1 }
+                // Centre on the vehicle AND re-arm the lock; when already
+                // locked, a second tap releases it. Filled while locked, so the
+                // button shows the state instead of needing a second control.
+                RoundBtn(if (followActive) "◉" else "◎", active = followActive) {
+                    if (followActive) {
+                        followActive = false
+                        settings.followLock = false
+                    } else {
+                        followActive = true
+                        settings.followLock = true
+                        recenterState.value = recenterState.value + 1
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
                 RoundBtn(when (orientation) {
                     MapOrientation.NORTH_UP -> "N"
@@ -250,6 +284,26 @@ fun NavScreen(
                     }
                     settings.mapLayer = mapLayer
                 }
+                Spacer(Modifier.height(8.dp))
+                // View reset: default zoom, the view's own tilt, the current
+                // orientation's bearing, back on the vehicle, lock re-armed.
+                RoundBtn("⟲") {
+                    orientation = MapOrientation.NORTH_UP
+                    settings.orientation = MapOrientation.NORTH_UP
+                    followActive = settings.followLock
+                    resetKey++
+                }
+            }
+        }
+
+        // Zoom pair, bottom-right and clear of the button column above, in the
+        // place every map app puts it. Buttons matter in a car: pinch-zoom needs
+        // two fingers and a glance, a button needs neither.
+        if (onMap) {
+            Column(Modifier.align(Alignment.BottomEnd).padding(end = 8.dp, bottom = 72.dp)) {
+                RoundBtn("+") { zoomTicks++ }
+                Spacer(Modifier.height(8.dp))
+                RoundBtn("−") { zoomTicks-- }      // minus sign, not hyphen
             }
         }
 
@@ -298,11 +352,13 @@ fun NavScreen(
 }
 
 @Composable
-private fun RoundBtn(label: String, onClick: () -> Unit) {
+private fun RoundBtn(label: String, active: Boolean = false, onClick: () -> Unit) {
     Box(Modifier.size(44.dp).clip(CircleShape)
-            .background(EnactDarkMid.copy(alpha = 0.92f))
+            .background(if (active) EnactGreen.copy(alpha = 0.92f)
+                        else EnactDarkMid.copy(alpha = 0.92f))
             .clickable { onClick() }, contentAlignment = Alignment.Center) {
-        Text(label, color = EnactGreen, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text(label, color = if (active) EnactDark else EnactGreen,
+            fontSize = 18.sp, fontWeight = FontWeight.Bold)
     }
 }
 
